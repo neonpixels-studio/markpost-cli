@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createRecord,
@@ -10,19 +10,31 @@ import {
 import { ApiDeleteMeta } from '@/types/api.types.js';
 import { Record } from '@/types/records.types.js';
 
-// Only override the external-service seams (base URL, token). Everything
-// else — formatErrorMessages, assertApiSuccess — stays real so these tests
-// exercise production error-parsing logic instead of a hand-copied stand-in
-// that could silently drift from it.
-vi.mock('@/libs/api.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/libs/api.js')>('@/libs/api.js');
+// @/libs/api.js imports @/libs/config.js, which constructs a real
+// `conf`-backed store (touching the developer's actual config directory) as
+// soon as it's loaded. Mock it so loading api.js doesn't pull in that side
+// effect — the stubbed API_TOKEN below resolves the token before the store is
+// consulted.
+vi.mock('@/libs/config.js', () => ({
+  config: { get: vi.fn() },
+}));
 
-  return {
-    ...actual,
-    getBaseUrl: () => 'https://example.com',
-    getApiToken: () => 'test-token',
-  };
+// Drive the external-service seams (base URL, token) through the env vars the
+// real `getBaseUrl`/`getApiToken` read, so the shared `authedRequest` helper
+// in @/libs/api.js resolves them the same way production does. Overriding the
+// exports wouldn't reach `authedRequest`, which calls those functions
+// internally. `vi.stubEnv` scopes and auto-restores the values so nothing
+// leaks into other test files sharing the worker. Everything else —
+// formatErrorMessages, assertApiSuccess — stays real so these tests exercise
+// production error-parsing logic instead of a hand-copied stand-in that could
+// silently drift from it.
+beforeEach(() => {
+  vi.stubEnv('BASE_URL', 'https://example.com');
+  vi.stubEnv('API_TOKEN', 'test-token');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 const mockRecord: Record = {

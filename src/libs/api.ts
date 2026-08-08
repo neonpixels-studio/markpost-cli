@@ -156,6 +156,36 @@ export const assertApiSuccess = (response: Response, body: unknown): void => {
   );
 };
 
+// Single seam for talking to the markpost API: prefixes the base URL,
+// attaches the bearer token, throws with the server's real error detail on
+// failure (via `assertApiSuccess`, so a 2xx response that still carries
+// `errors` is caught here too, not just a non-2xx status), otherwise returns
+// the parsed body for the caller to read in whatever shape (list, single,
+// meta) it expects. `headers` is narrowed to a plain object so caller headers
+// reliably merge on top of the auth header — a `Headers` instance or tuple
+// array (both legal on `RequestInit`) would spread to nothing/garbage and
+// silently drop them.
+export const authedRequest = async (
+  path: string,
+  init: Omit<RequestInit, 'headers'> & {
+    headers?: Record<string, string>;
+  } = {},
+): Promise<unknown> => {
+  const response = await fetch(`${getBaseUrl()}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${getApiToken()}`,
+      ...init.headers,
+    },
+  });
+
+  const body = await response.json();
+
+  assertApiSuccess(response, body);
+
+  return body;
+};
+
 // Reads the `attributes` off a single-resource success response. Callers
 // should run this only after `assertApiSuccess` has already ruled out the
 // errors branch. The `?? null` covers every way this can come back empty —

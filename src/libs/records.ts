@@ -1,7 +1,5 @@
 import {
-  assertApiSuccess,
-  getApiToken,
-  getBaseUrl,
+  authedRequest,
   isSystemicApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
@@ -167,18 +165,9 @@ export const fetchPaginatedRecords = async (
   links: ApiPaginationLinks;
 } | null> => {
   try {
-    const response = await fetch(
-      `${getBaseUrl()}/api/records?${buildRecordsQuery(size, after)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${getApiToken()}`,
-        },
-      },
-    );
-
-    const body = (await response.json()) as RecordListApiResponse;
-
-    assertApiSuccess(response, body);
+    const body = (await authedRequest(
+      `/api/records?${buildRecordsQuery(size, after)}`,
+    )) as RecordListApiResponse;
 
     const records = unwrapResourceCollection(
       'fetchPaginatedRecords',
@@ -226,11 +215,10 @@ export const createRecord = async (
   content: string,
 ): Promise<Record | null> => {
   try {
-    const response = await fetch(`${getBaseUrl()}/api/records`, {
+    const body = (await authedRequest('/api/records', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/vnd.api+json',
-        Authorization: `Bearer ${getApiToken()}`,
       },
       body: JSON.stringify({
         data: {
@@ -241,10 +229,7 @@ export const createRecord = async (
           },
         },
       }),
-    });
-
-    const body = (await response.json()) as RecordApiResponse;
-    assertApiSuccess(response, body);
+    })) as RecordApiResponse;
 
     return unwrapResourceAttributes(body);
   } catch (error) {
@@ -266,15 +251,9 @@ export const createRecord = async (
 
 export const fetchRecord = async (uuid: string): Promise<Record | null> => {
   try {
-    const response = await fetch(`${getBaseUrl()}/api/records/${uuid}`, {
-      headers: {
-        Authorization: `Bearer ${getApiToken()}`,
-      },
-    });
-
-    const body = (await response.json()) as RecordApiResponse;
-
-    assertApiSuccess(response, body);
+    const body = (await authedRequest(
+      `/api/records/${encodeURIComponent(uuid)}`,
+    )) as RecordApiResponse;
 
     return unwrapResourceAttributes(body);
   } catch (error) {
@@ -291,11 +270,10 @@ export const deleteRecords = async (
   uuids: string[],
 ): Promise<ApiDeleteMeta | null> => {
   try {
-    const response = await fetch(`${getBaseUrl()}/api/records`, {
+    const body = (await authedRequest('/api/records', {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/vnd.api+json',
-        Authorization: `Bearer ${getApiToken()}`,
       },
       body: JSON.stringify({
         data: {
@@ -305,10 +283,7 @@ export const deleteRecords = async (
           },
         },
       }),
-    });
-
-    const body = (await response.json()) as ApiDeleteResponse;
-    assertApiSuccess(response, body);
+    })) as ApiDeleteResponse;
 
     return body.meta ?? null;
   } catch (error) {
