@@ -27,6 +27,10 @@ vi.mock('@/commands/records.js', () => ({
   runRecordsCommand: vi.fn(),
   USAGE: 'Usage: markpost records <list>',
 }));
+vi.mock('@/commands/config.js', () => ({
+  runConfigCommand: vi.fn(),
+  USAGE: 'Usage: markpost config <get|set|path> [key] [value]',
+}));
 vi.mock('yocto-spinner', () => ({ default: vi.fn() }));
 vi.mock('cli-spinners', () => ({ default: { dots: {} } }));
 vi.mock('chalk', () => ({

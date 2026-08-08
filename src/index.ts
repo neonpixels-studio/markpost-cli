@@ -13,6 +13,7 @@ import {
   runRecordsCommand,
   USAGE as RECORDS_USAGE,
 } from '@/commands/records.js';
+import { runConfigCommand, USAGE as CONFIG_USAGE } from '@/commands/config.js';
 import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
@@ -69,6 +70,7 @@ const COMMANDS = new Map<string, Command>([
   ['get', { run: runGetCommand, usage: GET_USAGE }],
   ['sources', { run: runSourcesCommand, usage: SOURCES_USAGE }],
   ['records', { run: runRecordsCommand, usage: RECORDS_USAGE }],
+  ['config', { run: runConfigCommand, usage: CONFIG_USAGE }],
 ]);
 
 // The sync is the one destructive command, so it rejects unexpected arguments
