@@ -31,14 +31,19 @@ describe('runGetCommand', () => {
     process.exitCode = undefined;
   });
 
-  it('prints usage when no uuid is given', async () => {
+  it('errors to stderr and exits 1 when no uuid is given', async () => {
     const { runGetCommand } = await import('@/commands/get.js');
 
     await runGetCommand([]);
 
-    expect(console.log).toHaveBeenCalledWith(
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No uuid given.'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Usage: markpost get'),
     );
+    expect(console.log).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it('does not check config when no uuid is given', async () => {

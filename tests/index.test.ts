@@ -86,6 +86,26 @@ describe('index', () => {
     expect(mockSpinner.start).not.toHaveBeenCalled();
   });
 
+  // The command modules now treat an unknown subcommand as a usage error
+  // (stderr, exit 1). This pins the invariant their comments rely on: a
+  // subcommand-position help flag is intercepted here and never reaches the
+  // handler, so it still prints usage to stdout and exits 0.
+  it.each(['--help', '-h'])(
+    'prints a subcommand group\'s usage and exits 0 for "sources %s" without invoking the handler',
+    async (helpFlag) => {
+      process.argv = [...originalArgv.slice(0, 2), 'sources', helpFlag];
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await import('@/index.js');
+
+      expect(runSourcesCommand).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
   it('dispatches to runRecordsCommand and skips the sync flow when the "records" command is given', async () => {
     process.argv = [...originalArgv.slice(0, 2), 'records', 'list'];
     const { runRecordsCommand } = await import('@/commands/records.js');
