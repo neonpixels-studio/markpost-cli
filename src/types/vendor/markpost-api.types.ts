@@ -9,7 +9,7 @@
 // The drift test at tests/types/contract-drift.test.ts fails if this file's
 // exports or the CLI's usage of them stop lining up.
 //
-// Source: grimicorn/markpost @ server/types/api.types.ts
+// Source: neonpixels-studio/markpost @ server/types/api.types.ts
 // See src/types/vendor/manifest.json for the exact commit this was synced from.
 
 export type ApiError = {

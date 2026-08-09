@@ -28,7 +28,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
-const MARKPOST_REPO_URL = 'https://github.com/grimicorn/markpost';
+const MARKPOST_REPO_URL = 'https://github.com/neonpixels-studio/markpost';
 const CONTRACT_RELATIVE_PATH = 'server/types/api.types.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -48,7 +48,7 @@ const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 // The drift test at tests/types/contract-drift.test.ts fails if this file's
 // exports or the CLI's usage of them stop lining up.
 //
-// Source: grimicorn/markpost @ ${CONTRACT_RELATIVE_PATH}
+// Source: neonpixels-studio/markpost @ ${CONTRACT_RELATIVE_PATH}
 // See src/types/vendor/manifest.json for the exact commit this was synced from.
 
 `;
@@ -160,7 +160,7 @@ function readCommitHash(checkoutDir) {
 
 // Resolves the checkout's real `origin` remote so a `--from` sync against a
 // fork or a local branch records provenance the manifest can actually be
-// verified against, instead of hardcoding `grimicorn/markpost` for a commit
+// verified against, instead of hardcoding `neonpixels-studio/markpost` for a commit
 // that may not exist there. Falls back to the absolute local path when the
 // checkout has no `origin` remote (e.g. a bare local clone).
 function resolveSourceRepo(checkoutDir) {
