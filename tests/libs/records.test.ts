@@ -83,6 +83,27 @@ describe('fetchAllRecords', () => {
     expect(await fetchAllRecords()).toEqual({ ok: false });
   });
 
+  // markpost answers an invalid filter[source] with a 400; that must surface as
+  // `{ ok: false }`, never an empty array the caller renders as "No records
+  // found." — the same silent-failure concern as a network error above.
+  it('returns { ok: false } when the server rejects the request (e.g. an invalid filter)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: () =>
+        Promise.resolve({
+          errors: [
+            {
+              status: '400',
+              title: 'Invalid filter[source]',
+              detail: 'filter[source] must be one of: webhook, email',
+            },
+          ],
+        }),
+    });
+
+    expect(await fetchAllRecords({ source: 'bogus' })).toEqual({ ok: false });
+  });
+
   // A legitimately empty account is a success, distinct from a failed fetch.
   it('returns { ok: true, records: [] } when the account has no records', async () => {
     mockFetch({
@@ -166,7 +187,50 @@ describe('fetchAllRecords', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[status]=pending',
+      'https://example.com/api/records?page[size]=100&page[after]=abc-123',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-token' },
+      }),
+    );
+  });
+
+  it('threads the filters into every page request', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [{ attributes: mockRecord }],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: {
+              next: '/api/records?page[after]=abc-123&page[size]=1',
+              prev: null,
+            },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [{ attributes: mockRecord2 }],
+            meta: { total: 2, size: 1, hasMore: false },
+            links: { next: null, prev: null },
+          }),
+      });
+
+    await fetchAllRecords({ source: 'webhook', status: 'pending' });
+
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      1,
+      'https://example.com/api/records?page[size]=100&filter[source]=webhook&filter[status]=pending',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-token' },
+      }),
+    );
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[source]=webhook&filter[status]=pending',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -371,7 +435,7 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc%2Bxyz&filter[status]=pending',
+      'https://example.com/api/records?page[size]=100&page[after]=abc%2Bxyz',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -412,7 +476,7 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[status]=pending',
+      'https://example.com/api/records?page[size]=100&page[after]=abc-123',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -479,7 +543,7 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=YWJj%3D%3D&filter[status]=pending',
+      'https://example.com/api/records?page[size]=100&page[after]=YWJj%3D%3D',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -494,14 +558,15 @@ describe('fetchPaginatedRecords', () => {
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  // Regression coverage for #50: without filter[status]=pending the server
-  // returns synced records too, so already-written records are re-fetched and
-  // re-written as `-2`/`-3` duplicates every run.
-  it('scopes the fetch to pending records via filter[status] when no cursor is given', async () => {
+  // An unfiltered request sends no filter[status], so `records list` can page
+  // any status. Scoping the sync to pending (the #50 duplicate guard) is the
+  // caller's job now — see index.test.ts, which asserts the sync passes
+  // { status: 'pending' }.
+  it('sends no filter[status] when no filters are given', async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
     await fetchPaginatedRecords();
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100&filter[status]=pending',
+      'https://example.com/api/records?page[size]=100',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -512,7 +577,55 @@ describe('fetchPaginatedRecords', () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
     await fetchPaginatedRecords('abc-123', 50);
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=50&page[after]=abc-123&filter[status]=pending',
+      'https://example.com/api/records?page[size]=50&page[after]=abc-123',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-token' },
+      }),
+    );
+  });
+
+  it('appends filter[source], filter[status], and filter[q] when filters are given', async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords(undefined, 100, {
+      source: 'webhook',
+      status: 'pending',
+      search: 'notes',
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records?page[size]=100&filter[source]=webhook&filter[status]=pending&filter[q]=notes',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-token' },
+      }),
+    );
+  });
+
+  it('only appends the filters that are provided', async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords(undefined, 100, { status: 'error' });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records?page[size]=100&filter[status]=error',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-token' },
+      }),
+    );
+  });
+
+  it('percent-encodes a search value containing spaces and special characters', async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords(undefined, 100, { search: 'foo bar & baz' });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records?page[size]=100&filter[q]=foo%20bar%20%26%20baz',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-token' },
+      }),
+    );
+  });
+
+  it('keeps the cursor and filters together on a paged request', async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords('abc-123', 100, { source: 'email' });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[source]=email',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),

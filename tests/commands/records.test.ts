@@ -147,6 +147,192 @@ describe('runRecordsCommand', () => {
       );
     });
 
+    it('passes no filters through when no flags are given', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list']);
+
+      expect(fetchAllRecords).toHaveBeenCalledWith({
+        source: undefined,
+        status: undefined,
+        search: undefined,
+      });
+    });
+
+    it('threads --source, --status, and --search into the fetch', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'list',
+        '--source',
+        'webhook',
+        '--status',
+        'pending',
+        '--search',
+        'meeting notes',
+      ]);
+
+      expect(fetchAllRecords).toHaveBeenCalledWith({
+        source: 'webhook',
+        status: 'pending',
+        search: 'meeting notes',
+      });
+      // Assert the fetched record actually renders, so the test breaks if the
+      // filter path stops reaching the print step (not just the fetch call).
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('First Record'),
+      );
+      expect(process.exitCode).not.toBe(1);
+    });
+
+    it('accepts the --flag=value form', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--source=email']);
+
+      expect(fetchAllRecords).toHaveBeenCalledWith({
+        source: 'email',
+        status: undefined,
+        search: undefined,
+      });
+    });
+
+    it('surfaces an error and never fetches when given an unknown flag', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--bogus', 'value']);
+
+      // A bad flag must fail on usage before checkConfig runs, since checkConfig
+      // prompts for and persists an API token/output directory when unset.
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('bogus'),
+        }),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a present-but-empty filter value instead of listing everything', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--source=']);
+
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '--source needs a non-empty value.',
+        }),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a stray positional argument instead of listing everything', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', 'webhook']);
+
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('Unexpected argument "webhook"'),
+        }),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a filter flag passed more than once instead of silently last-winning', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'list',
+        '--source',
+        'webhook',
+        '--source',
+        'email',
+      ]);
+
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '--source was given more than once. Pass it only once.',
+        }),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a whitespace-only filter value', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--source', '   ']);
+
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '--source needs a non-empty value.',
+        }),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('trims surrounding whitespace from a filter value before sending it', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--search', '  meeting notes  ']);
+
+      expect(fetchAllRecords).toHaveBeenCalledWith({
+        source: undefined,
+        status: undefined,
+        search: 'meeting notes',
+      });
+    });
+
+    it('surfaces an error and never fetches when a flag is missing its value', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--search']);
+
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('search'),
+        }),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
     it('never deletes the records it lists', async () => {
       const { fetchAllRecords, deleteRecords } = await import(
         '@/libs/records.js'

@@ -23,7 +23,7 @@ server-side records.
 | `markpost push <path...>` | Create records from one or more markdown files, directories, or glob patterns |
 | `markpost get <uuid>` | Fetch and display a single record |
 | `markpost sources <list\|create\|update\|delete> [uuid]` | Manage sources |
-| `markpost records list` | List pending records without deleting them |
+| `markpost records list [--source <type>] [--status <status>] [--search <text>]` | List records without deleting them, optionally filtered by source, status, or search text |
 | `markpost config <get\|set\|path> [key] [value]` | View or change the stored API token and output directory |
 | `markpost help` | Show aggregated usage |
 
