@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
-import { deleteRecords, fetchAllRecords } from '@/libs/records.js';
+import {
+  deleteRecords,
+  fetchAllRecords,
+  markRecordSynced,
+} from '@/libs/records.js';
 import { ensureOutputDirectory, writeMarkdown } from '@/libs/markdown.js';
 import {
   fetchSettings,
@@ -17,6 +21,7 @@ import {
   runRecordsCommand,
   USAGE as RECORDS_USAGE,
 } from '@/commands/records.js';
+import { runConfigCommand, USAGE as CONFIG_USAGE } from '@/commands/config.js';
 import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
@@ -53,6 +58,16 @@ let lastResolvedSettings: ResolvedSyncSettings | null = null;
 // alone (the record contract carries no mutation timestamp), so a record edited
 // on the server after being synced is not re-fetched within the same session.
 const syncedRecordIds = new Set<string>();
+
+type Spinner = ReturnType<typeof yoctoSpinner>;
+
+// Cap how many mark-synced PATCHes are in flight at once. A large first sync
+// can write hundreds of records; firing one unbounded `Promise.all` over all
+// of them risks rate-limit/connection failures exactly when the batch is
+// biggest — and every failed mark stays pending and re-duplicates next run.
+// Declared here (above the top-level `dispatch()` call) so the hoisted helpers
+// don't hit its temporal dead zone when the default sync runs.
+const MARK_SYNCED_CONCURRENCY = 10;
 
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
@@ -99,6 +114,7 @@ const COMMANDS = new Map<string, Command>([
   ['get', { run: runGetCommand, usage: GET_USAGE }],
   ['sources', { run: runSourcesCommand, usage: SOURCES_USAGE }],
   ['records', { run: runRecordsCommand, usage: RECORDS_USAGE }],
+  ['config', { run: runConfigCommand, usage: CONFIG_USAGE }],
 ]);
 
 // The sync is the one destructive command, so it rejects unexpected arguments
@@ -376,8 +392,6 @@ function announceAutoSync(autoSync: boolean): void {
   );
 }
 
-type Spinner = ReturnType<typeof yoctoSpinner>;
-
 // Surface records the `skip` strategy left unwritten: they stay on the server
 // (they're excluded from the delete), so the user needs to know they weren't
 // synced rather than silently losing count of them.
@@ -393,27 +407,141 @@ function reportSkipped(skippedCount: number): void {
   );
 }
 
-function reportAutoDeleteOff(writtenCount: number): void {
-  if (writtenCount <= 0) {
+// PATCHes the written records synced in bounded-concurrency batches, returning
+// a success flag per record in the original order.
+async function markRecordsInBatches(
+  writtenRecords: WrittenRecord[],
+): Promise<boolean[]> {
+  const results: boolean[] = [];
+
+  for (
+    let start = 0;
+    start < writtenRecords.length;
+    start += MARK_SYNCED_CONCURRENCY
+  ) {
+    const batch = writtenRecords.slice(start, start + MARK_SYNCED_CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(({ record, filePath }) =>
+        markRecordSynced(record.uuid, filePath),
+      ),
+    );
+
+    results.push(...batchResults);
+  }
+
+  return results;
+}
+
+// Surfaces mark-synced failures loudly (never as success): an unmarked record
+// stays pending and gets re-written as a duplicate next run, so the user needs
+// to know which files are affected. Still reports how many succeeded so a
+// single failure in a large batch doesn't hide that the rest went through.
+function reportMarkFailures(
+  failures: WrittenRecord[],
+  markedCount: number,
+  spinner: Spinner,
+): void {
+  spinner.error(
+    `Failed to mark ${failures.length} record(s) synced — written locally but still pending on the server; they may be re-written next run.`,
+  );
+  failures.forEach(({ record, filePath }) => {
+    // Sanitize the composed line: record.uuid comes from the same untrusted API
+    // response as a title, and filePath embeds the user-configured output path —
+    // either could carry an escape sequence. Route to stderr like the write-
+    // failure list so `2>` captures exactly which files are still pending.
+    console.error(
+      chalk.dim(sanitizeForTerminal(`  ! ${record.uuid} -> ${filePath}`)),
+    );
+  });
+
+  if (markedCount > 0) {
+    console.log(
+      chalk.dim(`  Marked ${markedCount} record(s) synced despite the above.`),
+    );
+  }
+
+  process.exitCode = 1;
+}
+
+// Marks every written record synced on the server after a write, so the next
+// run's pending-only fetch skips them — the autoDelete-off path's
+// non-destructive equivalent of the delete step.
+async function markWrittenRecordsSynced(
+  writtenRecords: WrittenRecord[],
+  spinner: Spinner,
+): Promise<void> {
+  if (writtenRecords.length === 0) {
     return;
   }
 
-  console.log(chalk.dim('  autoDelete is off — records left on the server.'));
+  spinner.start('Marking records synced...');
+
+  const results = await markRecordsInBatches(writtenRecords);
+  const failures = writtenRecords.filter((_written, index) => !results[index]);
+
+  if (failures.length > 0) {
+    reportMarkFailures(
+      failures,
+      writtenRecords.length - failures.length,
+      spinner,
+    );
+    return;
+  }
+
+  spinner.success(`Marked ${writtenRecords.length} records synced!`);
 }
 
-// Resolves the server side of a write: with autoDelete off the records are
-// intentionally left on the server; with it on they're deleted. Returns whether
-// the records are settled server-side and therefore safe to mark synced — a
-// failed or partial delete returns false so they're retried next iteration
-// instead of being abandoned (and re-surfaces the error each time until it
-// succeeds).
+// Ends a truncated sync on the truncation warning, never on a green success
+// line — otherwise the last thing on screen reads as a clean run even though a
+// page failed and records remain on the server (exit code is already 1). Called
+// before every path that would otherwise finish on a success mark.
+function reportIncompleteSync(partial: boolean): void {
+  if (!partial) {
+    return;
+  }
+
+  console.error(
+    chalk.yellow(
+      'Sync was incomplete — a later page failed to fetch. Re-run to collect the remaining records.',
+    ),
+  );
+}
+
+// Resolves the server side of a write and reports whether the records are
+// settled server-side (safe to record in-process so the autoSync daemon won't
+// re-write them). Three cases: settings unreadable → mutate nothing and leave
+// records pending (the real preference is unknown, and deleting is
+// irreversible); autoDelete off → mark the written records synced on the
+// server so the next pending-only fetch skips them; autoDelete on → delete
+// them, with a failed or partial delete returning false so they're retried
+// next iteration instead of being abandoned.
 async function finalizeServerRecords(
   writtenRecords: WrittenRecord[],
   autoDelete: boolean,
+  settingsOk: boolean,
   spinner: Spinner,
 ): Promise<boolean> {
+  // Settings unreadable: autoDelete is forced off upstream and we don't know
+  // the user's real preference, so mutate nothing on the server. Marking synced
+  // here would be permanent and unrecoverable — a user whose real setting is
+  // autoDelete on would have these records flipped to `synced`, and the next
+  // pending-only fetch would never see them again. Leaving them pending risks
+  // re-writing them as fresh suffixed files next run (the lesser, recoverable
+  // evil), so we return false rather than record them synced in-process.
+  if (!settingsOk) {
+    console.log(
+      chalk.yellow(
+        '  Settings unreadable — records left pending; they will be re-written as new files each run until settings are readable.',
+      ),
+    );
+    return false;
+  }
+
+  // autoDelete off (settings known): mark the written records synced on the
+  // server so the next run's pending-only fetch skips them instead of writing
+  // duplicate files — the non-destructive equivalent of the delete step.
   if (!autoDelete) {
-    reportAutoDeleteOff(writtenRecords.length);
+    await markWrittenRecordsSynced(writtenRecords, spinner);
     return true;
   }
 
@@ -440,7 +568,7 @@ async function finalizeServerRecords(
   }
 
   // A partial delete (fewer removed than requested) must not be reported as a
-  // full success — the survivors would be marked synced and abandoned. Fail
+  // full success — the survivors would be recorded synced and abandoned. Fail
   // loud and retry them next iteration.
   if (deleteMeta.deleted < writtenRecords.length) {
     spinner.error(
@@ -580,6 +708,7 @@ async function runDefaultSync(): Promise<boolean> {
     const settled = await finalizeServerRecords(
       writtenRecords,
       autoDelete,
+      settingsResult.ok,
       spinner,
     );
 
@@ -589,16 +718,7 @@ async function runDefaultSync(): Promise<boolean> {
       writtenRecords.forEach(({ record }) => syncedRecordIds.add(record.uuid));
     }
 
-    // End a partial sync on the truncation, not the green delete-success line —
-    // otherwise the last thing on screen reads as a clean run even though a
-    // page failed and records remain on the server (exit code is already 1).
-    if (recordsResult.partial) {
-      console.error(
-        chalk.yellow(
-          'Sync was incomplete — a later page failed to fetch. Re-run to collect the remaining records.',
-        ),
-      );
-    }
+    reportIncompleteSync(recordsResult.partial);
 
     return autoSync;
   } catch (error) {

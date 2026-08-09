@@ -1,19 +1,54 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { input } from '@inquirer/prompts';
-import { checkConfig } from '@/libs/config.js';
+import {
+  checkConfig,
+  getConfigPath,
+  getConfigValue,
+  isConfigKey,
+  setConfigValue,
+} from '@/libs/config.js';
 
-const { mockGet, mockSet } = vi.hoisted(() => ({
+const { mockGet, mockSet, CONFIG_FILE_PATH } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockSet: vi.fn(),
+  CONFIG_FILE_PATH: '/home/user/.config/@markpost/cli/config.json',
 }));
 
 vi.mock('conf', () => ({
   default: vi.fn().mockImplementation(function () {
-    return { get: mockGet, set: mockSet };
+    return { get: mockGet, set: mockSet, path: CONFIG_FILE_PATH };
   }),
 }));
 
 vi.mock('@inquirer/prompts', () => ({ input: vi.fn() }));
+
+describe('config accessors', () => {
+  afterEach(() => {
+    mockGet.mockReset();
+    mockSet.mockReset();
+  });
+
+  it('reads a value through the store', () => {
+    mockGet.mockReturnValue('stored-token');
+    expect(getConfigValue('apiToken')).toBe('stored-token');
+    expect(mockGet).toHaveBeenCalledWith('apiToken');
+  });
+
+  it('writes a value through the store', () => {
+    setConfigValue('outputDirectory', '/my/dir');
+    expect(mockSet).toHaveBeenCalledWith('outputDirectory', '/my/dir');
+  });
+
+  it('exposes the store file path', () => {
+    expect(getConfigPath()).toBe(CONFIG_FILE_PATH);
+  });
+
+  it('recognizes only the persisted keys', () => {
+    expect(isConfigKey('apiToken')).toBe(true);
+    expect(isConfigKey('outputDirectory')).toBe(true);
+    expect(isConfigKey('bogus')).toBe(false);
+  });
+});
 
 describe('checkConfig', () => {
   const originalApiToken = process.env.API_TOKEN;

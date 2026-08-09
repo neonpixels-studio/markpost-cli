@@ -40,14 +40,19 @@ describe('runPushCommand', () => {
     process.exitCode = undefined;
   });
 
-  it('prints usage when no path is given', async () => {
+  it('errors to stderr and exits 1 when no path is given', async () => {
     const { runPushCommand } = await import('@/commands/push.js');
 
     await runPushCommand([]);
 
-    expect(console.log).toHaveBeenCalledWith(
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No path given.'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Usage: markpost push'),
     );
+    expect(console.log).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it('does not check config when no path is given', async () => {
@@ -59,16 +64,21 @@ describe('runPushCommand', () => {
     expect(checkConfig).not.toHaveBeenCalled();
   });
 
-  it('prints usage and skips config for an empty-string argument', async () => {
+  it('errors to stderr, exits 1, and skips config for an empty-string argument', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     const { runPushCommand } = await import('@/commands/push.js');
 
     await runPushCommand(['']);
 
-    expect(console.log).toHaveBeenCalledWith(
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No path given.'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Usage: markpost push'),
     );
+    expect(console.log).not.toHaveBeenCalled();
     expect(checkConfig).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it('reads the markdown file and creates a record from a single file', async () => {

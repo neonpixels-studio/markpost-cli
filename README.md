@@ -24,6 +24,7 @@ server-side records.
 | `markpost get <uuid>` | Fetch and display a single record |
 | `markpost sources <list\|create\|update\|delete> [uuid]` | Manage sources |
 | `markpost records list` | List pending records without deleting them |
+| `markpost config <get\|set\|path> [key] [value]` | View or change the stored API token and output directory |
 | `markpost help` | Show aggregated usage |
 
 The destructive fetch/write/delete sync runs only under the explicit
@@ -54,6 +55,30 @@ markpost account settings:
   `markpost push` created) are written as bare content either way.
 - **`conflictStrategy`** — how same-name files are handled (`suffix`,
   `overwrite`, or `skip`).
+
+## Configuration
+
+The CLI stores your API token and output directory in a `conf` file on disk.
+On first run it prompts for anything missing. Use the `config` command to
+inspect or change those values afterwards without hand-editing the file:
+
+```bash
+markpost config get                      # show all stored config
+markpost config get apiToken             # show one value
+markpost config set apiToken <token>     # change the stored API token
+markpost config set outputDirectory <path>
+markpost config path                     # print the config file location
+```
+
+The stored API token is a secret, so `config get` never prints it in full: it
+shows only the first and last four characters (e.g. `sk_a****wxyz`), and fully
+masks tokens too short to redact safely. The output directory is a plain path
+and shown in full.
+
+Note that `config set apiToken <token>` puts the token in your shell history.
+Prefer a leading space (with `HISTCONTROL=ignorespace`, or `setopt
+HIST_IGNORE_SPACE` in zsh) to keep it out, or set `API_TOKEN` in the
+environment instead.
 
 ## Development
 
