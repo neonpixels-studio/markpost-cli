@@ -216,11 +216,15 @@ describe('runRecordsCommand', () => {
     });
 
     it('surfaces an error and never fetches when given an unknown flag', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
       const { fetchAllRecords } = await import('@/libs/records.js');
       const { runRecordsCommand } = await import('@/commands/records.js');
 
       await runRecordsCommand(['list', '--bogus', 'value']);
 
+      // A bad flag must fail on usage before checkConfig runs, since checkConfig
+      // prompts for and persists an API token/output directory when unset.
+      expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
         expect.objectContaining({

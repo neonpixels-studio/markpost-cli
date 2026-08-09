@@ -25,8 +25,13 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
   }
 
   try {
+    // Parse filters before checkConfig, which prompts for and persists an API
+    // token/output directory when unset: a bad flag must fail on usage alone,
+    // not after dragging the user through (or blocking a non-TTY run on) the
+    // config prompts. Mirrors the subcommand validation above.
+    const filters = parseListFilters(args);
     await checkConfig();
-    await listRecords(parseListFilters(args));
+    await listRecords(filters);
   } catch (error) {
     console.error(chalk.redBright(error));
     process.exitCode = 1;
