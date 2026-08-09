@@ -465,13 +465,17 @@ function reportMarkFailures(
 
 // Marks every written record synced on the server after a write, so the next
 // run's pending-only fetch skips them — the autoDelete-off path's
-// non-destructive equivalent of the delete step.
+// non-destructive equivalent of the delete step. Returns whether every record
+// settled: a failed mark returns false so the caller (finalizeServerRecords)
+// treats it exactly like a failed delete — the records aren't recorded synced
+// in-process, so the daemon retries them and the non-zero exit code isn't
+// cleared to a false "clean" on the next iteration.
 async function markWrittenRecordsSynced(
   writtenRecords: WrittenRecord[],
   spinner: Spinner,
-): Promise<void> {
+): Promise<boolean> {
   if (writtenRecords.length === 0) {
-    return;
+    return true;
   }
 
   spinner.start('Marking records synced...');
@@ -485,10 +489,11 @@ async function markWrittenRecordsSynced(
       writtenRecords.length - failures.length,
       spinner,
     );
-    return;
+    return false;
   }
 
   spinner.success(`Marked ${writtenRecords.length} records synced!`);
+  return true;
 }
 
 // Ends a truncated sync on the truncation warning, never on a green success
@@ -539,10 +544,11 @@ async function finalizeServerRecords(
 
   // autoDelete off (settings known): mark the written records synced on the
   // server so the next run's pending-only fetch skips them instead of writing
-  // duplicate files — the non-destructive equivalent of the delete step.
+  // duplicate files — the non-destructive equivalent of the delete step. A
+  // failed mark returns false (like a failed delete) so the records are retried
+  // rather than recorded synced in-process and abandoned.
   if (!autoDelete) {
-    await markWrittenRecordsSynced(writtenRecords, spinner);
-    return true;
+    return markWrittenRecordsSynced(writtenRecords, spinner);
   }
 
   // A bare DELETE with an empty uuid list would be a wasted, possibly-rejected

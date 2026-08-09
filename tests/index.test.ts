@@ -877,7 +877,9 @@ describe('index', () => {
   });
 
   it('across iterations: announces once and skips records already synced this process', async () => {
-    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { fetchAllRecords, deleteRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
     const { writeMarkdown } = await import('@/libs/markdown.js');
     const { fetchSettings } = await import('@/libs/settings.js');
     const { default: yoctoSpinner } = await import('yocto-spinner');
@@ -890,6 +892,9 @@ describe('index', () => {
     // the server).
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    // The mark succeeds, so iteration 1 records the record synced in-process
+    // (a failed mark would instead be retried — covered separately).
+    vi.mocked(markRecordSynced).mockResolvedValue(true);
 
     await import('@/index.js');
     // Drive a second iteration by hand.
@@ -936,6 +941,46 @@ describe('index', () => {
     // "already synced" — a failed delete is retried, not abandoned.
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
     expect(deleteRecords).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a record on the next iteration when its mark-synced failed', async () => {
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoSync: true, autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    // Mark fails on iteration 1 (false), succeeds on iteration 2.
+    vi.mocked(markRecordSynced)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+
+    await import('@/index.js');
+    // A failed mark must not record the record synced in-process.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 1 record(s) synced'),
+    );
+    expect(process.exitCode).toBe(1);
+
+    await scheduler.runSync?.();
+
+    // The record was re-written and re-marked rather than filtered out as
+    // "already synced" — a failed mark is retried, not abandoned, and the
+    // recovered iteration clears the sticky failure code.
+    expect(writeMarkdown).toHaveBeenCalledTimes(2);
+    expect(markRecordSynced).toHaveBeenCalledTimes(2);
+    expect(process.exitCode).toBe(0);
   });
 
   it('keeps a running daemon alive when a later iteration fails before the settings read', async () => {

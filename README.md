@@ -42,9 +42,10 @@ markpost account settings:
   written during a session are not re-written on later iterations; a record
   edited on the server after it was synced is not re-fetched until you restart
   the process (the record contract carries no mutation timestamp to detect the
-  edit). Note that with `autoDelete` off each iteration re-fetches your full
-  record set (the API has no incremental cursor), so the per-interval fetch cost
-  grows with your history.
+  edit). Each iteration fetches only records still `pending` on the server (with
+  `autoDelete` off, written records are marked `synced` so later passes skip
+  them), so the per-interval fetch cost tracks your outstanding backlog rather
+  than growing with your full history.
 - **`autoDelete`** — when on (markpost's default), records written locally are
   deleted from the server after a successful write; when off, they stay on the
   server. If a delete fails, the record is retried on the next `autoSync`
