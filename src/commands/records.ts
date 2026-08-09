@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { fetchAllRecords } from '@/libs/records.js';
 import { checkConfig } from '@/libs/config.js';
+import { failWithSubcommandUsage } from '@/libs/usage.js';
 import { Record } from '@/types/records.types.js';
 
 export const USAGE = `Usage: markpost records <list>
@@ -8,17 +9,18 @@ export const USAGE = `Usage: markpost records <list>
   list  List all pending records without deleting them`;
 
 export const runRecordsCommand = async (args: string[]): Promise<void> => {
+  const [subcommand] = args;
+
+  // Validate before the config check so a bad subcommand fails on usage alone,
+  // without needing a configured account.
+  if (subcommand !== 'list') {
+    failWithSubcommandUsage(subcommand, USAGE);
+    return;
+  }
+
   try {
     await checkConfig();
-
-    const [subcommand] = args;
-
-    if (subcommand === 'list') {
-      await listRecords();
-      return;
-    }
-
-    console.log(USAGE);
+    await listRecords();
   } catch (error) {
     console.error(chalk.redBright(error));
     process.exitCode = 1;

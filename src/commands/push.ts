@@ -9,6 +9,7 @@ import {
 import { readMarkdown } from '@/libs/markdown.js';
 import { resolveMarkdownInputs } from '@/libs/files.js';
 import { checkConfig } from '@/libs/config.js';
+import { failWithUsage } from '@/libs/usage.js';
 
 export const USAGE = `Usage: markpost push <path...>
 
@@ -139,7 +140,7 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
     const paths = args.filter((arg) => arg.length > 0);
 
     if (paths.length === 0) {
-      console.log(USAGE);
+      failWithUsage('No path given.', USAGE);
       return;
     }
 

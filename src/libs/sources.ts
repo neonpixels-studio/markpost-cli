@@ -1,8 +1,5 @@
 import {
-  apiFetch,
-  assertApiSuccess,
-  getApiToken,
-  getBaseUrl,
+  authedRequest,
   logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
@@ -16,33 +13,9 @@ import {
   UpdateSourceInput,
 } from '@/types/sources.types.js';
 
-// Single seam for talking to the sources API: attaches auth, throws with
-// the server's real error detail on failure (via `assertApiSuccess`, so a
-// 2xx response that still carries `errors` is caught here too, not just a
-// non-2xx status), otherwise returns the parsed body for the caller to read
-// in whatever shape (list, single, meta) it expects.
-const authedSourcesRequest = async (
-  path: string,
-  init: Omit<RequestInit, 'signal'> = {},
-): Promise<unknown> => {
-  const { response, body } = await apiFetch(`${getBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${getApiToken()}`,
-      ...init.headers,
-    },
-  });
-
-  assertApiSuccess(response, body);
-
-  return body;
-};
-
 export const fetchSources = async (): Promise<Source[]> => {
   try {
-    const body = (await authedSourcesRequest(
-      '/api/sources',
-    )) as SourceListApiResponse;
+    const body = (await authedRequest('/api/sources')) as SourceListApiResponse;
 
     return unwrapResourceCollection('fetchSources', body, 'source');
   } catch (error) {
@@ -56,7 +29,7 @@ export const createSource = async (
   input: CreateSourceInput,
 ): Promise<Source | null> => {
   try {
-    const body = (await authedSourcesRequest('/api/sources', {
+    const body = (await authedRequest('/api/sources', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/vnd.api+json',
@@ -82,7 +55,7 @@ export const updateSource = async (
   input: UpdateSourceInput,
 ): Promise<Source | null> => {
   try {
-    const body = (await authedSourcesRequest(
+    const body = (await authedRequest(
       `/api/sources/${encodeURIComponent(uuid)}`,
       {
         method: 'PATCH',
@@ -110,7 +83,7 @@ export const deleteSource = async (
   uuid: string,
 ): Promise<ApiDeleteMeta | null> => {
   try {
-    const body = (await authedSourcesRequest(
+    const body = (await authedRequest(
       `/api/sources/${encodeURIComponent(uuid)}`,
       {
         method: 'DELETE',

@@ -6,6 +6,7 @@ import {
   ApiRequestError,
   ApiTimeoutError,
   assertApiSuccess,
+  authedRequest,
   describeSystemicFailure,
   formatErrorMessages,
   getApiToken,
@@ -179,6 +180,116 @@ describe('assertApiSuccess', () => {
     expect(() => assertApiSuccess({ ok: false } as Response, body)).toThrow(
       'Unknown error occurred',
     );
+  });
+});
+
+// The single seam both records.ts and sources.ts route through: it must
+// attach the bearer auth header, merge caller-supplied headers on top without
+// dropping auth, return the parsed body on success, and delegate error
+// detection to `assertApiSuccess` (so a 2xx body carrying `errors` still
+// throws, not just a non-2xx status).
+describe('authedRequest', () => {
+  const mockFetch = (responseBody: unknown, ok = true, status = 200) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok,
+        status,
+        json: () => Promise.resolve(responseBody),
+      }),
+    );
+  };
+
+  beforeEach(() => {
+    vi.stubEnv('BASE_URL', 'https://example.com');
+    vi.stubEnv('API_TOKEN', 'test-token');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('prefixes the base URL and attaches the bearer auth header', async () => {
+    mockFetch({ data: {} });
+    await authedRequest('/api/records');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-token' },
+      }),
+    );
+  });
+
+  it('merges caller-provided headers without dropping the auth header', async () => {
+    mockFetch({ data: {} });
+    await authedRequest('/api/records', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-token',
+          'Content-Type': 'application/vnd.api+json',
+        },
+      }),
+    );
+  });
+
+  it('returns the parsed body on success', async () => {
+    mockFetch({ data: { attributes: { uuid: 'abc-123' } } });
+    await expect(authedRequest('/api/records')).resolves.toEqual({
+      data: { attributes: { uuid: 'abc-123' } },
+    });
+  });
+
+  it('throws with the real error detail when a 2xx body still carries errors', async () => {
+    mockFetch(
+      { data: { errors: [{ title: 'Conflict', detail: 'Duplicate record' }] } },
+      true,
+    );
+    await expect(authedRequest('/api/records')).rejects.toThrow(
+      'Conflict: Duplicate record',
+    );
+  });
+
+  it('throws with the real error detail when the response is not ok', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [{ title: 'Unauthorized', detail: 'Invalid or missing token' }],
+        },
+      },
+      false,
+    );
+    await expect(authedRequest('/api/records')).rejects.toThrow(
+      'Unauthorized: Invalid or missing token',
+    );
+  });
+
+  // The seam must propagate the HTTP status onto the thrown error, since
+  // `createRecord` only re-throws (fail-fast) when `isSystemicApiFailure`
+  // sees a systemic status. A seam that dropped the status would still pass
+  // the message-only assertions above, so classification is asserted here.
+  it('propagates the HTTP status so systemic failures stay classifiable', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [
+            { title: 'Unauthorized', detail: 'Invalid or missing token' },
+          ],
+        },
+      },
+      false,
+      401,
+    );
+    await expect(authedRequest('/api/records')).rejects.toMatchObject({
+      statusCode: 401,
+      isSystemic: true,
+    });
   });
 });
 

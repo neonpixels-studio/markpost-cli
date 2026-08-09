@@ -80,12 +80,38 @@ describe('runSourcesCommand', () => {
     expect(checkConfig).toHaveBeenCalled();
   });
 
-  it('prints usage for an unrecognized or missing subcommand', async () => {
+  it('errors to stderr and exits 1 when no subcommand is given', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
     const { runSourcesCommand } = await import('@/commands/sources.js');
 
     await runSourcesCommand([]);
 
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Usage: markpost sources'));
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No subcommand given.'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Usage: markpost sources'),
+    );
+    expect(console.log).not.toHaveBeenCalled();
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('errors to stderr and exits 1 for an unknown subcommand', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    const { runSourcesCommand } = await import('@/commands/sources.js');
+
+    await runSourcesCommand(['bogus']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown subcommand: bogus'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Usage: markpost sources'),
+    );
+    expect(console.log).not.toHaveBeenCalled();
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   // A propagated failure (e.g. a request timeout, which the sources lib now
@@ -356,5 +382,6 @@ describe('runSourcesCommand', () => {
     await runSourcesCommand(['list']);
 
     expect(console.error).toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 });

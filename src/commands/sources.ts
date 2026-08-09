@@ -7,6 +7,7 @@ import {
   updateSource,
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
+import { failWithSubcommandUsage } from '@/libs/usage.js';
 import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
 
 // Mirror the endpoint constants markpost's web app uses in
@@ -33,33 +34,34 @@ export const buildEndpointUrl = (
   return `${WEBHOOK_INGEST_BASE}/${endpointSlug}`;
 };
 
+// Membership check and handler come from the same Map, so a subcommand can
+// never pass the guard without a handler (which would otherwise risk falling
+// through to the destructive delete). A Map (not an object) keeps a subcommand
+// named "toString" from resolving to a prototype member.
+const SOURCES_HANDLERS = new Map<
+  string,
+  (uuid: string | undefined) => Promise<void>
+>([
+  ['list', () => listSources()],
+  ['create', () => createSourceCommand()],
+  ['update', (uuid) => updateSourceCommand(uuid)],
+  ['delete', (uuid) => deleteSourceCommand(uuid)],
+]);
+
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
+  const [subcommand, uuid] = args;
+  const handler = SOURCES_HANDLERS.get(subcommand);
+
+  // Validate before the config check so a bad subcommand fails on usage alone,
+  // without needing a configured account.
+  if (!handler) {
+    failWithSubcommandUsage(subcommand, USAGE);
+    return;
+  }
+
   try {
     await checkConfig();
-
-    const [subcommand, uuid] = args;
-
-    if (subcommand === 'list') {
-      await listSources();
-      return;
-    }
-
-    if (subcommand === 'create') {
-      await createSourceCommand();
-      return;
-    }
-
-    if (subcommand === 'update') {
-      await updateSourceCommand(uuid);
-      return;
-    }
-
-    if (subcommand === 'delete') {
-      await deleteSourceCommand(uuid);
-      return;
-    }
-
-    console.log(USAGE);
+    await handler(uuid);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
     // that's a user abort, not a command failure, so don't flag it non-zero.

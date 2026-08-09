@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchSettings } from '@/libs/settings.js';
 import { ApiTimeoutError } from '@/libs/api.js';
@@ -6,23 +6,26 @@ import { logErrorMessage } from '@/libs/errors.js';
 import { UserSettings } from '@/types/settings.types.js';
 
 // @/libs/api.js imports @/libs/config.js, which constructs a real
-// `conf`-backed store as soon as it's loaded. Mock it so importActual below
+// `conf`-backed store as soon as it's loaded. Mock it so loading api.js
 // doesn't pull in that side effect (see tests/libs/sources.test.ts).
 vi.mock('@/libs/config.js', () => ({
   config: { get: vi.fn() },
 }));
 
-// Override only the external-service seams (base URL, token); keep the real
-// response-parsing helpers so this exercises production logic.
-vi.mock('@/libs/api.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/libs/api.js')>('@/libs/api.js');
+// Drive the external-service seams (base URL, token) through the env vars the
+// real `getBaseUrl`/`getApiToken` read, so the shared `authedRequest` helper
+// in @/libs/api.js resolves them the same way production does. Overriding the
+// exports wouldn't reach `authedRequest`, which calls those functions
+// internally. `vi.stubEnv` scopes and auto-restores the values so nothing
+// leaks into other test files sharing the worker. The real response-parsing
+// helpers stay in place so this exercises production logic.
+beforeEach(() => {
+  vi.stubEnv('BASE_URL', 'https://example.com');
+  vi.stubEnv('API_TOKEN', 'test-token');
+});
 
-  return {
-    ...actual,
-    getBaseUrl: () => 'https://example.com',
-    getApiToken: () => 'test-token',
-  };
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 vi.mock('@/libs/errors.js', () => ({

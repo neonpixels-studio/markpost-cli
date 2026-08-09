@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createRecord,
@@ -6,24 +6,37 @@ import {
   fetchAllRecords,
   fetchPaginatedRecords,
   fetchRecord,
+  markRecordSynced,
 } from '@/libs/records.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
 import { Record } from '@/types/records.types.js';
 
-// Only override the external-service seams (base URL, token). Everything
-// else — formatErrorMessages, assertApiSuccess — stays real so these tests
-// exercise production error-parsing logic instead of a hand-copied stand-in
-// that could silently drift from it.
-vi.mock('@/libs/api.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/libs/api.js')>('@/libs/api.js');
+// @/libs/api.js imports @/libs/config.js, which constructs a real
+// `conf`-backed store (touching the developer's actual config directory) as
+// soon as it's loaded. Mock it so loading api.js doesn't pull in that side
+// effect — the stubbed API_TOKEN below resolves the token before the store is
+// consulted.
+vi.mock('@/libs/config.js', () => ({
+  config: { get: vi.fn() },
+}));
 
-  return {
-    ...actual,
-    getBaseUrl: () => 'https://example.com',
-    getApiToken: () => 'test-token',
-  };
+// Drive the external-service seams (base URL, token) through the env vars the
+// real `getBaseUrl`/`getApiToken` read, so the shared `authedRequest` helper
+// in @/libs/api.js resolves them the same way production does. Overriding the
+// exports wouldn't reach `authedRequest`, which calls those functions
+// internally. `vi.stubEnv` scopes and auto-restores the values so nothing
+// leaks into other test files sharing the worker. Everything else —
+// formatErrorMessages, assertApiSuccess — stays real so these tests exercise
+// production error-parsing logic instead of a hand-copied stand-in that could
+// silently drift from it.
+beforeEach(() => {
+  vi.stubEnv('BASE_URL', 'https://example.com');
+  vi.stubEnv('API_TOKEN', 'test-token');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 const mockRecord: Record = {
@@ -153,7 +166,7 @@ describe('fetchAllRecords', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123',
+      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[status]=pending',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -358,7 +371,7 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc%2Bxyz',
+      'https://example.com/api/records?page[size]=100&page[after]=abc%2Bxyz&filter[status]=pending',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -399,7 +412,7 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123',
+      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[status]=pending',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -466,7 +479,7 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=YWJj%3D%3D',
+      'https://example.com/api/records?page[size]=100&page[after]=YWJj%3D%3D&filter[status]=pending',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -481,11 +494,14 @@ describe('fetchPaginatedRecords', () => {
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  it('calls fetch with page[size] only when no cursor is given', async () => {
+  // Regression coverage for #50: without filter[status]=pending the server
+  // returns synced records too, so already-written records are re-fetched and
+  // re-written as `-2`/`-3` duplicates every run.
+  it('scopes the fetch to pending records via filter[status] when no cursor is given', async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
     await fetchPaginatedRecords();
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100',
+      'https://example.com/api/records?page[size]=100&filter[status]=pending',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -496,7 +512,7 @@ describe('fetchPaginatedRecords', () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
     await fetchPaginatedRecords('abc-123', 50);
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=50&page[after]=abc-123',
+      'https://example.com/api/records?page[size]=50&page[after]=abc-123&filter[status]=pending',
       expect.objectContaining({
         headers: { Authorization: 'Bearer test-token' },
       }),
@@ -911,6 +927,112 @@ describe('records API timeout propagation', () => {
     mockFetchTimeout();
     await expect(deleteRecords(['abc-123'])).rejects.toBeInstanceOf(
       ApiTimeoutError,
+    );
+  });
+});
+
+describe('markRecordSynced', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  // Unlike the other record calls, a mark-synced timeout is non-fatal: the
+  // file is already written, so a stalled PATCH is logged and reported as
+  // `false` (leaving the record to re-sync next run) rather than re-thrown to
+  // abort the whole sync. The AbortSignal still bounds the wait so it can't
+  // hang forever.
+  it('returns false on a request timeout instead of re-throwing', async () => {
+    global.fetch = vi
+      .fn()
+      .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      false,
+    );
+  });
+
+  it('PATCHes the record uuid with status=synced, syncedAt, and filePath', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await markRecordSynced(
+      'abc-123',
+      '/vault/test-title.md',
+      '2024-01-01T00:00:00.000Z',
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records/abc-123',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: 'Bearer test-token',
+        },
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes: {
+              status: 'synced',
+              syncedAt: '2024-01-01T00:00:00.000Z',
+              filePath: '/vault/test-title.md',
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('defaults syncedAt to the current time when not supplied', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await markRecordSynced('abc-123', '/vault/test-title.md');
+    const requestInit = vi.mocked(global.fetch).mock.calls[0]?.[1];
+    const sentBody = JSON.parse(String(requestInit?.body));
+    expect(sentBody.data.attributes.syncedAt).toEqual(expect.any(String));
+    expect(
+      Number.isNaN(Date.parse(sentBody.data.attributes.syncedAt)),
+    ).toBe(false);
+  });
+
+  it('returns true on success', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      true,
+    );
+  });
+
+  // A 2xx that carries no resource body must count as success, not a spurious
+  // failure that warns the user of duplicates that never appear.
+  it('returns true for a 2xx response with a null data body', async () => {
+    mockFetch({ data: null });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      true,
+    );
+  });
+
+  // A 200 carrying an unparseable body (e.g. an HTML page from a proxy) must
+  // fail rather than be reported as a silent success that leaves the record
+  // pending and re-duplicated next run.
+  it('returns false for a 2xx response whose body is not valid JSON', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(new Error('Unexpected token < in JSON')),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      false,
+    );
+  });
+
+  it('returns false when the response contains errors', async () => {
+    mockFetch(
+      { data: { errors: [{ title: 'Not Found', detail: 'Record missing' }] } },
+      false,
+    );
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      false,
+    );
+  });
+
+  it('returns false on network failure', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      false,
     );
   });
 });

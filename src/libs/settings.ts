@@ -1,8 +1,5 @@
 import {
-  apiFetch,
-  assertApiSuccess,
-  getApiToken,
-  getBaseUrl,
+  authedRequest,
   logApiFailure,
   unwrapResourceAttributes,
 } from '@/libs/api.js';
@@ -20,29 +17,24 @@ import {
 export type SettingsReadResult =
   { ok: true; settings: UserSettings | null } | { ok: false };
 
-// Single seam for reading the settings API: attaches auth, throws with the
-// server's real error detail on failure (via `assertApiSuccess`, so a 2xx
-// response that still carries `errors` is caught here too), and reports the
-// outcome as a discriminated result. On any failure except a request timeout
-// it logs and returns `{ ok: false }` so the caller can fall back
-// conservatively instead of crashing the sync — the same resilient shape
-// `fetchSources` uses. A timeout propagates (see `logApiFailure`) rather than
-// being collapsed to `{ ok: false }` here, so the caller can tell a stalled
-// read apart from an ordinary failure and decide how to handle it (the sync
-// caller degrades it non-fatally — see `runDefaultSync`).
+// Reads the settings API through the shared `authedRequest` seam (auth +
+// error parsing + request timeout) and reports the outcome as a discriminated
+// result. On any failure except a request timeout it logs and returns
+// `{ ok: false }` so the caller can fall back conservatively instead of
+// crashing the sync — the same resilient shape `fetchSources` uses. A timeout
+// propagates (see `logApiFailure`) rather than being collapsed to
+// `{ ok: false }` here, so the caller can tell a stalled read apart from an
+// ordinary failure and decide how to handle it (the sync caller degrades it
+// non-fatally — see `runDefaultSync`).
 export const fetchSettings = async (): Promise<SettingsReadResult> => {
   try {
-    const { response, body } = await apiFetch(`${getBaseUrl()}/api/settings`, {
-      headers: {
-        Authorization: `Bearer ${getApiToken()}`,
-      },
-    });
-
-    assertApiSuccess(response, body);
+    const body = (await authedRequest(
+      '/api/settings',
+    )) as UserSettingsApiResponse;
 
     return {
       ok: true,
-      settings: unwrapResourceAttributes(body as UserSettingsApiResponse),
+      settings: unwrapResourceAttributes(body),
     };
   } catch (error) {
     logApiFailure('fetchSettings', error);
