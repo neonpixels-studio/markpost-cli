@@ -15,36 +15,14 @@ vi.mock('@/libs/markdown.js', () => ({
   writeMarkdown: vi.fn(),
   ensureOutputDirectory: vi.fn(),
 }));
-// Keep the real resolveSyncSettings (the fallback logic under test) and only
-// stub the network read.
-vi.mock('@/libs/settings.js', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@/libs/settings.js')>();
-  return { ...actual, fetchSettings: vi.fn() };
-});
-// Run the sync once synchronously instead of arming a real timer, and capture
-// what runDefaultSync reports back so tests can assert the autoSync decision
-// (a mock that discarded the return value would let a constant stand in for
-// the resolver). Spread the real module so the interval constant stays in sync
-// with scheduler.ts; the scheduling logic itself lives in
-// tests/libs/scheduler.test.ts.
-const scheduler = vi.hoisted(() => ({
-  lastSyncResult: undefined as boolean | undefined,
-  runSync: undefined as (() => Promise<boolean>) | undefined,
+vi.mock('@/libs/settings.js', () => ({ fetchSettings: vi.fn() }));
+// Run the sync once synchronously instead of arming a real timer: the
+// scheduling decision itself is covered in tests/libs/scheduler.test.ts.
+vi.mock('@/libs/scheduler.js', () => ({
+  runSyncWithAutoSchedule: vi.fn(async (runSync: () => Promise<boolean>) => {
+    await runSync();
+  }),
 }));
-vi.mock('@/libs/scheduler.js', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@/libs/scheduler.js')>();
-  return {
-    ...actual,
-    // Capture runSync so a test can drive extra iterations by hand (the real
-    // scheduler would re-invoke it on a timer) and run the first iteration now.
-    runSyncWithAutoSchedule: vi.fn(async (runSync: () => Promise<boolean>) => {
-      scheduler.runSync = runSync;
-      scheduler.lastSyncResult = await runSync();
-    }),
-  };
-});
 vi.mock('@/commands/push.js', () => ({
   runPushCommand: vi.fn(),
   USAGE: 'Usage: markpost push <path...>',
@@ -89,8 +67,6 @@ describe('index', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    scheduler.lastSyncResult = undefined;
-    scheduler.runSync = undefined;
     mockSpinner = { start: vi.fn(), success: vi.fn(), error: vi.fn() };
     // The sync now runs only under the explicit `sync` subcommand, so the
     // default-sync tests below invoke it that way. Dispatch, help, and
@@ -470,20 +446,10 @@ describe('index', () => {
   it('exits early when no records are fetched', async () => {
     const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
     const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
     const { default: yoctoSpinner } = await import('yocto-spinner');
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    // autoSync off so this exercises the true "exiting" path (with autoSync on
-    // the process stays alive and the message differs).
-    vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoSync: false }),
-    );
-    vi.mocked(fetchAllRecords).mockResolvedValue({
-      ok: true,
-      records: [],
-      partial: false,
-    });
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [], partial: false });
 
     await import('@/index.js');
 
@@ -708,7 +674,11 @@ describe('index', () => {
     vi.mocked(fetchSettings).mockResolvedValue(
       mockSettings({ frontmatter: false }),
     );
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
     vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
 
@@ -730,302 +700,11 @@ describe('index', () => {
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [], partial: false });
+    vi.mocked(fetchAllRecords).mockResolvedValue([]);
 
     await import('@/index.js');
 
     expect(runSyncWithAutoSchedule).toHaveBeenCalledWith(expect.any(Function));
-  });
-
-  it('reports autoSync on to the scheduler when the setting is enabled', async () => {
-    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoSync: true }));
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
-
-    await import('@/index.js');
-
-    expect(scheduler.lastSyncResult).toBe(true);
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('autoSync is on'),
-    );
-  });
-
-  it('reports autoSync off to the scheduler when the setting is disabled', async () => {
-    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoSync: false }),
-    );
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
-
-    await import('@/index.js');
-
-    expect(scheduler.lastSyncResult).toBe(false);
-    expect(console.log).not.toHaveBeenCalledWith(
-      expect.stringContaining('autoSync is on'),
-    );
-  });
-
-  it('reports autoSync off to the scheduler when settings cannot be read', async () => {
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue({ ok: false });
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-
-    await import('@/index.js');
-
-    expect(scheduler.lastSyncResult).toBe(false);
-    // With no prior good read, a failed read writes with conservative defaults:
-    // suffix strategy and frontmatter on.
-    expect(writeMarkdown).toHaveBeenCalledWith(
-      mockRecord,
-      'suffix',
-      expect.any(Set),
-      true,
-    );
-  });
-
-  it('reuses the last confirmed format when a later iteration cannot read settings', async () => {
-    const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Second',
-      content: 'Second body',
-      createdAt: '2024-01-02T00:00:00Z',
-    };
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    // Iteration 1 confirms frontmatter off + overwrite strategy.
-    vi.mocked(fetchSettings).mockResolvedValueOnce(
-      mockSettings({
-        autoSync: true,
-        autoDelete: false,
-        frontmatter: false,
-        conflictStrategy: 'overwrite',
-      }),
-    );
-    // Iteration 2's settings read blips.
-    vi.mocked(fetchSettings).mockResolvedValue({ ok: false });
-    vi.mocked(fetchAllRecords).mockResolvedValueOnce({ ok: true, records: [mockRecord], partial: false });
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord2], partial: false });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/x.md');
-
-    await import('@/index.js');
-    await scheduler.runSync?.();
-
-    // The record written during the failed-settings iteration keeps the user's
-    // confirmed format (frontmatter off, overwrite) rather than reverting to
-    // suffix + frontmatter-on defaults.
-    expect(writeMarkdown).toHaveBeenCalledWith(
-      mockRecord2,
-      'overwrite',
-      expect.any(Set),
-      false,
-    );
-  });
-
-  it('keeps autoSync on across a transient failure so the daemon survives one throw', async () => {
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoSync: true }));
-    vi.mocked(fetchAllRecords).mockRejectedValue(new Error('Network error'));
-
-    await import('@/index.js');
-
-    // The throw sets exitCode=1, but autoSync stays reported so the scheduler
-    // retries next iteration instead of ending the session on a network blip.
-    expect(scheduler.lastSyncResult).toBe(true);
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('reports autoSync off when the failure happens before settings are read', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    // Once-only: clearAllMocks doesn't reset implementations, so a persistent
-    // reject would poison later tests.
-    vi.mocked(checkConfig).mockRejectedValueOnce(new Error('No config'));
-
-    await import('@/index.js');
-
-    // Failing before the settings read leaves autoSync false, so a run that
-    // never got that far won't start a daemon loop.
-    expect(scheduler.lastSyncResult).toBe(false);
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('across iterations: announces once and skips records already synced this process', async () => {
-    const { fetchAllRecords, deleteRecords, markRecordSynced } = await import(
-      '@/libs/records.js'
-    );
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoSync: true, autoDelete: false }),
-    );
-    // The same record comes back every iteration (autoDelete off leaves it on
-    // the server).
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    // The mark succeeds, so iteration 1 records the record synced in-process
-    // (a failed mark would instead be retried — covered separately).
-    vi.mocked(markRecordSynced).mockResolvedValue(true);
-
-    await import('@/index.js');
-    // Drive a second iteration by hand.
-    await scheduler.runSync?.();
-
-    // Written once, not twice — the second iteration filtered the already-synced
-    // record instead of writing a suffixed duplicate.
-    expect(writeMarkdown).toHaveBeenCalledTimes(1);
-    expect(mockSpinner.success).toHaveBeenCalledWith('No new records.');
-    expect(deleteRecords).not.toHaveBeenCalled();
-
-    const bannerCalls = vi
-      .mocked(console.log)
-      .mock.calls.filter((call) => String(call[0]).includes('autoSync is on'));
-    expect(bannerCalls).toHaveLength(1);
-  });
-
-  it('retries a record on the next iteration when its server delete failed', async () => {
-    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoSync: true, autoDelete: true }),
-    );
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    // Delete fails on iteration 1 (null), succeeds on iteration 2.
-    vi.mocked(deleteRecords)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue({ deleted: 1 });
-
-    await import('@/index.js');
-    // A failed delete must not mark the record synced.
-    expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to delete records'),
-    );
-
-    await scheduler.runSync?.();
-
-    // The record was re-written and re-deleted rather than filtered out as
-    // "already synced" — a failed delete is retried, not abandoned.
-    expect(writeMarkdown).toHaveBeenCalledTimes(2);
-    expect(deleteRecords).toHaveBeenCalledTimes(2);
-  });
-
-  it('retries a record on the next iteration when its mark-synced failed', async () => {
-    const { fetchAllRecords, markRecordSynced } = await import(
-      '@/libs/records.js'
-    );
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoSync: true, autoDelete: false }),
-    );
-    vi.mocked(fetchAllRecords).mockResolvedValue({
-      ok: true,
-      records: [mockRecord],
-      partial: false,
-    });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    // Mark fails on iteration 1 (false), succeeds on iteration 2.
-    vi.mocked(markRecordSynced)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValue(true);
-
-    await import('@/index.js');
-    // A failed mark must not record the record synced in-process.
-    expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to mark 1 record(s) synced'),
-    );
-    expect(process.exitCode).toBe(1);
-
-    await scheduler.runSync?.();
-
-    // The record was re-written and re-marked rather than filtered out as
-    // "already synced" — a failed mark is retried, not abandoned, and the
-    // recovered iteration clears the sticky failure code.
-    expect(writeMarkdown).toHaveBeenCalledTimes(2);
-    expect(markRecordSynced).toHaveBeenCalledTimes(2);
-    expect(process.exitCode).toBe(0);
-  });
-
-  it('keeps a running daemon alive when a later iteration fails before the settings read', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoSync: true }));
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [], partial: false });
-
-    await import('@/index.js');
-    // Iteration 1 established the daemon (autoSync confirmed on).
-    expect(scheduler.lastSyncResult).toBe(true);
-
-    // Iteration 2 fails in checkConfig (before the settings read).
-    vi.mocked(checkConfig).mockRejectedValueOnce(new Error('config gone'));
-    const secondResult = await scheduler.runSync?.();
-
-    // The daemon resumes from the last confirmed autoSync instead of exiting.
-    expect(secondResult).toBe(true);
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('resets exitCode to 0 once a failed iteration recovers', async () => {
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoSync: true }));
-    vi.mocked(fetchAllRecords)
-      .mockRejectedValueOnce(new Error('Network blip'))
-      .mockResolvedValue({ ok: true, records: [], partial: false });
-
-    await import('@/index.js');
-    expect(process.exitCode).toBe(1);
-
-    await scheduler.runSync?.();
-    // The recovered iteration cleared the sticky failure code.
-    expect(process.exitCode).toBe(0);
   });
 
   it('marks records synced (not deleted) when autoDelete is false', async () => {
@@ -1791,6 +1470,6 @@ describe('index', () => {
       expect.stringContaining('Could not read settings'),
     );
     expect(deleteRecords).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(0);
+    expect(process.exitCode).toBeUndefined();
   });
 });
