@@ -8,6 +8,7 @@ import {
   fetchRecord,
   markRecordSynced,
 } from '@/libs/records.js';
+import { ApiTimeoutError } from '@/libs/api.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
 import { Record } from '@/types/records.types.js';
 
@@ -54,6 +55,12 @@ function mockFetch(responseBody: object, ok = true) {
     ok,
     json: () => Promise.resolve(responseBody),
   });
+}
+
+function mockFetchTimeout() {
+  global.fetch = vi
+    .fn()
+    .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
 }
 
 const mockRecord2: Record = {
@@ -971,9 +978,89 @@ describe('deleteRecords', () => {
   });
 });
 
+// A stalled request must fail loud, not degrade to an empty/`null` result:
+// otherwise the sync reports "no records" (exit 0) on a hung server, the
+// exact failure this timeout guards against. Each public function re-throws
+// the timeout instead of swallowing it.
+describe('records API timeout propagation', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('fetchPaginatedRecords rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(fetchPaginatedRecords()).rejects.toBeInstanceOf(
+      ApiTimeoutError,
+    );
+  });
+
+  it('fetchAllRecords propagates the timeout rather than returning []', async () => {
+    mockFetchTimeout();
+    await expect(fetchAllRecords()).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  // A timeout partway through pagination must discard the pages already
+  // collected and fail loud, NOT return page 1 as if complete — otherwise
+  // the sync would write and (with autoDelete) delete a partial set.
+  it('fetchAllRecords rejects on a mid-pagination timeout instead of returning page 1', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [{ attributes: mockRecord }],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: {
+              next: '/api/records?page[after]=abc-123&page[size]=1',
+              prev: null,
+            },
+          }),
+      })
+      .mockRejectedValueOnce(new DOMException('timed out', 'TimeoutError'));
+
+    await expect(fetchAllRecords()).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  it('createRecord rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(createRecord('t', 'c')).rejects.toBeInstanceOf(
+      ApiTimeoutError,
+    );
+  });
+
+  it('fetchRecord rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(fetchRecord('abc-123')).rejects.toBeInstanceOf(
+      ApiTimeoutError,
+    );
+  });
+
+  it('deleteRecords rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(deleteRecords(['abc-123'])).rejects.toBeInstanceOf(
+      ApiTimeoutError,
+    );
+  });
+});
+
 describe('markRecordSynced', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  // Unlike the other record calls, a mark-synced timeout is non-fatal: the
+  // file is already written, so a stalled PATCH is logged and reported as
+  // `false` (leaving the record to re-sync next run) rather than re-thrown to
+  // abort the whole sync. The AbortSignal still bounds the wait so it can't
+  // hang forever.
+  it('returns false on a request timeout instead of re-throwing', async () => {
+    global.fetch = vi
+      .fn()
+      .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      false,
+    );
   });
 
   it('PATCHes the record uuid with status=synced, syncedAt, and filePath', async () => {

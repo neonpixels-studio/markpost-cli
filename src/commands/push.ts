@@ -4,6 +4,7 @@ import {
   ApiRequestError,
   describeSystemicFailure,
   isSystemicApiFailure,
+  rethrowIfTimeout,
 } from '@/libs/api.js';
 import { readMarkdown } from '@/libs/markdown.js';
 import { resolveMarkdownInputs } from '@/libs/files.js';
@@ -59,6 +60,12 @@ const pushFile = async (filePath: string): Promise<PushResult> => {
     console.log(chalk.greenBright(`Pushed "${record.title}" (${record.uuid})`));
     return { filePath, pushed: true };
   } catch (error) {
+    // A timeout must abort the whole batch, not be logged per-file and
+    // retried on the next one: 50 stalled files would otherwise burn
+    // 50 × the timeout before reporting. `runPushCommand`'s catch reports it
+    // with a non-zero exit.
+    rethrowIfTimeout(error);
+
     // A systemic failure (auth/5xx/429) isn't this file's fault and will recur
     // for every other file, so hand it back for the batch to abort on rather
     // than logging it as a per-file failure and pressing on.

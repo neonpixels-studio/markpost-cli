@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchSettings } from '@/libs/settings.js';
+import { ApiTimeoutError } from '@/libs/api.js';
 import { logErrorMessage } from '@/libs/errors.js';
 import { UserSettings } from '@/types/settings.types.js';
 
@@ -51,9 +52,23 @@ function mockFetch(responseBody: object, ok = true) {
   });
 }
 
+function mockFetchTimeout() {
+  global.fetch = vi
+    .fn()
+    .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+}
+
 describe('fetchSettings', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  // A timeout must escape the resilient `{ ok: false }` fallback so the sync
+  // fails loud instead of silently using default settings on a stalled read.
+  it('propagates a timeout as ApiTimeoutError instead of returning ok:false', async () => {
+    mockFetchTimeout();
+
+    await expect(fetchSettings()).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
   it('calls fetch with the settings URL and auth header', async () => {

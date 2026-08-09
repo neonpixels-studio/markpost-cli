@@ -114,6 +114,37 @@ describe('runSourcesCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // A propagated failure (e.g. a request timeout, which the sources lib now
+  // re-throws) must exit non-zero like every other command, not print red
+  // text and exit 0.
+  it('exits non-zero when a sources call throws', async () => {
+    const { fetchSources } = await import('@/libs/sources.js');
+    vi.mocked(fetchSources).mockRejectedValue(new Error('boom'));
+    const { runSourcesCommand } = await import('@/commands/sources.js');
+
+    await runSourcesCommand(['list']);
+
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A Ctrl+C at a prompt throws @inquirer's `ExitPromptError` — a deliberate
+  // user abort, not a failure. It must exit 0 (exitCode left unset) and print
+  // nothing, so the swallow branch can't silently convert a real failure that
+  // happens to share the name into a clean exit without a test noticing.
+  it('exits zero and stays quiet when a prompt is aborted with Ctrl+C', async () => {
+    const { fetchSources } = await import('@/libs/sources.js');
+    const exitPromptError = Object.assign(new Error('User force closed'), {
+      name: 'ExitPromptError',
+    });
+    vi.mocked(fetchSources).mockRejectedValue(exitPromptError);
+    const { runSourcesCommand } = await import('@/commands/sources.js');
+
+    await runSourcesCommand(['list']);
+
+    expect(process.exitCode).toBeUndefined();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
   describe('list', () => {
     it('prints "No sources found." when there are none', async () => {
       const { fetchSources } = await import('@/libs/sources.js');
