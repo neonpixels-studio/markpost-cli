@@ -15,7 +15,10 @@ import {
 } from 'node:path';
 import slugify from '@sindresorhus/slugify';
 import { config } from '@/libs/config.js';
-import { buildRecordDocument } from '@/libs/frontmatter.js';
+import {
+  buildRecordDocument,
+  stripFrontmatterDocument,
+} from '@/libs/frontmatter.js';
 import { Record } from '@/types/records.types.js';
 import {
   ConflictStrategy,
@@ -207,6 +210,29 @@ const resolveStrategyForSlug = (
   return conflictStrategy;
 };
 
+// Batch-wide precondition for writing: the output directory must be configured
+// and must exist. Both failures (unset config, an un-creatable/read-only path)
+// doom every record in a sync, not just one file. A caller looping over records
+// calls this once up front and lets it throw, so a systemic failure that's
+// already present at the start of a sync surfaces once — not miscounted as N
+// identical per-record failures. writeMarkdown still calls it per record so it
+// stays self-contained and correct when used on its own; after the up-front
+// call created the directory, the per-record existsSync is true and mkdirSync
+// does not run again. Returns the resolved directory.
+export const ensureOutputDirectory = (): string => {
+  const outputDirectory = getOutputDirectory();
+
+  if (!outputDirectory) {
+    throw Error('Output directory is not set!');
+  }
+
+  if (!existsSync(outputDirectory)) {
+    mkdirSync(outputDirectory, { recursive: true });
+  }
+
+  return outputDirectory;
+};
+
 // Returns the resolved path written to, or `null` when the `skip` strategy
 // left an existing file untouched. Defaults to `suffix` (markpost's own
 // default) when no strategy is supplied. `seenSlugs` is run-scoped state the
@@ -220,15 +246,7 @@ export const writeMarkdown = (
   seenSlugs: Set<string> = new Set(),
   includeFrontmatter = true,
 ): string | null => {
-  const outputDirectory = getOutputDirectory();
-
-  if (!outputDirectory) {
-    throw Error('Output directory is not set!');
-  }
-
-  if (!existsSync(outputDirectory)) {
-    mkdirSync(outputDirectory, { recursive: true });
-  }
+  const outputDirectory = ensureOutputDirectory();
 
   const slug = slugifyTitle(record.title, record.uuid);
   const content = buildRecordDocument(record, includeFrontmatter);
@@ -250,6 +268,11 @@ export const writeMarkdown = (
 // title comes from the filename (no extension). Note this is the filename
 // as written on disk, which may be a slug rather than the original title
 // if the file was previously pulled down by writeMarkdown.
+//
+// A file previously pulled by writeMarkdown carries the frontmatter block and
+// `# ` heading writeMarkdown added. Strip them here so pushing the file back
+// sends only the body — otherwise markpost would treat the frontmatter+heading
+// as content and wrap it in a second frontmatter block on ingestion.
 export const readMarkdown = (
   filePath: string,
 ): Pick<Record, 'title' | 'content'> => {
@@ -259,6 +282,6 @@ export const readMarkdown = (
 
   return {
     title: basename(filePath, extname(filePath)),
-    content: readFileSync(filePath, 'utf-8'),
+    content: stripFrontmatterDocument(readFileSync(filePath, 'utf-8')),
   };
 };

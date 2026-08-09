@@ -4,6 +4,7 @@ import {
   assembleMarkdownDocument,
   buildRecordDocument,
   serializeFrontmatter,
+  stripFrontmatterDocument,
 } from '@/libs/frontmatter.js';
 import { Frontmatter, Record } from '@/types/records.types.js';
 
@@ -223,5 +224,210 @@ describe('buildRecordDocument', () => {
     } as unknown as Record;
 
     expect(buildRecordDocument(malformedRecord)).toBe('Raw body.');
+  });
+});
+
+describe('stripFrontmatterDocument', () => {
+  it('strips the frontmatter block and mirrored heading, leaving only the body', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Production deploy succeeded',
+      body: 'Commit a1f9c20 shipped to prod.',
+      frontmatter,
+    });
+
+    expect(stripFrontmatterDocument(document)).toBe(
+      'Commit a1f9c20 shipped to prod.',
+    );
+  });
+
+  it('round-trips a synced record so pushing it back sends only the body (no double-wrap)', () => {
+    const document = buildRecordDocument(recordWithFrontmatter);
+
+    expect(stripFrontmatterDocument(document)).toBe(
+      recordWithFrontmatter.content,
+    );
+  });
+
+  it('preserves a body that itself contains blank lines and a horizontal rule', () => {
+    const body = 'First paragraph.\n\nSecond paragraph.\n\n---\n\nAfter a rule.';
+    const document = assembleMarkdownDocument({
+      title: 'My Note',
+      body,
+      frontmatter: { ...frontmatter, title: 'My Note' },
+    });
+
+    expect(stripFrontmatterDocument(document)).toBe(body);
+  });
+
+  it('returns bare content with no frontmatter unchanged', () => {
+    expect(stripFrontmatterDocument('Just some text.')).toBe('Just some text.');
+  });
+
+  it('leaves a user note that starts with a heading but has no frontmatter untouched', () => {
+    const note = '# A real heading\n\nBody the user wrote themselves.';
+
+    expect(stripFrontmatterDocument(note)).toBe(note);
+  });
+
+  it('returns content unchanged when the frontmatter block is never closed', () => {
+    const malformed = '---\ntitle: Broken\nno closing delimiter here';
+
+    expect(stripFrontmatterDocument(malformed)).toBe(malformed);
+  });
+
+  it('still strips a CRLF-re-saved pulled file, returning the body LF-normalized', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Deploy',
+      body: 'First line.\n\nSecond line.',
+      frontmatter: { ...frontmatter, title: 'Deploy' },
+    }).replace(/\n/g, '\r\n');
+
+    // Only the exact markpost structure is reversed; a stripped body comes
+    // back LF-normalized (the file was a markpost LF document to begin with).
+    expect(stripFrontmatterDocument(document)).toBe(
+      'First line.\n\nSecond line.',
+    );
+  });
+
+  it('still strips when the pulled file carries a leading UTF-8 BOM', () => {
+    const document =
+      '\uFEFF' +
+      assembleMarkdownDocument({
+        title: 'Deploy',
+        body: 'Commit shipped.',
+        frontmatter: { ...frontmatter, title: 'Deploy' },
+      });
+
+    expect(stripFrontmatterDocument(document)).toBe('Commit shipped.');
+  });
+
+  it('leaves a prose file whose opening looks like a thematic break untouched', () => {
+    const prose = '---\nJust an opening line, not YAML.\n---\n\nReal body.';
+
+    expect(stripFrontmatterDocument(prose)).toBe(prose);
+  });
+
+  it('leaves the whole note untouched when the heading is not the mirrored title', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: []\n' +
+      '---\n\n' +
+      '# Prerequisites\n\n' +
+      'Install the CLI first.';
+
+    // Block keys match, but the heading is the user's own section title, not
+    // the record title — so this is not a markpost-composed document and the
+    // block must not be stripped (leave it whole rather than lose metadata).
+    expect(stripFrontmatterDocument(document)).toBe(document);
+  });
+
+  it('strips the mirrored heading even when the title needs YAML quoting', () => {
+    const quotedTitleRecord: Record = {
+      ...recordWithFrontmatter,
+      title: 'Deploy: prod #2',
+      content: 'Body intact.',
+      frontmatter: { ...frontmatter, title: 'Deploy: prod #2' },
+    };
+    const document = buildRecordDocument(quotedTitleRecord);
+
+    expect(stripFrontmatterDocument(document)).toBe('Body intact.');
+  });
+
+  it('returns an empty body when a synced record had no content', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Heading only',
+      body: '',
+      frontmatter: { ...frontmatter, title: 'Heading only' },
+    });
+
+    expect(stripFrontmatterDocument(document)).toBe('');
+  });
+
+  it('leaves an empty (non-markpost) frontmatter block untouched', () => {
+    const document = '---\n---\n\n# Title\n\nBody.';
+
+    expect(stripFrontmatterDocument(document)).toBe(document);
+  });
+
+  it('leaves a note whose own frontmatter uses non-markpost keys untouched', () => {
+    const note =
+      '---\n' +
+      'aliases: [x]\n' +
+      'author: Jane\n' +
+      '---\n\n' +
+      '# My heading\n\n' +
+      'Body the user wrote.';
+
+    expect(stripFrontmatterDocument(note)).toBe(note);
+  });
+
+  it('strips a mirrored heading with no blank line after it (editor-trimmed empty body)', () => {
+    const document =
+      '---\n' +
+      'title: Heading only\n' +
+      'source: webhook/github\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: []\n' +
+      '---\n\n' +
+      '# Heading only';
+
+    expect(stripFrontmatterDocument(document)).toBe('');
+  });
+
+  it('strips the mirrored heading when the title spans multiple lines', () => {
+    const multilineTitleRecord: Record = {
+      ...recordWithFrontmatter,
+      title: 'Deploy\nprod',
+      content: 'Body intact.',
+      frontmatter: { ...frontmatter, title: 'Deploy\nprod' },
+    };
+    const document = buildRecordDocument(multilineTitleRecord);
+
+    expect(stripFrontmatterDocument(document)).toBe('Body intact.');
+  });
+
+  it('leaves the note untouched when the heading only starts with the record title', () => {
+    const document =
+      '---\n' +
+      'title: Deploy\n' +
+      'source: webhook/github\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: []\n' +
+      '---\n\n' +
+      '# Deployment notes\n\n' +
+      'Body.';
+
+    // `# Deployment notes` is not the `# Deploy` heading markpost would write,
+    // so the document is left whole rather than stripped.
+    expect(stripFrontmatterDocument(document)).toBe(document);
+  });
+
+  it('leaves a hand-authored block with the markpost keys but a typed date untouched', () => {
+    const note =
+      '---\n' +
+      'title: My note\n' +
+      'source: personal\n' +
+      'created: yesterday\n' +
+      'tags: []\n' +
+      '---\n\n' +
+      '# My note\n\n' +
+      'Body.';
+
+    expect(stripFrontmatterDocument(note)).toBe(note);
+  });
+
+  it('strips the mirrored heading when the title contains a carriage return', () => {
+    const carriageReturnTitleRecord: Record = {
+      ...recordWithFrontmatter,
+      title: 'Deploy\r\nprod',
+      content: 'Body intact.',
+      frontmatter: { ...frontmatter, title: 'Deploy\r\nprod' },
+    };
+    const document = buildRecordDocument(carriageReturnTitleRecord);
+
+    expect(stripFrontmatterDocument(document)).toBe('Body intact.');
   });
 });

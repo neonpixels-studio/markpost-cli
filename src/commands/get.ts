@@ -1,9 +1,10 @@
 import chalk from 'chalk';
 import { fetchRecord } from '@/libs/records.js';
 import { checkConfig } from '@/libs/config.js';
+import { failWithUsage } from '@/libs/usage.js';
 import { Record } from '@/types/records.types.js';
 
-const USAGE = `Usage: markpost get <uuid>
+export const USAGE = `Usage: markpost get <uuid>
 
   uuid  UUID of the record to fetch and display`;
 
@@ -12,7 +13,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
     const [uuid] = args;
 
     if (!uuid) {
-      console.log(USAGE);
+      failWithUsage('No uuid given.', USAGE);
       return;
     }
 

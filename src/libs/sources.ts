@@ -1,11 +1,9 @@
 import {
-  assertApiSuccess,
-  getApiToken,
-  getBaseUrl,
+  authedRequest,
+  logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
 } from '@/libs/api.js';
-import { logErrorMessage } from '@/libs/errors.js';
 import { ApiDeleteMeta, ApiDeleteResponse } from '@/types/api.types.js';
 import {
   CreateSourceInput,
@@ -15,42 +13,13 @@ import {
   UpdateSourceInput,
 } from '@/types/sources.types.js';
 
-// Single seam for talking to the sources API: attaches auth, throws with
-// the server's real error detail on failure (via `assertApiSuccess`, so a
-// 2xx response that still carries `errors` is caught here too, not just a
-// non-2xx status), otherwise returns the parsed body for the caller to read
-// in whatever shape (list, single, meta) it expects.
-const authedSourcesRequest = async (
-  path: string,
-  init: RequestInit = {},
-): Promise<unknown> => {
-  const response = await fetch(`${getBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${getApiToken()}`,
-      ...init.headers,
-    },
-  });
-
-  const body = await response.json();
-
-  assertApiSuccess(response, body);
-
-  return body;
-};
-
 export const fetchSources = async (): Promise<Source[]> => {
   try {
-    const body = (await authedSourcesRequest(
-      '/api/sources',
-    )) as SourceListApiResponse;
+    const body = (await authedRequest('/api/sources')) as SourceListApiResponse;
 
     return unwrapResourceCollection('fetchSources', body, 'source');
   } catch (error) {
-    logErrorMessage(
-      'fetchSources',
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure('fetchSources', error);
 
     return [];
   }
@@ -60,7 +29,7 @@ export const createSource = async (
   input: CreateSourceInput,
 ): Promise<Source | null> => {
   try {
-    const body = (await authedSourcesRequest('/api/sources', {
+    const body = (await authedRequest('/api/sources', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/vnd.api+json',
@@ -75,10 +44,7 @@ export const createSource = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    logErrorMessage(
-      `createSource["${input.name}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`createSource["${input.name}"]`, error);
 
     return null;
   }
@@ -89,7 +55,7 @@ export const updateSource = async (
   input: UpdateSourceInput,
 ): Promise<Source | null> => {
   try {
-    const body = (await authedSourcesRequest(
+    const body = (await authedRequest(
       `/api/sources/${encodeURIComponent(uuid)}`,
       {
         method: 'PATCH',
@@ -107,10 +73,7 @@ export const updateSource = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    logErrorMessage(
-      `updateSource["${uuid}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`updateSource["${uuid}"]`, error);
 
     return null;
   }
@@ -120,7 +83,7 @@ export const deleteSource = async (
   uuid: string,
 ): Promise<ApiDeleteMeta | null> => {
   try {
-    const body = (await authedSourcesRequest(
+    const body = (await authedRequest(
       `/api/sources/${encodeURIComponent(uuid)}`,
       {
         method: 'DELETE',
@@ -129,10 +92,7 @@ export const deleteSource = async (
 
     return body.meta ?? null;
   } catch (error) {
-    logErrorMessage(
-      `deleteSource["${uuid}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`deleteSource["${uuid}"]`, error);
 
     return null;
   }

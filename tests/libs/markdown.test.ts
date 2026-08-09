@@ -11,6 +11,7 @@ import slugify from '@sindresorhus/slugify';
 
 import { config } from '@/libs/config.js';
 import {
+  ensureOutputDirectory,
   MAX_COLLISION_SUFFIX,
   readMarkdown,
   writeMarkdown,
@@ -494,6 +495,38 @@ describe('writeMarkdown', () => {
   });
 });
 
+describe('ensureOutputDirectory', () => {
+  beforeEach(() => {
+    process.env.OUTPUT_DIRECTORY = outputDirectory;
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(config.get).mockReturnValue(undefined);
+  });
+
+  afterEach(() => {
+    delete process.env.OUTPUT_DIRECTORY;
+    vi.clearAllMocks();
+  });
+
+  it('throws when neither OUTPUT_DIRECTORY nor the persisted config value is set', () => {
+    delete process.env.OUTPUT_DIRECTORY;
+    expect(() => ensureOutputDirectory()).toThrow('Output directory is not set!');
+  });
+
+  it('creates the directory once and skips mkdirSync when it already exists', () => {
+    // First call: directory missing, so it's created.
+    const firstResult = ensureOutputDirectory();
+    expect(firstResult).toBe(outputDirectory);
+    expect(mkdirSync).toHaveBeenCalledTimes(1);
+
+    // Second call after the directory now exists: the up-front creation stands,
+    // so no second mkdirSync (the idempotence the writeMarkdown comment relies
+    // on when it re-invokes this per record).
+    vi.mocked(existsSync).mockReturnValue(true);
+    ensureOutputDirectory();
+    expect(mkdirSync).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('readMarkdown', () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -526,5 +559,23 @@ describe('readMarkdown', () => {
       'utf-8',
     );
     expect(result.content).toBe(mockRecord.content);
+  });
+
+  it('strips the frontmatter block and heading from a previously-pulled file so the push carries only the body', () => {
+    const pulledDocument =
+      '---\n' +
+      'title: Deploy\n' +
+      'source: webhook/github\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci]\n' +
+      '---\n\n' +
+      '# Deploy\n\n' +
+      'Commit shipped.';
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(pulledDocument);
+
+    const result = readMarkdown('./notes/deploy.md');
+
+    expect(result.content).toBe('Commit shipped.');
   });
 });

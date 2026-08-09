@@ -40,14 +40,19 @@ describe('runPushCommand', () => {
     process.exitCode = undefined;
   });
 
-  it('prints usage when no path is given', async () => {
+  it('errors to stderr and exits 1 when no path is given', async () => {
     const { runPushCommand } = await import('@/commands/push.js');
 
     await runPushCommand([]);
 
-    expect(console.log).toHaveBeenCalledWith(
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No path given.'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Usage: markpost push'),
     );
+    expect(console.log).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it('does not check config when no path is given', async () => {
@@ -59,16 +64,21 @@ describe('runPushCommand', () => {
     expect(checkConfig).not.toHaveBeenCalled();
   });
 
-  it('prints usage and skips config for an empty-string argument', async () => {
+  it('errors to stderr, exits 1, and skips config for an empty-string argument', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     const { runPushCommand } = await import('@/commands/push.js');
 
     await runPushCommand(['']);
 
-    expect(console.log).toHaveBeenCalledWith(
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No path given.'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Usage: markpost push'),
     );
+    expect(console.log).not.toHaveBeenCalled();
     expect(checkConfig).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it('reads the markdown file and creates a record from a single file', async () => {
@@ -230,6 +240,34 @@ describe('runPushCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // A timeout must abort the whole batch immediately, not be caught per-file
+  // and retried on the next — otherwise a hung server stalls once per file.
+  it('aborts the batch on a timeout instead of retrying the next file', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    // Import from the same (reset) module instance push.js will resolve, so
+    // `instanceof ApiTimeoutError` in rethrowIfTimeout matches this error.
+    const { ApiTimeoutError } = await import('@/libs/api.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown)
+      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+    vi.mocked(createRecord).mockRejectedValueOnce(
+      new ApiTimeoutError('https://example.com/api/records'),
+    );
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md']);
+
+    expect(createRecord).toHaveBeenCalledTimes(1);
+    expect(process.exitCode).toBe(1);
+  });
+
   it('errors when no inputs resolve to any file', async () => {
     const { createRecord } = await import('@/libs/records.js');
     const { resolveMarkdownInputs } = await import('@/libs/files.js');
@@ -318,6 +356,198 @@ describe('runPushCommand', () => {
     );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Pushed "Ok" (uuid-ok)'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('aborts the batch on a systemic auth failure without attempting later files', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md', 'c.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown)
+      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B' })
+      .mockReturnValueOnce({ title: 'C', content: 'Content C' });
+    vi.mocked(createRecord)
+      .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
+      .mockRejectedValueOnce(
+        new ApiRequestError('Invalid or missing token', 401),
+      );
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md', 'c.md']);
+
+    // The third file is never sent — the run stops after the systemic failure.
+    expect(createRecord).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Aborted on "b.md": Authentication failed (HTTP 401): Invalid or missing token. 1 file(s) not attempted.',
+      ),
+    );
+    // The denominator stays the full resolved count (3), not the attempted
+    // count, so an aborted run doesn't misreport how many files there were.
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Pushed 1/3 file(s) successfully.'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('aborts on the very first file when the token is already expired', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md', 'c.md'],
+      missing: [],
+      skipped: [],
+    });
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(readMarkdown).mockReturnValue({ title: 'A', content: 'Content' });
+    vi.mocked(createRecord).mockRejectedValue(
+      new ApiRequestError('Invalid or missing token', 401),
+    );
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md', 'c.md']);
+
+    expect(createRecord).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Aborted on "a.md": Authentication failed (HTTP 401): Invalid or missing token. 2 file(s) not attempted.',
+      ),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A rate-limit (429) is systemic too: keep firing and it only gets worse.
+  it('aborts the batch on a 429 rate-limit response', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown).mockReturnValue({ title: 'A', content: 'Content' });
+    vi.mocked(createRecord).mockRejectedValue(
+      new ApiRequestError('Too many requests', 429),
+    );
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md']);
+
+    expect(createRecord).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Aborted on "a.md": Rate limited (HTTP 429): Too many requests. 1 file(s) not attempted.',
+      ),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('aborts the batch on a systemic 5xx server failure', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md', 'c.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown)
+      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+    vi.mocked(createRecord)
+      .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
+      .mockRejectedValueOnce(
+        new ApiRequestError('Unknown error occurred', 503),
+      );
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md', 'c.md']);
+
+    expect(createRecord).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Aborted on "b.md": Server error (HTTP 503): Unknown error occurred. 1 file(s) not attempted.',
+      ),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // When the abort lands on the final file there's nothing left to skip, so the
+  // "N file(s) not attempted" clause is dropped rather than reading "0 file(s)".
+  it('omits the not-attempted clause when the last file aborts', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown)
+      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+    vi.mocked(createRecord)
+      .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
+      .mockRejectedValueOnce(new ApiRequestError('Server fell over', 500));
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Aborted on "b.md": Server error (HTTP 500): Server fell over.',
+      ),
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('not attempted'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A per-file failure surfaces from createRecord as a null return (that's its
+  // real contract post-fix — it only throws for systemic failures), so the
+  // batch logs it and keeps going rather than aborting.
+  it('does not abort on a per-file failure — it keeps pushing the rest', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown)
+      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+    vi.mocked(createRecord)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(recordFor('B', 'uuid-b'));
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md']);
+
+    expect(createRecord).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to push "a.md".'),
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted on'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Pushed "B" (uuid-b)'),
     );
     expect(process.exitCode).toBe(1);
   });
