@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   CONFLICT_STRATEGIES,
   DEFAULT_AUTO_DELETE,
+  DEFAULT_AUTO_SYNC,
   DEFAULT_CONFLICT_STRATEGY,
+  DEFAULT_FRONTMATTER_ENABLED,
   isConflictStrategy,
   normalizeAutoDelete,
+  normalizeAutoSync,
   normalizeConflictStrategy,
+  normalizeFrontmatterEnabled,
 } from '@/types/settings.types.js';
 
 describe('isConflictStrategy', () => {
@@ -51,5 +55,39 @@ describe('normalizeAutoDelete', () => {
     ['an object', {}],
   ])('falls back to the default for %s', (_label, value) => {
     expect(normalizeAutoDelete(value)).toBe(DEFAULT_AUTO_DELETE);
+  });
+});
+
+describe('normalizeAutoSync', () => {
+  it('passes through a real boolean', () => {
+    expect(normalizeAutoSync(true)).toBe(true);
+    expect(normalizeAutoSync(false)).toBe(false);
+  });
+
+  it.each([
+    ['the string "false"', 'false'],
+    ['the number 0', 0],
+    ['null', null],
+    ['undefined', undefined],
+    ['an object', {}],
+  ])('falls back to the default for %s', (_label, value) => {
+    expect(normalizeAutoSync(value)).toBe(DEFAULT_AUTO_SYNC);
+  });
+});
+
+describe('normalizeFrontmatterEnabled', () => {
+  it('passes through a real boolean', () => {
+    expect(normalizeFrontmatterEnabled(true)).toBe(true);
+    expect(normalizeFrontmatterEnabled(false)).toBe(false);
+  });
+
+  it.each([
+    ['the string "false"', 'false'],
+    ['the number 0', 0],
+    ['null', null],
+    ['undefined', undefined],
+    ['an object', {}],
+  ])('falls back to the default for %s', (_label, value) => {
+    expect(normalizeFrontmatterEnabled(value)).toBe(DEFAULT_FRONTMATTER_ENABLED);
   });
 });

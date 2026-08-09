@@ -30,6 +30,33 @@ server-side records.
 The destructive fetch/write/delete sync runs only under the explicit
 `markpost sync` command.
 
+## Sync behavior
+
+`markpost sync` writes your records to `OUTPUT_DIRECTORY`, honoring your
+markpost account settings:
+
+- **`autoSync`** — when on (markpost's default), the sync does not exit after
+  one pass: it self-schedules and re-runs every 5 minutes, staying in the
+  foreground until you stop it with `Ctrl-C`. A one-line banner announces this
+  at startup. When off, `markpost sync` syncs once and exits. Records already
+  written during a session are not re-written on later iterations; a record
+  edited on the server after it was synced is not re-fetched until you restart
+  the process (the record contract carries no mutation timestamp to detect the
+  edit). Each iteration fetches only records still `pending` on the server (with
+  `autoDelete` off, written records are marked `synced` so later passes skip
+  them), so the per-interval fetch cost tracks your outstanding backlog rather
+  than growing with your full history.
+- **`autoDelete`** — when on (markpost's default), records written locally are
+  deleted from the server after a successful write; when off, they stay on the
+  server. If a delete fails, the record is retried on the next `autoSync`
+  iteration rather than abandoned.
+- **`frontmatter`** — when on (markpost's default), synced files include a YAML
+  frontmatter block. When off, records that carry markpost metadata are written
+  with just their `# Title` heading and body; records with no metadata (e.g.
+  `markpost push` created) are written as bare content either way.
+- **`conflictStrategy`** — how same-name files are handled (`suffix`,
+  `overwrite`, or `skip`).
+
 ## Configuration
 
 The CLI stores your API token and output directory in a `conf` file on disk.

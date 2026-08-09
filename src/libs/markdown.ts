@@ -210,11 +210,6 @@ const resolveStrategyForSlug = (
   return conflictStrategy;
 };
 
-// Returns the resolved path written to, or `null` when the `skip` strategy
-// left an existing file untouched. Defaults to `suffix` (markpost's own
-// default) when no strategy is supplied. `seenSlugs` is run-scoped state the
-// caller threads across a batch so `overwrite` can't lose two same-slug
-// records written in one sync (see resolveStrategyForSlug).
 // Batch-wide precondition for writing: the output directory must be configured
 // and must exist. Both failures (unset config, an un-creatable/read-only path)
 // doom every record in a sync, not just one file. A caller looping over records
@@ -238,15 +233,23 @@ export const ensureOutputDirectory = (): string => {
   return outputDirectory;
 };
 
+// Returns the resolved path written to, or `null` when the `skip` strategy
+// left an existing file untouched. Defaults to `suffix` (markpost's own
+// default) when no strategy is supplied. `seenSlugs` is run-scoped state the
+// caller threads across a batch so `overwrite` can't lose two same-slug
+// records written in one sync (see resolveStrategyForSlug). `includeFrontmatter`
+// is the user's `frontmatter` setting; when off the file is written without a
+// frontmatter block (see buildRecordDocument).
 export const writeMarkdown = (
   record: Record,
   conflictStrategy: ConflictStrategy = DEFAULT_CONFLICT_STRATEGY,
   seenSlugs: Set<string> = new Set(),
+  includeFrontmatter = true,
 ): string | null => {
   const outputDirectory = ensureOutputDirectory();
 
   const slug = slugifyTitle(record.title, record.uuid);
-  const content = buildRecordDocument(record);
+  const content = buildRecordDocument(record, includeFrontmatter);
   const effectiveStrategy = resolveStrategyForSlug(
     conflictStrategy,
     slug,

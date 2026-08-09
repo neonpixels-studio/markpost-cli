@@ -23,11 +23,14 @@ import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
 import { checkConfig } from '@/libs/config.js';
+import { runSyncWithAutoSchedule } from '@/libs/scheduler.js';
 import { Record } from '@/types/records.types.js';
 import {
   ConflictStrategy,
   normalizeAutoDelete,
+  normalizeAutoSync,
   normalizeConflictStrategy,
+  normalizeFrontmatterEnabled,
 } from '@/types/settings.types.js';
 
 type Spinner = ReturnType<typeof yoctoSpinner>;
@@ -100,7 +103,9 @@ async function runSyncCommand(args: string[]): Promise<void> {
     return;
   }
 
-  await runDefaultSync();
+  // The scheduler self-repeats the sync when a run reports `autoSync` on; a
+  // single, non-repeating run returns after one pass.
+  await runSyncWithAutoSchedule(runDefaultSync);
 }
 
 // Aggregate each command's own USAGE string rather than maintaining a second,
@@ -206,9 +211,15 @@ function writeRecordSafely(
   record: Record,
   conflictStrategy: ConflictStrategy,
   seenSlugs: Set<string>,
+  includeFrontmatter: boolean,
 ): WriteOutcome {
   try {
-    const filePath = writeMarkdown(record, conflictStrategy, seenSlugs);
+    const filePath = writeMarkdown(
+      record,
+      conflictStrategy,
+      seenSlugs,
+      includeFrontmatter,
+    );
 
     if (filePath === null) {
       return { status: 'skipped' };
@@ -229,6 +240,7 @@ function writeRecordSafely(
 function writeRecords(
   records: Record[],
   conflictStrategy: ConflictStrategy,
+  includeFrontmatter: boolean,
 ): WriteRecordsResult {
   // One Set shared across the whole batch so `overwrite` can detect two
   // same-slug records in a single sync and avoid clobbering (see
@@ -240,7 +252,12 @@ function writeRecords(
   let skipped = 0;
 
   for (const record of records) {
-    const outcome = writeRecordSafely(record, conflictStrategy, seenSlugs);
+    const outcome = writeRecordSafely(
+      record,
+      conflictStrategy,
+      seenSlugs,
+      includeFrontmatter,
+    );
 
     if (outcome.status === 'written') {
       written.push({ record, filePath: outcome.filePath });
@@ -434,8 +451,9 @@ function reportIncompleteSync(partial: boolean): void {
 // Default behavior when no subcommand is given: read the user's markpost
 // settings, fetch all records, write each to a markdown file honoring the
 // conflict strategy, then (only if autoDelete is on) delete the records that
-// were actually written from the server.
-async function runDefaultSync(): Promise<void> {
+// were actually written from the server. Returns whether `autoSync` is on so
+// the scheduler can decide to repeat the sync (see runSyncWithAutoSchedule).
+async function runDefaultSync(): Promise<boolean> {
   const spinner = yoctoSpinner({ spinner: cliSpinners.dots });
 
   try {
@@ -473,6 +491,16 @@ async function runDefaultSync(): Promise<void> {
     const autoDelete = settingsResult.ok
       ? normalizeAutoDelete(settings?.autoDelete)
       : false;
+    // A failed settings read leaves autoSync off: without confirmed settings
+    // we don't spin up a self-scheduling daemon (mirrors the conservative
+    // autoDelete above). Frontmatter defaults to on — the safe,
+    // non-destructive default, matching how conflictStrategy falls back.
+    const autoSync = settingsResult.ok
+      ? normalizeAutoSync(settings?.autoSync)
+      : false;
+    const includeFrontmatter = settingsResult.ok
+      ? normalizeFrontmatterEnabled(settings?.frontmatter)
+      : true;
 
     if (!settingsResult.ok) {
       console.log(
@@ -498,7 +526,7 @@ async function runDefaultSync(): Promise<void> {
         'Failed to fetch records from the server — nothing synced.',
       );
       process.exitCode = 1;
-      return;
+      return autoSync;
     }
 
     const allRecords = recordsResult.records;
@@ -516,11 +544,11 @@ async function runDefaultSync(): Promise<void> {
       // rather than running the write path and printing a confusing
       // "Wrote 0 records!" right after the error mark.
       if (allRecords.length === 0) {
-        return;
+        return autoSync;
       }
     } else if (allRecords.length === 0) {
       spinner.success('No new records, exiting...');
-      return;
+      return autoSync;
     } else {
       spinner.success(`Fetched ${allRecords.length} records!`);
     }
@@ -535,7 +563,7 @@ async function runDefaultSync(): Promise<void> {
       written: writtenRecords,
       failed: failedRecords,
       skipped: skippedCount,
-    } = writeRecords(allRecords, conflictStrategy);
+    } = writeRecords(allRecords, conflictStrategy, includeFrontmatter);
     reportWriteOutcome(spinner, writtenRecords.length, failedRecords.length);
     writtenRecords.forEach(({ filePath }) => {
       console.log(chalk.dim(`  -> ${filePath}`));
@@ -571,7 +599,7 @@ async function runDefaultSync(): Promise<void> {
         ),
       );
       reportIncompleteSync(recordsResult.partial);
-      return;
+      return autoSync;
     }
 
     // autoDelete off (settings known): mark the written records synced so the
@@ -580,7 +608,7 @@ async function runDefaultSync(): Promise<void> {
     if (!autoDelete) {
       await markWrittenRecordsSynced(writtenRecords, spinner);
       reportIncompleteSync(recordsResult.partial);
-      return;
+      return autoSync;
     }
 
     // Delete Records — skipped when nothing was written (a bare DELETE with an
@@ -588,7 +616,7 @@ async function runDefaultSync(): Promise<void> {
     // success).
     if (writtenRecords.length === 0) {
       reportIncompleteSync(recordsResult.partial);
-      return;
+      return autoSync;
     }
 
     spinner.start('Deleting records...');
@@ -617,12 +645,13 @@ async function runDefaultSync(): Promise<void> {
         'Failed to delete records from the server — they were written locally but remain on the server.',
       );
       process.exitCode = 1;
-      return;
+      return autoSync;
     }
 
     spinner.success(`Deleted ${deleteMeta.deleted} records!`);
 
     reportIncompleteSync(recordsResult.partial);
+    return autoSync;
   } catch (error) {
     spinner.error('Something went wrong!');
     // Systemic errors surface here (unset output dir, a failed fetch/delete).
@@ -632,5 +661,8 @@ async function runDefaultSync(): Promise<void> {
       chalk.redBright(sanitizeForTerminal(extractErrorMessage(error))),
     );
     process.exitCode = 1;
+    // Don't self-schedule after an unexpected failure — a crashing run
+    // shouldn't spin a daemon that just keeps crashing.
+    return false;
   }
 }

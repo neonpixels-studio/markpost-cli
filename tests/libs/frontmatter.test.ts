@@ -131,6 +131,37 @@ describe('buildRecordDocument', () => {
     expect(result).toContain('tags: [ci, deploy, incoming]');
   });
 
+  it('omits the frontmatter block but keeps the heading and body when frontmatter is disabled', () => {
+    const result = buildRecordDocument(recordWithFrontmatter, false);
+
+    expect(result).toBe(
+      '# Production deploy succeeded\n\nCommit a1f9c20 shipped to prod.',
+    );
+    expect(result).not.toContain('---');
+    expect(result).not.toContain('title: Production deploy succeeded');
+    expect(result).not.toContain('source: webhook/github');
+  });
+
+  it('returns bare content (no heading) when frontmatter is disabled and the record has no metadata', () => {
+    const bareRecord: Record = {
+      uuid: 'abc-123',
+      createdAt: '2026-06-14T09:41:02Z',
+      title: 'Pushed note',
+      content: 'Just some text.',
+    };
+
+    // No frontmatter object means no parsed title, so there's no heading to
+    // keep — same bare-content path as with frontmatter enabled.
+    expect(buildRecordDocument(bareRecord, false)).toBe('Just some text.');
+  });
+
+  it('includes the frontmatter block when frontmatter is enabled explicitly', () => {
+    const result = buildRecordDocument(recordWithFrontmatter, true);
+
+    expect(result).toContain('title: Production deploy succeeded');
+    expect(result).toContain('# Production deploy succeeded');
+  });
+
   it('returns bare content when the record has no frontmatter metadata', () => {
     const bareRecord: Record = {
       uuid: 'abc-123',

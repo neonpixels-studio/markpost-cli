@@ -103,12 +103,18 @@ type MarkdownDocument = {
   frontmatter: Frontmatter;
 };
 
+// The title-heading + body half of a document, shared by the full assembly
+// (with frontmatter) and the frontmatter-disabled path (heading + body only).
+const assembleTitledBody = (title: string, body: string): string => {
+  return `${HEADING_PREFIX}${title}${BLOCK_SEPARATOR}${body}`;
+};
+
 export const assembleMarkdownDocument = (
   document: MarkdownDocument,
 ): string => {
   const frontmatterBlock = serializeFrontmatter(document.frontmatter);
 
-  return `${frontmatterBlock}${BLOCK_SEPARATOR}${HEADING_PREFIX}${document.title}${BLOCK_SEPARATOR}${document.body}`;
+  return `${frontmatterBlock}${BLOCK_SEPARATOR}${assembleTitledBody(document.title, document.body)}`;
 };
 
 // writeMarkdown emits LF-only with no BOM, but an editor may re-save a pulled
@@ -294,12 +300,22 @@ const normalizeFrontmatter = (record: Record): Frontmatter | null => {
 // Builds the full .md file contents for a record: a frontmatter block, title
 // heading, and body when the record carries markpost-assembled metadata;
 // otherwise the bare content (records with no frontmatter, e.g. `markpost
-// push` created).
-export const buildRecordDocument = (record: Record): string => {
+// push` created). `includeFrontmatter` is the user's `frontmatter` setting —
+// when off, only the YAML frontmatter block is omitted; the `# Title` heading
+// and body are still written, so disabling frontmatter doesn't silently
+// discard the record's title (which autoDelete would then make unrecoverable).
+export const buildRecordDocument = (
+  record: Record,
+  includeFrontmatter = true,
+): string => {
   const frontmatter = normalizeFrontmatter(record);
 
   if (!frontmatter) {
     return record.content;
+  }
+
+  if (!includeFrontmatter) {
+    return assembleTitledBody(frontmatter.title, record.content);
   }
 
   // Use the frontmatter's title for the heading too, so the block title and

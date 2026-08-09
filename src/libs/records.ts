@@ -1,9 +1,5 @@
 import {
-  apiFetch,
-  assertApiSuccess,
   authedRequest,
-  getApiToken,
-  getBaseUrl,
   isSystemicApiFailure,
   logApiFailure,
   unwrapResourceAttributes,
@@ -335,8 +331,8 @@ export const createRecord = async (
 // and tests can pin the timestamp. Content-Type mirrors createRecord/
 // deleteRecords for consistency; markpost reads the body regardless.
 //
-// Goes through `apiFetch` so the PATCH inherits the same request timeout as
-// every other API call (a stalled connection can't hang the sync forever).
+// Goes through `authedRequest` so the PATCH inherits the same request timeout
+// as every other API call (a stalled connection can't hang the sync forever).
 // Unlike the fetch helpers above, a failure here is logged and reported as
 // `false` rather than re-thrown — including a timeout: this is non-critical
 // post-write bookkeeping (the file is already on disk), so a failed mark
@@ -358,32 +354,29 @@ export const markRecordSynced = async (
   syncedAt: string = new Date().toISOString(),
 ): Promise<boolean> => {
   try {
-    const { response, body } = await apiFetch(
-      `${getBaseUrl()}/api/records/${encodeURIComponent(uuid)}`,
-      {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: `Bearer ${getApiToken()}`,
-        },
-        body: JSON.stringify({
-          data: {
-            type: 'records',
-            attributes: {
-              status: SYNCED_STATUS,
-              syncedAt,
-              filePath,
-            },
-          },
-        }),
+    // Route through the shared authedRequest seam (like createRecord/
+    // fetchRecord): it attaches the bearer token and asserts success (throwing
+    // on a non-2xx or an errors-carrying 2xx, and on an unparseable body such
+    // as an HTML error page behind a 200), so a failure lands in the catch
+    // below rather than being mistaken for a silent success that leaves the
+    // record pending. We ignore the returned body — the caller only needs to
+    // know the server accepted the change.
+    await authedRequest(`/api/records/${encodeURIComponent(uuid)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/vnd.api+json',
       },
-    );
-
-    // Assert exactly like the other request helpers: an error response (or an
-    // unparseable body surfacing from `apiFetch` as a thrown error) is caught
-    // below as a failure, rather than being mistaken for a silent success that
-    // leaves the record pending.
-    assertApiSuccess(response, body as RecordApiResponse);
+      body: JSON.stringify({
+        data: {
+          type: 'records',
+          attributes: {
+            status: SYNCED_STATUS,
+            syncedAt,
+            filePath,
+          },
+        },
+      }),
+    });
 
     return true;
   } catch (error) {

@@ -4,6 +4,13 @@ import {
   unwrapResourceAttributes,
 } from '@/libs/api.js';
 import {
+  ConflictStrategy,
+  DEFAULT_CONFLICT_STRATEGY,
+  DEFAULT_FRONTMATTER_ENABLED,
+  normalizeAutoDelete,
+  normalizeAutoSync,
+  normalizeConflictStrategy,
+  normalizeFrontmatterEnabled,
   UserSettings,
   UserSettingsApiResponse,
 } from '@/types/settings.types.js';
@@ -41,4 +48,43 @@ export const fetchSettings = async (): Promise<SettingsReadResult> => {
 
     return { ok: false };
   }
+};
+
+// The subset of settings the default sync acts on, already resolved to safe
+// values.
+export type ResolvedSyncSettings = {
+  conflictStrategy: ConflictStrategy;
+  autoDelete: boolean;
+  autoSync: boolean;
+  includeFrontmatter: boolean;
+};
+
+// Collapses the "trust each field only if the read succeeded" decision into one
+// place. A failed read is deliberately conservative: no auto-delete and no
+// self-scheduling daemon without confirmed settings, but writes still happen
+// with the safe suffix strategy and frontmatter on. A successful read defers
+// each field to its normalizer, which falls back to markpost's schema default
+// on a malformed value.
+export const resolveSyncSettings = (
+  result: SettingsReadResult,
+): ResolvedSyncSettings => {
+  if (!result.ok) {
+    return {
+      conflictStrategy: DEFAULT_CONFLICT_STRATEGY,
+      autoDelete: false,
+      autoSync: false,
+      includeFrontmatter: DEFAULT_FRONTMATTER_ENABLED,
+    };
+  }
+
+  return {
+    conflictStrategy: normalizeConflictStrategy(
+      result.settings?.conflictStrategy,
+    ),
+    autoDelete: normalizeAutoDelete(result.settings?.autoDelete),
+    autoSync: normalizeAutoSync(result.settings?.autoSync),
+    includeFrontmatter: normalizeFrontmatterEnabled(
+      result.settings?.frontmatter,
+    ),
+  };
 };

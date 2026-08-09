@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchSettings } from '@/libs/settings.js';
+import { fetchSettings, resolveSyncSettings } from '@/libs/settings.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { logErrorMessage } from '@/libs/errors.js';
-import { UserSettings } from '@/types/settings.types.js';
+import {
+  DEFAULT_AUTO_SYNC,
+  DEFAULT_CONFLICT_STRATEGY,
+  DEFAULT_FRONTMATTER_ENABLED,
+  UserSettings,
+} from '@/types/settings.types.js';
 
 // @/libs/api.js imports @/libs/config.js, which constructs a real
 // `conf`-backed store as soon as it's loaded. Mock it so loading api.js
@@ -156,5 +161,66 @@ describe('fetchSettings', () => {
     mockFetch({ data: null });
 
     expect(await fetchSettings()).toEqual({ ok: true, settings: null });
+  });
+});
+
+describe('resolveSyncSettings', () => {
+  it('falls back conservatively when the read failed', () => {
+    const resolved = resolveSyncSettings({ ok: false });
+
+    expect(resolved).toEqual({
+      conflictStrategy: DEFAULT_CONFLICT_STRATEGY,
+      autoDelete: false,
+      autoSync: false,
+      includeFrontmatter: DEFAULT_FRONTMATTER_ENABLED,
+    });
+  });
+
+  it('passes through the normalized fields of a successful read', () => {
+    const resolved = resolveSyncSettings({
+      ok: true,
+      settings: {
+        ...mockSettings,
+        conflictStrategy: 'overwrite',
+        autoDelete: true,
+        autoSync: false,
+        frontmatter: false,
+      },
+    });
+
+    expect(resolved).toEqual({
+      conflictStrategy: 'overwrite',
+      autoDelete: true,
+      autoSync: false,
+      includeFrontmatter: false,
+    });
+  });
+
+  it('uses markpost schema defaults when the account has no saved row', () => {
+    const resolved = resolveSyncSettings({ ok: true, settings: null });
+
+    expect(resolved).toEqual({
+      conflictStrategy: DEFAULT_CONFLICT_STRATEGY,
+      autoDelete: true,
+      autoSync: DEFAULT_AUTO_SYNC,
+      includeFrontmatter: DEFAULT_FRONTMATTER_ENABLED,
+    });
+  });
+
+  it('falls back to defaults for off-contract boolean values on a successful read', () => {
+    const resolved = resolveSyncSettings({
+      ok: true,
+      settings: {
+        ...mockSettings,
+        // Wire values the server should never send, but the CLI must not trust:
+        autoSync: 'false' as unknown as boolean,
+        frontmatter: 0 as unknown as boolean,
+        autoDelete: 'true' as unknown as boolean,
+      },
+    });
+
+    expect(resolved.autoSync).toBe(DEFAULT_AUTO_SYNC);
+    expect(resolved.includeFrontmatter).toBe(DEFAULT_FRONTMATTER_ENABLED);
+    expect(resolved.autoDelete).toBe(true);
   });
 });

@@ -202,6 +202,25 @@ describe('writeMarkdown', () => {
     );
   });
 
+  it('writes the heading and body without a frontmatter block when frontmatter is disabled', () => {
+    const syncedRecord: Record = {
+      ...mockRecord,
+      title: 'Deploy',
+      content: 'Commit shipped.',
+      frontmatter: {
+        title: 'Deploy',
+        source: 'webhook/github',
+        created: '2026-06-14T09:41:02Z',
+        tags: ['ci'],
+      },
+    };
+
+    writeMarkdown(syncedRecord, 'suffix', new Set(), false);
+
+    const [, writtenContent] = vi.mocked(writeFileSync).mock.calls[0];
+    expect(writtenContent).toBe('# Deploy\n\nCommit shipped.');
+  });
+
   it('keeps the write inside outputDirectory when the title contains path separators', () => {
     const maliciousRecord: Record = {
       ...mockRecord,
