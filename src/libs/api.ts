@@ -10,6 +10,107 @@ export const getApiToken = () => {
   return process.env.API_TOKEN ?? config.get('apiToken');
 };
 
+// How long any API request may stall before it's aborted. Without this a
+// hung connection blocks the sync — and any unattended cron run — forever;
+// `AbortSignal.timeout` makes a stalled request fail loud instead.
+export const API_REQUEST_TIMEOUT_MS = 30_000;
+
+// A timeout must be distinguishable from an ordinary API failure so it
+// surfaces as its own clear message (fail loud) rather than being logged as
+// a generic error or collapsing into a silent empty result.
+export class ApiTimeoutError extends Error {
+  constructor(url: string) {
+    super(`Request to ${url} timed out after ${API_REQUEST_TIMEOUT_MS}ms`);
+    this.name = 'ApiTimeoutError';
+  }
+}
+
+// A cause chain should never be circular, but a self-referential `cause`
+// would spin `isTimeoutAbort` forever — an unacceptable failure mode for the
+// helper whose whole purpose is preventing hangs. Bound the walk instead.
+const MAX_CAUSE_DEPTH = 8;
+
+// `apiFetch` owns the only signal on these requests (it takes
+// `Omit<…, 'signal'>`), so *any* abort is the timeout firing. `AbortSignal
+// .timeout` aborts with a `TimeoutError` DOMException, but undici doesn't
+// always surface that bare — a mid-body abort can come back as a `TypeError`
+// ("terminated") with the real reason on `.cause`, and some paths report a
+// plain `AbortError`. Match either abort name, walking the (bounded) cause
+// chain, and let every unrelated rejection pass through untouched.
+const ABORT_ERROR_NAMES = new Set(['TimeoutError', 'AbortError']);
+
+const isTimeoutAbort = (error: unknown): boolean => {
+  let current: unknown = error;
+
+  for (
+    let depth = 0;
+    current instanceof Error && depth < MAX_CAUSE_DEPTH;
+    depth++
+  ) {
+    if (ABORT_ERROR_NAMES.has(current.name)) {
+      return true;
+    }
+
+    current = current.cause;
+  }
+
+  return false;
+};
+
+export type ApiFetchResult = { response: Response; body: unknown };
+
+// Single seam wrapping `fetch` (and the JSON read) with a request timeout so
+// a stalled connection fails loud as `ApiTimeoutError` instead of hanging
+// forever. Owns only the timeout + transport concern: callers still attach
+// their own headers/body and run `assertApiSuccess` on the result. The
+// signal is owned here (`Omit<..., 'signal'>`) so a caller can't silently
+// override the timeout.
+export const apiFetch = async (
+  url: string,
+  init: Omit<RequestInit, 'signal'> = {},
+): Promise<ApiFetchResult> => {
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS),
+    });
+    const body = await response.json();
+
+    return { response, body };
+  } catch (error) {
+    if (isTimeoutAbort(error)) {
+      throw new ApiTimeoutError(url);
+    }
+
+    throw error;
+  }
+};
+
+// Guard for the resilient per-call catches that otherwise downgrade any
+// failure to an empty result: a timeout must escape them so the sync fails
+// loud (non-zero exit) rather than reporting "nothing to fetch". Call this
+// first in those catches — it re-throws a timeout and returns for every
+// other error, letting the caller fall through to its conservative fallback.
+export const rethrowIfTimeout = (error: unknown): void => {
+  if (error instanceof ApiTimeoutError) {
+    throw error;
+  }
+};
+
+// The one way to report a failed API call from a resilient catch: re-throw a
+// timeout (fail loud) and log every other error. Bundling both halves means
+// a new call site can't log-and-swallow a timeout by forgetting the rethrow,
+// and removes the `error instanceof Error ? ...` extraction repeated at
+// every catch. Callers still return their own conservative fallback after.
+export const logApiFailure = (context: string, error: unknown): void => {
+  rethrowIfTimeout(error);
+
+  logErrorMessage(
+    context,
+    error instanceof Error ? error.message : String(error),
+  );
+};
+
 // Auth/authorization failures that doom the whole batch, not one request:
 // 401 is a missing/expired/revoked token (markpost's `requireUser` throws a
 // bare 401 with no `data.errors` body — so this must key off the HTTP status,
@@ -164,22 +265,23 @@ export const assertApiSuccess = (response: Response, body: unknown): void => {
 // meta) it expects. `headers` is narrowed to a plain object so caller headers
 // reliably merge on top of the auth header — a `Headers` instance or tuple
 // array (both legal on `RequestInit`) would spread to nothing/garbage and
-// silently drop them.
+// silently drop them. The transport goes through `apiFetch`, so every request
+// made via this seam inherits the request timeout (a stall fails loud as
+// `ApiTimeoutError` instead of hanging the sync forever); `signal` is owned by
+// `apiFetch`, so callers can't override the timeout.
 export const authedRequest = async (
   path: string,
-  init: Omit<RequestInit, 'headers'> & {
+  init: Omit<RequestInit, 'headers' | 'signal'> & {
     headers?: Record<string, string>;
   } = {},
 ): Promise<unknown> => {
-  const response = await fetch(`${getBaseUrl()}${path}`, {
+  const { response, body } = await apiFetch(`${getBaseUrl()}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${getApiToken()}`,
       ...init.headers,
     },
   });
-
-  const body = await response.json();
 
   assertApiSuccess(response, body);
 

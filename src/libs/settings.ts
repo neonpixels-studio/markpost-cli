@@ -1,5 +1,8 @@
-import { authedRequest, unwrapResourceAttributes } from '@/libs/api.js';
-import { logErrorMessage } from '@/libs/errors.js';
+import {
+  authedRequest,
+  logApiFailure,
+  unwrapResourceAttributes,
+} from '@/libs/api.js';
 import {
   ConflictStrategy,
   DEFAULT_CONFLICT_STRATEGY,
@@ -22,22 +25,26 @@ export type SettingsReadResult =
   { ok: true; settings: UserSettings | null } | { ok: false };
 
 // Reads the settings API through the shared `authedRequest` seam (auth +
-// error parsing) and reports the outcome as a discriminated result. On any
-// failure it logs and returns `{ ok: false }` so the caller can fall back
-// conservatively instead of crashing the sync — the same resilient shape
-// `fetchSources` uses.
+// error parsing + request timeout) and reports the outcome as a discriminated
+// result. On any failure except a request timeout it logs and returns
+// `{ ok: false }` so the caller can fall back conservatively instead of
+// crashing the sync — the same resilient shape `fetchSources` uses. A timeout
+// propagates (see `logApiFailure`) rather than being collapsed to
+// `{ ok: false }` here, so the caller can tell a stalled read apart from an
+// ordinary failure and decide how to handle it (the sync caller degrades it
+// non-fatally — see `runDefaultSync`).
 export const fetchSettings = async (): Promise<SettingsReadResult> => {
   try {
     const body = (await authedRequest(
       '/api/settings',
     )) as UserSettingsApiResponse;
 
-    return { ok: true, settings: unwrapResourceAttributes(body) };
+    return {
+      ok: true,
+      settings: unwrapResourceAttributes(body),
+    };
   } catch (error) {
-    logErrorMessage(
-      'fetchSettings',
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure('fetchSettings', error);
 
     return { ok: false };
   }

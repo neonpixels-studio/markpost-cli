@@ -1,6 +1,7 @@
 import {
   authedRequest,
   isSystemicApiFailure,
+  logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
 } from '@/libs/api.js';
@@ -217,10 +218,7 @@ export const fetchPaginatedRecords = async (
 
     return { records, meta, links };
   } catch (error) {
-    logErrorMessage(
-      `fetchPaginatedRecords`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`fetchPaginatedRecords`, error);
 
     return null;
   }
@@ -256,10 +254,8 @@ export const createRecord = async (
       throw error;
     }
 
-    logErrorMessage(
-      `createRecord["${title}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    // `logApiFailure` re-throws a timeout (fail loud) and logs everything else.
+    logApiFailure(`createRecord["${title}"]`, error);
 
     return null;
   }
@@ -273,6 +269,15 @@ export const createRecord = async (
 // from re-writing it. `syncedAt` is injected (defaulting to now) so callers
 // and tests can pin the timestamp. Content-Type mirrors createRecord/
 // deleteRecords for consistency; markpost reads the body regardless.
+//
+// Goes through `authedRequest` so the PATCH inherits the same request timeout
+// as every other API call (a stalled connection can't hang the sync forever).
+// Unlike the fetch helpers above, a failure here is logged and reported as
+// `false` rather than re-thrown — including a timeout: this is non-critical
+// post-write bookkeeping (the file is already on disk), so a failed mark
+// simply leaves the record `pending` to re-sync next run, which is far less
+// disruptive than aborting the whole sync after files have landed. The
+// timeout's job here is purely to bound the wait, not to fail loud.
 //
 // Returns a plain success boolean rather than the updated record: the caller
 // only needs to know whether the server accepted the change. Reading it back
@@ -331,10 +336,7 @@ export const fetchRecord = async (uuid: string): Promise<Record | null> => {
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    logErrorMessage(
-      `fetchRecord["${uuid}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`fetchRecord["${uuid}"]`, error);
 
     return null;
   }
@@ -361,10 +363,7 @@ export const deleteRecords = async (
 
     return body.meta ?? null;
   } catch (error) {
-    logErrorMessage(
-      `deleteRecords["${uuids.join(', ')}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`deleteRecords["${uuids.join(', ')}"]`, error);
 
     return null;
   }

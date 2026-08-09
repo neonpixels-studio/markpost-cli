@@ -10,6 +10,7 @@ import {
   fetchSettings,
   resolveSyncSettings,
   ResolvedSyncSettings,
+  SettingsReadResult,
 } from '@/libs/settings.js';
 import { runPushCommand, USAGE as PUSH_USAGE } from '@/commands/push.js';
 import { runGetCommand, USAGE as GET_USAGE } from '@/commands/get.js';
@@ -558,13 +559,27 @@ async function finalizeServerRecords(
   }
 
   spinner.start('Deleting records...');
+  // deleteRecords swallows its own errors to null but re-throws a timeout. Log
+  // the timeout's reason (deleteRecords never got to log it, since the rethrow
+  // happens before its logger) and route it to the same null branch below, so
+  // the user gets both the "why" and the specific "remain on the server"
+  // consequence with a non-zero exit — not the generic outer catch's
+  // "Something went wrong!".
   const deleteMeta = await deleteRecords(
     writtenRecords.map(({ record }) => record.uuid),
-  );
+  ).catch((error: unknown) => {
+    // Sanitize before printing, same threat as the outer catch: a server- or
+    // API-derived message (here a timeout) can embed an escape.
+    console.error(
+      chalk.redBright(sanitizeForTerminal(extractErrorMessage(error))),
+    );
 
-  // deleteRecords swallows its own errors and returns null; reporting success
-  // here would lie (records still on the server, re-fetched next run). Surface
-  // the failure loudly and report "not settled" so they're retried.
+    return null;
+  });
+
+  // reporting success here would lie (records still on the server, re-fetched
+  // next run). Surface the failure loudly and report "not settled" so they're
+  // retried.
   if (!deleteMeta) {
     spinner.error(
       'Failed to delete records from the server — they were written locally but remain on the server.',
@@ -617,7 +632,25 @@ async function runDefaultSync(): Promise<boolean> {
     // read with no saved row (`settings: null`) is a real account default, so
     // it uses markpost's defaults. resolveSyncSettings owns those fallbacks
     // (see settings.ts).
-    const settingsResult = await fetchSettings();
+    //
+    // A settings read failure — including a timeout, which `fetchSettings`
+    // rethrows via `logApiFailure` — is deliberately non-fatal: the
+    // conservative `ok: false` path still writes records and only skips the
+    // irreversible auto-delete. Catch a propagated timeout here rather than
+    // letting it abort the whole sync — writing was never the risky operation,
+    // so a slow settings endpoint must not cost the user their records.
+    const settingsResult = await fetchSettings().catch(
+      (error: unknown): SettingsReadResult => {
+        // Sanitize before printing: a propagated timeout's message embeds the
+        // (env-controlled) base URL, and any future API-derived rethrow could
+        // carry an escape sequence — same guard as the outer catch below.
+        console.error(
+          chalk.redBright(sanitizeForTerminal(extractErrorMessage(error))),
+        );
+
+        return { ok: false };
+      },
+    );
     const resolved = resolveSyncSettings(settingsResult);
 
     if (settingsResult.ok) {

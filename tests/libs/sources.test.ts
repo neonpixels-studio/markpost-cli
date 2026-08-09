@@ -6,6 +6,7 @@ import {
   fetchSources,
   updateSource,
 } from '@/libs/sources.js';
+import { ApiTimeoutError } from '@/libs/api.js';
 import { logErrorMessage } from '@/libs/errors.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
 import { Source } from '@/types/sources.types.js';
@@ -60,6 +61,47 @@ function mockFetch(responseBody: object, ok = true) {
     json: () => Promise.resolve(responseBody),
   });
 }
+
+function mockFetchTimeout() {
+  global.fetch = vi
+    .fn()
+    .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+}
+
+// A timeout must escape each function's resilient fallback ([] or null) so
+// the command fails loud instead of looking like an empty result on a
+// stalled server. All four source calls flow through the same seam.
+describe('sources API timeout propagation', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('fetchSources rejects with ApiTimeoutError instead of returning []', async () => {
+    mockFetchTimeout();
+    await expect(fetchSources()).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  it('createSource rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(
+      createSource({ type: 'webhook', name: 'n', routeFolder: 'f/' }),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  it('updateSource rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(
+      updateSource('abc-123', { routeFolder: 'f/' }),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  it('deleteSource rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(deleteSource('abc-123')).rejects.toBeInstanceOf(
+      ApiTimeoutError,
+    );
+  });
+});
 
 describe('fetchSources', () => {
   beforeEach(() => {
