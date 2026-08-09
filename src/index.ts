@@ -4,6 +4,7 @@ import {
   deleteRecords,
   fetchAllRecords,
   markRecordSynced,
+  PENDING_STATUS,
 } from '@/libs/records.js';
 import { ensureOutputDirectory, writeMarkdown } from '@/libs/markdown.js';
 import { fetchSettings, SettingsReadResult } from '@/libs/settings.js';
@@ -481,9 +482,13 @@ async function runDefaultSync(): Promise<void> {
       );
     }
 
-    // Fetch records
+    // Fetch records. Scope the sync to pending only: markpost returns every
+    // status when unfiltered, so without this the server hands back records
+    // already written to disk and they get re-fetched and re-written as endless
+    // `-2`/`-3` duplicates. The mark-synced step below moves each written
+    // record out of `pending` so the next run skips it.
     spinner.start('Fetching records...');
-    const recordsResult = await fetchAllRecords();
+    const recordsResult = await fetchAllRecords({ status: PENDING_STATUS });
 
     // A failed fetch must fail loud: reporting "No new records" and exiting 0
     // on a network/auth error silently masks a broken sync in cron. An empty

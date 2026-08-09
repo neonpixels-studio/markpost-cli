@@ -25,7 +25,7 @@ import {
 // markpost's record lifecycle statuses (server/db/schema.ts RECORD_STATUSES).
 // The sync only ever wants records not yet written to disk, so it fetches
 // `pending` and, once a record is written, PATCHes it to `synced`.
-const PENDING_STATUS = 'pending';
+export const PENDING_STATUS = 'pending';
 const SYNCED_STATUS = 'synced';
 
 // markpost paginates with a cursor: each response's `links.next` embeds the
@@ -80,6 +80,19 @@ const extractAfterCursor = (
   return undefined;
 };
 
+// The list filters markpost's `GET /api/records` validates and applies (see
+// markpost `server/api/records/index.get.ts`): `filter[source]`,
+// `filter[status]`, and `filter[q]`. The CLI passes the raw values straight
+// through and does not re-implement the server's validation logic here (an
+// invalid `filter[source]` is rejected server-side and surfaced); markpost
+// stays the single source of truth for which values are allowed, so the two
+// can't drift.
+export type RecordListFilters = {
+  source?: string;
+  status?: string;
+  search?: string;
+};
+
 // A read either succeeded (`ok: true`) or the INITIAL page fetch failed
 // (`ok: false`). Collapsing a failed initial fetch to an empty array — the old
 // behavior — made a network/auth error indistinguishable from "no pending
@@ -98,9 +111,36 @@ const extractAfterCursor = (
 export type FetchAllRecordsResult =
   { ok: true; records: Record[]; partial: boolean } | { ok: false };
 
-export const fetchAllRecords = async (): Promise<FetchAllRecordsResult> => {
-  const initial = await fetchPaginatedRecords();
+// Maps each CLI filter to the exact query-param name markpost expects. `q`
+// (not `search`) is markpost's title/content search parameter.
+// A mapped type, not `Record<...>`: this module imports a `Record` record
+// type from records.types.js, which shadows TypeScript's global `Record`
+// utility.
+const FILTER_QUERY_KEYS: { [Key in keyof RecordListFilters]-?: string } = {
+  source: 'filter[source]',
+  status: 'filter[status]',
+  search: 'filter[q]',
+};
 
+const DEFAULT_PAGE_SIZE = 100;
+
+export const fetchAllRecords = async (
+  filters: RecordListFilters = {},
+): Promise<FetchAllRecordsResult> => {
+  const initial = await fetchPaginatedRecords(
+    undefined,
+    DEFAULT_PAGE_SIZE,
+    filters,
+  );
+
+  // Return `{ ok: false }` rather than `[]` so the caller can tell a failed
+  // request apart from a genuinely empty result. This matters most for
+  // filtered listings: markpost rejects an invalid `filter[source]` with a
+  // 400, and returning `[]` here would render that as "No records found.", a
+  // silent failure. fetchPaginatedRecords has already logged the underlying
+  // cause; the command surfaces the failure and exits non-zero. A
+  // subsequent-page failure still returns the pages already collected (the
+  // error is logged) so partial progress isn't discarded.
   if (!initial) {
     return { ok: false };
   }
@@ -142,7 +182,11 @@ export const fetchAllRecords = async (): Promise<FetchAllRecordsResult> => {
     }
 
     seenCursors.add(after);
-    const subsequent = await fetchPaginatedRecords(after);
+    const subsequent = await fetchPaginatedRecords(
+      after,
+      DEFAULT_PAGE_SIZE,
+      filters,
+    );
 
     if (!subsequent) {
       // A later page failed (`fetchPaginatedRecords` already logged why). Stop,
@@ -159,27 +203,44 @@ export const fetchAllRecords = async (): Promise<FetchAllRecordsResult> => {
   return { ok: true, records: records.flat(1) as Record[], partial };
 };
 
-// Always scope the fetch to pending records. markpost's GET /api/records
-// supports `filter[status]` (server/api/records/index.get.ts); without it the
-// server returns synced + pending + error every run, so records already
-// written to disk get re-fetched and re-written as endless `-2`/`-3`
-// duplicates under the suffix strategy. Filtering to pending is what lets the
-// mark-synced step (below) actually close the loop.
-const buildRecordsQuery = (size: number, after?: string): string => {
+// Emits `page[size]`/`page[after]` plus whichever of markpost's list filters
+// (`filter[source]`, `filter[status]`, `filter[q]`) the caller supplied.
+// markpost's GET /api/records returns every status when no `filter[status]` is
+// given (server/api/records/index.get.ts), so scoping the sync to pending is
+// the caller's job (see the `PENDING_STATUS` call in src/index.ts) — this keeps
+// `records list` free to page any status the user asks for.
+const buildRecordsQuery = (
+  size: number,
+  after: string | undefined,
+  filters: RecordListFilters,
+): string => {
   const params = [`page[size]=${size}`];
 
   if (after) {
     params.push(`page[after]=${encodeURIComponent(after)}`);
   }
 
-  params.push(`filter[status]=${PENDING_STATUS}`);
+  const filterKeys = Object.keys(
+    FILTER_QUERY_KEYS,
+  ) as (keyof RecordListFilters)[];
+
+  for (const filterKey of filterKeys) {
+    const value = filters[filterKey];
+
+    if (!value) {
+      continue;
+    }
+
+    params.push(`${FILTER_QUERY_KEYS[filterKey]}=${encodeURIComponent(value)}`);
+  }
 
   return params.join('&');
 };
 
 export const fetchPaginatedRecords = async (
   after?: string,
-  size: number = 100,
+  size: number = DEFAULT_PAGE_SIZE,
+  filters: RecordListFilters = {},
 ): Promise<{
   records: Record[];
   meta: PaginatedRecordsMeta;
@@ -187,7 +248,7 @@ export const fetchPaginatedRecords = async (
 } | null> => {
   try {
     const body = (await authedRequest(
-      `/api/records?${buildRecordsQuery(size, after)}`,
+      `/api/records?${buildRecordsQuery(size, after, filters)}`,
     )) as RecordListApiResponse;
 
     const records = unwrapResourceCollection(

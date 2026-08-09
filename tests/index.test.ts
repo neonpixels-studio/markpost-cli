@@ -9,6 +9,7 @@ vi.mock('@/libs/records.js', () => ({
   fetchAllRecords: vi.fn(),
   deleteRecords: vi.fn(),
   markRecordSynced: vi.fn(),
+  PENDING_STATUS: 'pending',
 }));
 vi.mock('@/libs/markdown.js', () => ({
   writeMarkdown: vi.fn(),
@@ -367,7 +368,9 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(fetchAllRecords).toHaveBeenCalled();
+    // Scoped to pending so the sync never re-fetches already-synced records
+    // (regression guard for the `-2`/`-3` duplicate bug).
+    expect(fetchAllRecords).toHaveBeenCalledWith({ status: 'pending' });
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
   });
 
