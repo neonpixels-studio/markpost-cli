@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  API_REQUEST_TIMEOUT_MS,
+  apiFetch,
   ApiRequestError,
+  ApiTimeoutError,
   assertApiSuccess,
   authedRequest,
   describeSystemicFailure,
@@ -9,6 +12,8 @@ import {
   getApiToken,
   getBaseUrl,
   isSystemicApiFailure,
+  logApiFailure,
+  rethrowIfTimeout,
   unwrapResourceAttributes,
   unwrapResourceCollection,
 } from '@/libs/api.js';
@@ -567,5 +572,167 @@ describe('unwrapResourceCollection', () => {
       'myContext',
       'Skipped 2 fixture(s) with no attributes',
     );
+  });
+});
+
+describe('apiFetch', () => {
+  const originalFetch = global.fetch;
+
+  const okResponse = (body: unknown = {}) =>
+    ({ ok: true, json: () => Promise.resolve(body) }) as unknown as Response;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('returns the response and parsed body on success', async () => {
+    const parsed = { data: { attributes: { uuid: 'abc-123' } } };
+    global.fetch = vi.fn().mockResolvedValue(okResponse(parsed));
+
+    const result = await apiFetch('https://example.com/api/records');
+
+    expect(result.response.ok).toBe(true);
+    expect(result.body).toEqual(parsed);
+  });
+
+  // Pins the timeout to the named constant: a mutation to `AbortSignal
+  // .timeout(1)` or to a controller that never fires (both of which would
+  // silently defeat the timeout) makes this assertion fail.
+  it('arms the request with an AbortSignal for the configured timeout', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const fetchMock = vi.fn().mockResolvedValue(okResponse());
+    global.fetch = fetchMock;
+
+    await apiFetch('https://example.com/api/records', { method: 'GET' });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(API_REQUEST_TIMEOUT_MS);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.method).toBe('GET');
+  });
+
+  // A stalled connection is aborted by `AbortSignal.timeout`, which `fetch`
+  // rejects with a `TimeoutError` DOMException — the exact shape reproduced
+  // here. It must surface as a distinct `ApiTimeoutError` with a clear
+  // message, never as a generic error or a silent hang.
+  it('rejects a stalled request with a distinct ApiTimeoutError', async () => {
+    const timeout = new DOMException('The operation timed out.', 'TimeoutError');
+    global.fetch = vi.fn().mockRejectedValue(timeout);
+
+    await expect(
+      apiFetch('https://example.com/api/records'),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
+
+    await expect(apiFetch('https://example.com/api/records')).rejects.toThrow(
+      `Request to https://example.com/api/records timed out after ${API_REQUEST_TIMEOUT_MS}ms`,
+    );
+  });
+
+  // The signal aborts the body stream too, so a server that stalls after
+  // sending headers rejects `response.json()` with the same TimeoutError —
+  // it must translate to ApiTimeoutError just like a connection stall.
+  it('rejects with ApiTimeoutError when the body read stalls past the timeout', async () => {
+    const timeout = new DOMException('The operation timed out.', 'TimeoutError');
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(timeout),
+    } as unknown as Response);
+
+    await expect(
+      apiFetch('https://example.com/api/records'),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  // undici can surface a mid-body timeout wrapped in a `TypeError`
+  // ("terminated") with the real reason on `.cause`; the translation must
+  // still recognize it or the sync silently degrades to an empty result.
+  it('translates a timeout wrapped in a cause chain', async () => {
+    const wrapped = new TypeError('terminated', {
+      cause: new DOMException('The operation timed out.', 'TimeoutError'),
+    });
+    global.fetch = vi.fn().mockRejectedValue(wrapped);
+
+    await expect(
+      apiFetch('https://example.com/api/records'),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  // apiFetch owns the only signal, so any abort is the timeout firing —
+  // including a plain AbortError-named DOMException some undici paths report.
+  it('translates a plain AbortError as a timeout', async () => {
+    const aborted = new DOMException('This operation was aborted', 'AbortError');
+    global.fetch = vi.fn().mockRejectedValue(aborted);
+
+    await expect(
+      apiFetch('https://example.com/api/records'),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  it('lets a non-timeout error pass through unwrapped', async () => {
+    const networkError = new TypeError('fetch failed');
+    global.fetch = vi.fn().mockRejectedValue(networkError);
+
+    await expect(apiFetch('https://example.com/api/records')).rejects.toBe(
+      networkError,
+    );
+  });
+
+  // A circular `cause` chain must not spin the abort walk forever — the whole
+  // point of the helper is preventing hangs. `MAX_CAUSE_DEPTH` bounds the walk,
+  // so a self-referential cause whose names never match an abort terminates and
+  // passes the original error through. Remove the bound and this test hangs
+  // until vitest's per-test timeout fails it.
+  it('does not hang on a self-referential cause chain', async () => {
+    const looping = new TypeError('terminated') as TypeError & {
+      cause: unknown;
+    };
+    looping.cause = looping;
+    global.fetch = vi.fn().mockRejectedValue(looping);
+
+    await expect(apiFetch('https://example.com/api/records')).rejects.toBe(
+      looping,
+    );
+  });
+});
+
+describe('logApiFailure', () => {
+  beforeEach(() => {
+    vi.mocked(logErrorMessage).mockClear();
+  });
+
+  // The rethrow-vs-log split is the whole reason this seam exists: a timeout
+  // must escape the resilient catch (fail loud) and must NOT also be logged as
+  // a generic error, since callers like the sync log its reason themselves.
+  it('re-throws a timeout without logging it', () => {
+    const timeout = new ApiTimeoutError('https://example.com/api/records');
+
+    expect(() => logApiFailure('fetchThing', timeout)).toThrow(timeout);
+    expect(logErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('logs the message of any non-timeout error without throwing', () => {
+    expect(() =>
+      logApiFailure('fetchThing', new Error('server error')),
+    ).not.toThrow();
+    expect(logErrorMessage).toHaveBeenCalledWith('fetchThing', 'server error');
+  });
+
+  it('stringifies a non-Error thrown value when logging', () => {
+    expect(() => logApiFailure('fetchThing', 'boom')).not.toThrow();
+    expect(logErrorMessage).toHaveBeenCalledWith('fetchThing', 'boom');
+  });
+});
+
+describe('rethrowIfTimeout', () => {
+  it('re-throws an ApiTimeoutError so it escapes a resilient catch', () => {
+    const timeout = new ApiTimeoutError('https://example.com/api/records');
+
+    expect(() => rethrowIfTimeout(timeout)).toThrow(timeout);
+  });
+
+  it('returns without throwing for any other error', () => {
+    expect(() => rethrowIfTimeout(new Error('server error'))).not.toThrow();
+    expect(() => rethrowIfTimeout('boom')).not.toThrow();
   });
 });

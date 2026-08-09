@@ -1359,4 +1359,62 @@ describe('index', () => {
     );
     expect(process.exitCode).toBe(1);
   });
+
+  // A delete timeout (deleteRecords re-throws it) must land in the specific
+  // "remain on the server" branch with a non-zero exit and log its reason,
+  // not fall through to the generic outer catch that would hide the detail.
+  it('reports a delete timeout with the specific consequence and its reason', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(deleteRecords).mockRejectedValue(
+      new Error('Request to https://example.com/api/records timed out'),
+    );
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('remain on the server'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('timed out'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A settings timeout must degrade like any settings read failure — write
+  // records, skip the auto-delete, warn — not abort the whole sync. Writing
+  // was never the risky operation.
+  it('degrades to writing records and skipping delete when settings times out', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockRejectedValue(
+      new Error('Request to https://example.com/api/settings timed out'),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+
+    await import('@/index.js');
+
+    expect(writeMarkdown).toHaveBeenCalledWith(
+      mockRecord,
+      'suffix',
+      expect.any(Set),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Could not read settings'),
+    );
+    expect(deleteRecords).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
 });

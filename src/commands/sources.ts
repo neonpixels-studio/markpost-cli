@@ -63,6 +63,12 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     await checkConfig();
     await handler(uuid);
   } catch (error) {
+    // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
+    // that's a user abort, not a command failure, so don't flag it non-zero.
+    if (error instanceof Error && error.name === 'ExitPromptError') {
+      return;
+    }
+
     console.error(chalk.redBright(error));
     process.exitCode = 1;
   }
@@ -150,8 +156,9 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
     return source;
   }
 
-  // fetchSources() swallows transport errors and returns [], so a uuid that
-  // doesn't match is indistinguishable here from a failed lookup.
+  // fetchSources() swallows transport errors (except a timeout, which
+  // propagates) and returns [], so a uuid that doesn't match is
+  // indistinguishable here from a failed lookup.
   console.error(
     chalk.redBright(
       'Source not found, or the source list could not be loaded.',

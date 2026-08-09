@@ -1,6 +1,11 @@
 import {
+  apiFetch,
+  assertApiSuccess,
   authedRequest,
+  getApiToken,
+  getBaseUrl,
   isSystemicApiFailure,
+  logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
 } from '@/libs/api.js';
@@ -217,10 +222,7 @@ export const fetchPaginatedRecords = async (
 
     return { records, meta, links };
   } catch (error) {
-    logErrorMessage(
-      `fetchPaginatedRecords`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`fetchPaginatedRecords`, error);
 
     return null;
   }
@@ -256,10 +258,8 @@ export const createRecord = async (
       throw error;
     }
 
-    logErrorMessage(
-      `createRecord["${title}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    // `logApiFailure` re-throws a timeout (fail loud) and logs everything else.
+    logApiFailure(`createRecord["${title}"]`, error);
 
     return null;
   }
@@ -273,6 +273,15 @@ export const createRecord = async (
 // from re-writing it. `syncedAt` is injected (defaulting to now) so callers
 // and tests can pin the timestamp. Content-Type mirrors createRecord/
 // deleteRecords for consistency; markpost reads the body regardless.
+//
+// Goes through `apiFetch` so the PATCH inherits the same request timeout as
+// every other API call (a stalled connection can't hang the sync forever).
+// Unlike the fetch helpers above, a failure here is logged and reported as
+// `false` rather than re-thrown — including a timeout: this is non-critical
+// post-write bookkeeping (the file is already on disk), so a failed mark
+// simply leaves the record `pending` to re-sync next run, which is far less
+// disruptive than aborting the whole sync after files have landed. The
+// timeout's job here is purely to bound the wait, not to fail loud.
 //
 // Returns a plain success boolean rather than the updated record: the caller
 // only needs to know whether the server accepted the change. Reading it back
@@ -288,7 +297,7 @@ export const markRecordSynced = async (
   syncedAt: string = new Date().toISOString(),
 ): Promise<boolean> => {
   try {
-    const response = await fetch(
+    const { response, body } = await apiFetch(
       `${getBaseUrl()}/api/records/${encodeURIComponent(uuid)}`,
       {
         method: 'PATCH',
@@ -309,12 +318,11 @@ export const markRecordSynced = async (
       },
     );
 
-    // Parse and assert exactly like the other request helpers: an unparseable
-    // body (e.g. an HTML error page from a proxy behind a 200) throws here and
-    // is caught below as a failure, rather than being mistaken for a silent
-    // success that leaves the record pending.
-    const body = (await response.json()) as RecordApiResponse;
-    assertApiSuccess(response, body);
+    // Assert exactly like the other request helpers: an error response (or an
+    // unparseable body surfacing from `apiFetch` as a thrown error) is caught
+    // below as a failure, rather than being mistaken for a silent success that
+    // leaves the record pending.
+    assertApiSuccess(response, body as RecordApiResponse);
 
     return true;
   } catch (error) {
@@ -335,10 +343,7 @@ export const fetchRecord = async (uuid: string): Promise<Record | null> => {
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    logErrorMessage(
-      `fetchRecord["${uuid}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`fetchRecord["${uuid}"]`, error);
 
     return null;
   }
@@ -365,10 +370,7 @@ export const deleteRecords = async (
 
     return body.meta ?? null;
   } catch (error) {
-    logErrorMessage(
-      `deleteRecords["${uuids.join(', ')}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`deleteRecords["${uuids.join(', ')}"]`, error);
 
     return null;
   }

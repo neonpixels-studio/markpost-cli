@@ -240,6 +240,34 @@ describe('runPushCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // A timeout must abort the whole batch immediately, not be caught per-file
+  // and retried on the next — otherwise a hung server stalls once per file.
+  it('aborts the batch on a timeout instead of retrying the next file', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    // Import from the same (reset) module instance push.js will resolve, so
+    // `instanceof ApiTimeoutError` in rethrowIfTimeout matches this error.
+    const { ApiTimeoutError } = await import('@/libs/api.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown)
+      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+    vi.mocked(createRecord).mockRejectedValueOnce(
+      new ApiTimeoutError('https://example.com/api/records'),
+    );
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md']);
+
+    expect(createRecord).toHaveBeenCalledTimes(1);
+    expect(process.exitCode).toBe(1);
+  });
+
   it('errors when no inputs resolve to any file', async () => {
     const { createRecord } = await import('@/libs/records.js');
     const { resolveMarkdownInputs } = await import('@/libs/files.js');

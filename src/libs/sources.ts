@@ -1,9 +1,9 @@
 import {
   authedRequest,
+  logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
 } from '@/libs/api.js';
-import { logErrorMessage } from '@/libs/errors.js';
 import { ApiDeleteMeta, ApiDeleteResponse } from '@/types/api.types.js';
 import {
   CreateSourceInput,
@@ -19,10 +19,7 @@ export const fetchSources = async (): Promise<Source[]> => {
 
     return unwrapResourceCollection('fetchSources', body, 'source');
   } catch (error) {
-    logErrorMessage(
-      'fetchSources',
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure('fetchSources', error);
 
     return [];
   }
@@ -47,10 +44,7 @@ export const createSource = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    logErrorMessage(
-      `createSource["${input.name}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`createSource["${input.name}"]`, error);
 
     return null;
   }
@@ -79,10 +73,7 @@ export const updateSource = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    logErrorMessage(
-      `updateSource["${uuid}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`updateSource["${uuid}"]`, error);
 
     return null;
   }
@@ -101,10 +92,7 @@ export const deleteSource = async (
 
     return body.meta ?? null;
   } catch (error) {
-    logErrorMessage(
-      `deleteSource["${uuid}"]`,
-      error instanceof Error ? error.message : String(error),
-    );
+    logApiFailure(`deleteSource["${uuid}"]`, error);
 
     return null;
   }
