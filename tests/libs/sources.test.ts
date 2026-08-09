@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createSource,
@@ -12,26 +12,28 @@ import { Source } from '@/types/sources.types.js';
 
 // @/libs/api.js imports @/libs/config.js, which constructs a real
 // `conf`-backed store (touching the developer's actual config directory) as
-// soon as it's loaded. Mock it so importActual below doesn't pull in that
-// side effect — getApiToken is overridden regardless, so nothing needs the
-// real store to resolve a value.
+// soon as it's loaded. Mock it so loading api.js doesn't pull in that side
+// effect — API_TOKEN below resolves the token before the store is consulted.
 vi.mock('@/libs/config.js', () => ({
   config: { get: vi.fn() },
 }));
 
-// Only override the external-service seams (base URL, token). Everything
-// else — formatErrorMessages, unwrapResourceAttributes — stays real so these
-// tests exercise production response-parsing logic instead of a hand-copied
+// Drive the external-service seams (base URL, token) through the env vars the
+// real `getBaseUrl`/`getApiToken` read, so the shared `authedRequest` helper
+// in @/libs/api.js resolves them the same way production does. Overriding the
+// exports wouldn't reach `authedRequest`, which calls those functions
+// internally. `vi.stubEnv` scopes and auto-restores the values so nothing
+// leaks into other test files sharing the worker. Everything else —
+// formatErrorMessages, unwrapResourceAttributes — stays real so these tests
+// exercise production response-parsing logic instead of a hand-copied
 // stand-in that could silently drift from it (see tests/libs/records.test.ts).
-vi.mock('@/libs/api.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/libs/api.js')>('@/libs/api.js');
+beforeEach(() => {
+  vi.stubEnv('BASE_URL', 'https://example.com');
+  vi.stubEnv('API_TOKEN', 'test-token');
+});
 
-  return {
-    ...actual,
-    getBaseUrl: () => 'https://example.com',
-    getApiToken: () => 'test-token',
-  };
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 vi.mock('@/libs/errors.js', () => ({

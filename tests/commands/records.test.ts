@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Record } from '@/types/records.types.js';
 
@@ -38,6 +38,10 @@ describe('runRecordsCommand', () => {
     process.exitCode = undefined;
   });
 
+  afterEach(() => {
+    process.exitCode = undefined;
+  });
+
   it('always checks config before dispatching', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     const { fetchAllRecords } = await import('@/libs/records.js');
@@ -65,28 +69,42 @@ describe('runRecordsCommand', () => {
     expect(console.error).toHaveBeenCalled();
   });
 
-  it('prints usage when no subcommand is given', async () => {
+  it('errors to stderr and exits 1 when no subcommand is given', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
     const { fetchAllRecords } = await import('@/libs/records.js');
     const { runRecordsCommand } = await import('@/commands/records.js');
 
     await runRecordsCommand([]);
 
-    expect(console.log).toHaveBeenCalledWith(
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No subcommand given.'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Usage: markpost records'),
     );
+    expect(console.log).not.toHaveBeenCalled();
+    expect(checkConfig).not.toHaveBeenCalled();
     expect(fetchAllRecords).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
-  it('prints usage for an unrecognized subcommand', async () => {
+  it('errors to stderr and exits 1 for an unrecognized subcommand', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
     const { fetchAllRecords } = await import('@/libs/records.js');
     const { runRecordsCommand } = await import('@/commands/records.js');
 
     await runRecordsCommand(['bogus']);
 
-    expect(console.log).toHaveBeenCalledWith(
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown subcommand: bogus'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Usage: markpost records'),
     );
+    expect(console.log).not.toHaveBeenCalled();
+    expect(checkConfig).not.toHaveBeenCalled();
     expect(fetchAllRecords).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   describe('list', () => {

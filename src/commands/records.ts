@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchAllRecords, RecordListFilters } from '@/libs/records.js';
 import { checkConfig } from '@/libs/config.js';
+import { failWithSubcommandUsage } from '@/libs/usage.js';
 import { Record } from '@/types/records.types.js';
 
 export const USAGE = `Usage: markpost records list [options]
@@ -14,17 +15,18 @@ Options:
   --search <text>    Filter by text in the title or content`;
 
 export const runRecordsCommand = async (args: string[]): Promise<void> => {
+  const [subcommand] = args;
+
+  // Validate before the config check so a bad subcommand fails on usage alone,
+  // without needing a configured account.
+  if (subcommand !== 'list') {
+    failWithSubcommandUsage(subcommand, USAGE);
+    return;
+  }
+
   try {
     await checkConfig();
-
-    const [subcommand] = args;
-
-    if (subcommand === 'list') {
-      await listRecords(parseListFilters(args));
-      return;
-    }
-
-    console.log(USAGE);
+    await listRecords(parseListFilters(args));
   } catch (error) {
     console.error(chalk.redBright(error));
     process.exitCode = 1;

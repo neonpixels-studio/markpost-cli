@@ -1,5 +1,6 @@
 import {
   assertApiSuccess,
+  authedRequest,
   getApiToken,
   getBaseUrl,
   isSystemicApiFailure,
@@ -18,6 +19,12 @@ import {
   RecordApiResponse,
   RecordListApiResponse,
 } from '@/types/records.types.js';
+
+// markpost's record lifecycle statuses (server/db/schema.ts RECORD_STATUSES).
+// The sync only ever wants records not yet written to disk, so it fetches
+// `pending` and, once a record is written, PATCHes it to `synced`.
+export const PENDING_STATUS = 'pending';
+const SYNCED_STATUS = 'synced';
 
 // markpost paginates with a cursor: each response's `links.next` embeds the
 // `page[after]` cursor to request the following page, and is `null` once
@@ -194,6 +201,12 @@ export const fetchAllRecords = async (
   return { ok: true, records: records.flat(1) as Record[], partial };
 };
 
+// Emits `page[size]`/`page[after]` plus whichever of markpost's list filters
+// (`filter[source]`, `filter[status]`, `filter[q]`) the caller supplied.
+// markpost's GET /api/records returns every status when no `filter[status]` is
+// given (server/api/records/index.get.ts), so scoping the sync to pending is
+// the caller's job (see the `PENDING_STATUS` call in src/index.ts) — this keeps
+// `records list` free to page any status the user asks for.
 const buildRecordsQuery = (
   size: number,
   after: string | undefined,
@@ -232,18 +245,9 @@ export const fetchPaginatedRecords = async (
   links: ApiPaginationLinks;
 } | null> => {
   try {
-    const response = await fetch(
-      `${getBaseUrl()}/api/records?${buildRecordsQuery(size, after, filters)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${getApiToken()}`,
-        },
-      },
-    );
-
-    const body = (await response.json()) as RecordListApiResponse;
-
-    assertApiSuccess(response, body);
+    const body = (await authedRequest(
+      `/api/records?${buildRecordsQuery(size, after, filters)}`,
+    )) as RecordListApiResponse;
 
     const records = unwrapResourceCollection(
       'fetchPaginatedRecords',
@@ -291,11 +295,10 @@ export const createRecord = async (
   content: string,
 ): Promise<Record | null> => {
   try {
-    const response = await fetch(`${getBaseUrl()}/api/records`, {
+    const body = (await authedRequest('/api/records', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/vnd.api+json',
-        Authorization: `Bearer ${getApiToken()}`,
       },
       body: JSON.stringify({
         data: {
@@ -306,10 +309,7 @@ export const createRecord = async (
           },
         },
       }),
-    });
-
-    const body = (await response.json()) as RecordApiResponse;
-    assertApiSuccess(response, body);
+    })) as RecordApiResponse;
 
     return unwrapResourceAttributes(body);
   } catch (error) {
@@ -329,17 +329,73 @@ export const createRecord = async (
   }
 };
 
+// Marks a single record synced after the CLI has written it to disk, via
+// markpost's PATCH /api/records/[uuid] (server/api/records/[uuid].patch.ts),
+// which accepts `status`, `syncedAt`, and `filePath`. This is the
+// non-destructive counterpart to `deleteRecords`: with autoDelete off, moving
+// the record out of `pending` is what stops the next run's pending-only fetch
+// from re-writing it. `syncedAt` is injected (defaulting to now) so callers
+// and tests can pin the timestamp. Content-Type mirrors createRecord/
+// deleteRecords for consistency; markpost reads the body regardless.
+//
+// Returns a plain success boolean rather than the updated record: the caller
+// only needs to know whether the server accepted the change. Reading it back
+// as a resource would mis-report a legitimate 2xx that carries no `data`
+// (markpost's PATCH always returns the record, but a `data: null` shape still
+// counts as success here) as a failure, wrongly warning the user of
+// duplicates. `filePath` is sent deliberately — markpost stores it on the
+// record so its UI can show where a synced note landed; it's the user's own
+// local path going to their own account, not a third-party leak.
+export const markRecordSynced = async (
+  uuid: string,
+  filePath: string,
+  syncedAt: string = new Date().toISOString(),
+): Promise<boolean> => {
+  try {
+    const response = await fetch(
+      `${getBaseUrl()}/api/records/${encodeURIComponent(uuid)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: `Bearer ${getApiToken()}`,
+        },
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes: {
+              status: SYNCED_STATUS,
+              syncedAt,
+              filePath,
+            },
+          },
+        }),
+      },
+    );
+
+    // Parse and assert exactly like the other request helpers: an unparseable
+    // body (e.g. an HTML error page from a proxy behind a 200) throws here and
+    // is caught below as a failure, rather than being mistaken for a silent
+    // success that leaves the record pending.
+    const body = (await response.json()) as RecordApiResponse;
+    assertApiSuccess(response, body);
+
+    return true;
+  } catch (error) {
+    logErrorMessage(
+      `markRecordSynced["${uuid}"]`,
+      error instanceof Error ? error.message : String(error),
+    );
+
+    return false;
+  }
+};
+
 export const fetchRecord = async (uuid: string): Promise<Record | null> => {
   try {
-    const response = await fetch(`${getBaseUrl()}/api/records/${uuid}`, {
-      headers: {
-        Authorization: `Bearer ${getApiToken()}`,
-      },
-    });
-
-    const body = (await response.json()) as RecordApiResponse;
-
-    assertApiSuccess(response, body);
+    const body = (await authedRequest(
+      `/api/records/${encodeURIComponent(uuid)}`,
+    )) as RecordApiResponse;
 
     return unwrapResourceAttributes(body);
   } catch (error) {
@@ -356,11 +412,10 @@ export const deleteRecords = async (
   uuids: string[],
 ): Promise<ApiDeleteMeta | null> => {
   try {
-    const response = await fetch(`${getBaseUrl()}/api/records`, {
+    const body = (await authedRequest('/api/records', {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/vnd.api+json',
-        Authorization: `Bearer ${getApiToken()}`,
       },
       body: JSON.stringify({
         data: {
@@ -370,10 +425,7 @@ export const deleteRecords = async (
           },
         },
       }),
-    });
-
-    const body = (await response.json()) as ApiDeleteResponse;
-    assertApiSuccess(response, body);
+    })) as ApiDeleteResponse;
 
     return body.meta ?? null;
   } catch (error) {
