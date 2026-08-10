@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Spinner } from 'yocto-spinner';
 
 import { Record } from '@/types/records.types.js';
 import { UserSettings } from '@/types/settings.types.js';
@@ -61,13 +62,16 @@ const mockRecord: Record = {
 };
 
 describe('index', () => {
-  let mockSpinner: { start: ReturnType<typeof vi.fn>; success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  // The production code only calls start/success/error on the spinner, so the
+  // mock implements just those three. Typed as the full Spinner it satisfies
+  // yoctoSpinner's mocked return type without stubbing methods nothing calls.
+  let mockSpinner: Spinner;
   const originalArgv = process.argv;
 
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    mockSpinner = { start: vi.fn(), success: vi.fn(), error: vi.fn() };
+    mockSpinner = { start: vi.fn(), success: vi.fn(), error: vi.fn() } as unknown as Spinner;
     // The sync now runs only under the explicit `sync` subcommand, so the
     // default-sync tests below invoke it that way. Dispatch, help, and
     // no-arg tests override process.argv themselves.
@@ -700,7 +704,7 @@ describe('index', () => {
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
-    vi.mocked(fetchAllRecords).mockResolvedValue([]);
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [], partial: false });
 
     await import('@/index.js');
 

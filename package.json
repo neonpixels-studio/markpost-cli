@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "tsc && tsc-alias",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "watch": "tsc --watch & tsc-alias --watch",
     "test": "vitest",
     "test:ci": "vitest run",
