@@ -517,6 +517,27 @@ describe('writeMarkdown', () => {
       expect(ownerPath).toBe(resolve(outputDirectory, 'test-title.md'));
     });
 
+    it('keys ownership by resolved path, so a mid-run outputDirectory change does not suppress overwrite in the new directory', () => {
+      const otherDirectory = '/mock/output-2';
+      // The new directory already holds a same-slug file from a previous run, so
+      // a wrongly-suppressed overwrite would be visible as a suffix.
+      mockWriteFileSyncRejectingExistingPaths([
+        resolve(otherDirectory, 'test-title.md'),
+      ]);
+      const seenSlugs = new Map<string, string>();
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
+
+      writeMarkdown(owner, 'overwrite', seenSlugs); // /mock/output/test-title.md
+      process.env.OUTPUT_DIRECTORY = otherDirectory; // user changes the setting
+      const otherPath = writeMarkdown(other, 'overwrite', seenSlugs);
+
+      // Ownership was recorded for the old dir's path, so the new dir's base path
+      // is unclaimed and `other` overwrites it. Keyed by bare slug, `other` would
+      // be wrongly downgraded to test-title-2.md.
+      expect(otherPath).toBe(resolve(otherDirectory, 'test-title.md'));
+    });
+
     it('unlinks the path before writing so a symlink is removed, not followed', () => {
       const invocationOrder: string[] = [];
       vi.mocked(rmSync).mockImplementation(() => {

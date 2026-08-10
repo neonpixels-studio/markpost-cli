@@ -443,7 +443,7 @@ describe('index', () => {
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
   });
 
-  it('threads one shared seenSlugs map across autoSync passes so a later pass sees earlier passes\' slug ownership', async () => {
+  it('passes the same seenSlugs map instance to every autoSync pass', async () => {
     const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
     const { writeMarkdown } = await import('@/libs/markdown.js');
     const { fetchSettings } = await import('@/libs/settings.js');

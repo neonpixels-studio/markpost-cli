@@ -43,18 +43,15 @@ type Spinner = ReturnType<typeof yoctoSpinner>;
 // don't hit its temporal dead zone when the default sync runs.
 const MARK_SYNCED_CONCURRENCY = 10;
 
-// Slug ownership (base slug -> the uuid that wrote `<slug>.md`), shared across
-// every autoSync pass in this process rather than rebuilt per pass. autoSync
-// deletes each pass's records server-side, so a later pass fetching a
+// Slug ownership (resolved `<slug>.md` path -> the uuid that wrote it), shared
+// across every autoSync pass in this process rather than rebuilt per pass.
+// autoSync deletes each pass's records server-side, so a later pass fetching a
 // *different* same-slug record would, under `overwrite`, clobber the earlier
 // pass's on-disk file — and the deleted original is unrecoverable. Persisting
 // ownership across passes lets resolveStrategyForSlug downgrade only a different
 // record to `suffix`. Lifetime is the CLI process (the autoSync daemon stays up
-// across passes); a fresh single-pass `markpost sync` starts empty, so a
-// cron-style loop of separate invocations does not get this cross-run guard.
-// Declared above the top-level `await dispatch()` so it exists before
-// writeRecords runs, and threaded in as an argument to keep writeRecords a
-// function of its inputs.
+// across passes); a cron-style loop of separate single-pass `markpost sync`
+// invocations starts empty each time and does not get this cross-run guard.
 const processSeenSlugs = new Map<string, string>();
 
 const [commandName, ...commandArgs] = process.argv.slice(2);
@@ -257,12 +254,9 @@ function writeRecords(
   includeFrontmatter: boolean,
   seenSlugs: Map<string, string>,
 ): WriteRecordsResult {
-  // `seenSlugs` (the module-scope `processSeenSlugs`, threaded in) is shared
-  // across the whole batch AND across every autoSync pass so `overwrite` can
-  // detect a different same-slug record — whether it arrives later in this batch
-  // or in a later pass — and avoid clobbering (see
-  // writeMarkdown/resolveStrategyForSlug). A sequential loop preserves order and
-  // threads the same Map across every record.
+  // `seenSlugs` (the module-scope `processSeenSlugs`) is threaded in so this
+  // stays a function of its inputs. A sequential loop preserves order and shares
+  // the one Map across every record; ownership semantics live in writeMarkdown.
   const written: WrittenRecord[] = [];
   const failed: FailedRecord[] = [];
   let skipped = 0;
