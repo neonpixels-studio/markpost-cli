@@ -79,9 +79,10 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
 // of control/ANSI escapes before printing (see terminal.ts): name, uuid, type,
 // endpoint (built from endpointSlug), routeFolder, recordCount, and lastHitAt.
 // recordCount is typed as a number but the type is only a compile-time claim
-// over parsed JSON — a hostile server could return a string, so it's coerced
-// and sanitized rather than trusted. The 'never hit' fallback is a local
-// literal, so only the untrusted lastHitAt branch is sanitized.
+// over parsed JSON — a hostile server could return a string carrying an escape,
+// so it goes through the sanitizer too (which coerces non-strings). The
+// 'never hit' fallback is a local literal, so only the untrusted lastHitAt
+// branch is sanitized.
 const printSource = (source: Source): void => {
   console.log(chalk.bold(sanitizeForTerminal(source.name)));
   console.log(`  uuid:      ${sanitizeForTerminal(source.uuid)}`);
@@ -92,9 +93,7 @@ const printSource = (source: Source): void => {
     )}`,
   );
   console.log(`  folder:    ${sanitizeForTerminal(source.routeFolder)}`);
-  console.log(
-    `  records:   ${sanitizeForTerminal(String(source.recordCount))}`,
-  );
+  console.log(`  records:   ${sanitizeForTerminal(source.recordCount)}`);
   console.log(
     `  last hit:  ${source.lastHitAt ? sanitizeForTerminal(source.lastHitAt) : 'never hit'}`,
   );

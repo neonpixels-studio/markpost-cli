@@ -39,8 +39,13 @@ function isDangerousControlCode(codePoint: number): boolean {
 // `allowLineBreaks` keeps TAB/LF so multi-line markdown survives; leave it off
 // for single-line fields (titles, uuids, composed status lines) where a stray
 // newline could itself inject a fake line.
-function sanitize(value: string, allowLineBreaks: boolean): string {
-  return Array.from(value, (character) => {
+//
+// `value` is typed `unknown`: the declared field types are only a compile-time
+// claim over parsed JSON, so a hostile or malformed response could hand us a
+// non-string (or null). Coercing here — one place — keeps callers from having
+// to guard, and stops `Array.from` throwing on null/undefined.
+function sanitize(value: unknown, allowLineBreaks: boolean): string {
+  return Array.from(String(value ?? ''), (character) => {
     const codePoint = character.codePointAt(0) ?? 0;
 
     if (
@@ -63,13 +68,13 @@ function sanitize(value: string, allowLineBreaks: boolean): string {
 // Single-line fields: strips every control character, including LF/TAB. Any
 // uuid printed alongside keeps the item identifiable even if the title is
 // emptied.
-export function sanitizeForTerminal(value: string): string {
+export function sanitizeForTerminal(value: unknown): string {
   return sanitize(value, false);
 }
 
 // Multi-line content (e.g. a record's markdown body): preserves LF and TAB so
 // the document keeps its structure, while still stripping CR and every other
 // control/ANSI escape.
-export function sanitizeBlockForTerminal(value: string): string {
+export function sanitizeBlockForTerminal(value: unknown): string {
   return sanitize(value, true);
 }

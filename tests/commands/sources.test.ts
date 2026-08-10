@@ -203,6 +203,45 @@ describe('runSourcesCommand', () => {
         expect.stringContaining('99 incoming/'),
       );
     });
+
+    it('sanitizes a hostile non-string recordCount from a malformed response', async () => {
+      // The type says number, but the server is untrusted: a string carrying an
+      // escape must still be coerced and stripped, not printed or thrown on.
+      const control = String.fromCharCode(0x1b);
+      const evilSource = {
+        ...webhookSource,
+        recordCount: `3${control}[2J` as unknown as number,
+      };
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([evilSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      const printedControl = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('3 [2J'),
+      );
+    });
+
+    it('renders "never hit" for an empty lastHitAt', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, lastHitAt: '' },
+      ]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('never hit'),
+      );
+    });
   });
 
   describe('create', () => {
@@ -290,6 +329,31 @@ describe('runSourcesCommand', () => {
       expect(updateSource).toHaveBeenCalledWith('abc-123', {
         routeFolder: '00-fixed/',
       });
+    });
+
+    it('sanitizes the source name in the interactive picker choices', async () => {
+      // The select label is composed from the untrusted source name, so a name
+      // carrying an escape must be stripped before it reaches the picker.
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, select } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, name: `Evil${control}Source` },
+      ]);
+      vi.mocked(select).mockResolvedValue('abc-123');
+      vi.mocked(input).mockResolvedValueOnce('00-fixed/');
+      vi.mocked(updateSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update']);
+
+      expect(select).toHaveBeenCalledWith(
+        expect.objectContaining({
+          choices: [
+            expect.objectContaining({ name: 'Evil Source (webhook)' }),
+          ],
+        }),
+      );
     });
 
     it('reports not-found when the uuid does not match any source', async () => {

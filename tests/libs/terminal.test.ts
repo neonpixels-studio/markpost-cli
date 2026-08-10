@@ -49,6 +49,17 @@ describe('sanitizeForTerminal', () => {
   it('returns an empty string for an empty input', () => {
     expect(sanitizeForTerminal('')).toBe('');
   });
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+  ])('coerces %s to an empty string instead of throwing', (_label, value) => {
+    expect(sanitizeForTerminal(value)).toBe('');
+  });
+
+  it('coerces a non-string (e.g. a number) before sanitizing', () => {
+    expect(sanitizeForTerminal(42)).toBe('42');
+  });
 });
 
 describe('sanitizeBlockForTerminal', () => {
