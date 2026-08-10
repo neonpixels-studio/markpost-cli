@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { fetchRecord } from '@/libs/records.js';
 import { checkConfig } from '@/libs/config.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithUsage } from '@/libs/usage.js';
 import { Record } from '@/types/records.types.js';
 
@@ -34,10 +35,12 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   }
 };
 
+// Every field here comes from the untrusted API response, so each is stripped
+// of control/ANSI escapes before printing (see terminal.ts sanitizeForTerminal).
 const printRecord = (record: Record): void => {
-  console.log(chalk.bold(record.title));
-  console.log(`  uuid:       ${record.uuid}`);
-  console.log(`  created at: ${record.createdAt}`);
+  console.log(chalk.bold(sanitizeForTerminal(record.title)));
+  console.log(`  uuid:       ${sanitizeForTerminal(record.uuid)}`);
+  console.log(`  created at: ${sanitizeForTerminal(record.createdAt)}`);
   console.log('');
-  console.log(record.content);
+  console.log(sanitizeForTerminal(record.content));
 };

@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchAllRecords, RecordListFilters } from '@/libs/records.js';
 import { checkConfig } from '@/libs/config.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage } from '@/libs/usage.js';
 import { Record } from '@/types/records.types.js';
 
@@ -102,10 +103,12 @@ const normalizeFilter = (
   return trimmed;
 };
 
+// title, uuid, and createdAt all come from the untrusted API response, so each
+// is stripped of control/ANSI escapes before printing (see terminal.ts).
 const printRecord = (record: Record): void => {
-  console.log(chalk.bold(record.title));
-  console.log(`  uuid:       ${record.uuid}`);
-  console.log(`  created at: ${record.createdAt}`);
+  console.log(chalk.bold(sanitizeForTerminal(record.title)));
+  console.log(`  uuid:       ${sanitizeForTerminal(record.uuid)}`);
+  console.log(`  created at: ${sanitizeForTerminal(record.createdAt)}`);
 };
 
 // Read-only preview of the records on the server (optionally filtered).

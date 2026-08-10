@@ -85,6 +85,31 @@ describe('runGetCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('strips control characters from untrusted record fields before printing', async () => {
+    // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
+    const control = String.fromCharCode(0x1b);
+    const evilRecord: Record = {
+      uuid: `id${control}1`,
+      title: `A${control}B`,
+      content: `C${control}D`,
+      createdAt: `2024${control}01`,
+    };
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(evilRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['id-1']);
+
+    const printedControl = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && arg.includes(control),
+      );
+    expect(printedControl).toBe(false);
+    expect(console.log).toHaveBeenCalledWith('A B');
+    expect(console.log).toHaveBeenCalledWith('C D');
+  });
+
   it('catches and logs an error when checkConfig throws', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     vi.mocked(checkConfig).mockRejectedValue(new Error('boom'));

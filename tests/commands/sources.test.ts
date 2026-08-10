@@ -170,6 +170,30 @@ describe('runSourcesCommand', () => {
         expect.stringContaining('clip-ab12@in.markpost.io'),
       );
     });
+
+    it('strips control characters from untrusted source fields before printing', async () => {
+      // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
+      const control = String.fromCharCode(0x1b);
+      const evilSource: Source = {
+        ...webhookSource,
+        name: `Evil${control}Source`,
+        endpointSlug: `wh_${control}slug`,
+        routeFolder: `99${control}incoming/`,
+      };
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([evilSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      const printedControl = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.log).toHaveBeenCalledWith('Evil Source');
+    });
   });
 
   describe('create', () => {

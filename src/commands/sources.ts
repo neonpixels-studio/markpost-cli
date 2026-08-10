@@ -7,6 +7,7 @@ import {
   updateSource,
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage } from '@/libs/usage.js';
 import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
 
@@ -74,16 +75,24 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   }
 };
 
+// name, type, endpoint (built from endpointSlug), routeFolder, and lastHitAt
+// all come from the untrusted API response, so each is stripped of control/ANSI
+// escapes before printing (see terminal.ts). recordCount is a number and needs
+// no sanitizing.
 const printSource = (source: Source): void => {
-  console.log(chalk.bold(source.name));
-  console.log(`  uuid:      ${source.uuid}`);
-  console.log(`  type:      ${source.type}`);
+  console.log(chalk.bold(sanitizeForTerminal(source.name)));
+  console.log(`  uuid:      ${sanitizeForTerminal(source.uuid)}`);
+  console.log(`  type:      ${sanitizeForTerminal(source.type)}`);
   console.log(
-    `  endpoint:  ${buildEndpointUrl(source.type, source.endpointSlug)}`,
+    `  endpoint:  ${sanitizeForTerminal(
+      buildEndpointUrl(source.type, source.endpointSlug),
+    )}`,
   );
-  console.log(`  folder:    ${source.routeFolder}`);
+  console.log(`  folder:    ${sanitizeForTerminal(source.routeFolder)}`);
   console.log(`  records:   ${source.recordCount}`);
-  console.log(`  last hit:  ${source.lastHitAt ?? 'never hit'}`);
+  console.log(
+    `  last hit:  ${sanitizeForTerminal(source.lastHitAt ?? 'never hit')}`,
+  );
 };
 
 const listSources = async (): Promise<void> => {
@@ -123,7 +132,9 @@ const createSourceCommand = async (): Promise<void> => {
     return;
   }
 
-  console.log(chalk.greenBright(`Created source "${source.name}"`));
+  console.log(
+    chalk.greenBright(`Created source "${sanitizeForTerminal(source.name)}"`),
+  );
   printSource(source);
 };
 
@@ -140,7 +151,7 @@ const promptForSource = async (action: string): Promise<Source | null> => {
   const selectedUuid = await select({
     message: `Select a source to ${action}`,
     choices: sources.map((source) => ({
-      name: `${source.name} (${source.type})`,
+      name: sanitizeForTerminal(`${source.name} (${source.type})`),
       value: source.uuid,
     })),
   });
@@ -193,7 +204,9 @@ const promptAndApplyRouteFolder = async (target: Source): Promise<void> => {
     return;
   }
 
-  console.log(chalk.greenBright(`Updated source "${source.name}"`));
+  console.log(
+    chalk.greenBright(`Updated source "${sanitizeForTerminal(source.name)}"`),
+  );
   printSource(source);
 };
 

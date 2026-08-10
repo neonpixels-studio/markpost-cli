@@ -147,6 +147,34 @@ describe('runRecordsCommand', () => {
       );
     });
 
+    it('strips control characters from untrusted record fields before printing', async () => {
+      // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
+      const control = String.fromCharCode(0x1b);
+      const evilRecord: Record = {
+        uuid: `id${control}1`,
+        createdAt: `2024${control}01`,
+        title: `A${control}B`,
+        content: 'irrelevant',
+      };
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [evilRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list']);
+
+      const printedControl = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.log).toHaveBeenCalledWith('A B');
+    });
+
     it('passes no filters through when no flags are given', async () => {
       const { fetchAllRecords } = await import('@/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
