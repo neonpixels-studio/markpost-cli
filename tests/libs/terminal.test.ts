@@ -60,8 +60,15 @@ describe('sanitizeBlockForTerminal', () => {
 
   it('still strips a carriage return (line-overwrite spoofing vector)', () => {
     const result = sanitizeBlockForTerminal(`real${CARRIAGE_RETURN}fake`);
-    expect(result).toBe('real fake');
+    expect(result).toBe('realfake');
     expect(result.includes(CARRIAGE_RETURN)).toBe(false);
+  });
+
+  it('drops CR from a CRLF body without leaving a trailing space', () => {
+    const crlfBody = `line one${CARRIAGE_RETURN}${LINE_FEED}line two`;
+    expect(sanitizeBlockForTerminal(crlfBody)).toBe(
+      `line one${LINE_FEED}line two`,
+    );
   });
 
   it.each([

@@ -8,10 +8,17 @@ const LAST_C1_CONTROL_CODE = 0x9f;
 
 // TAB and LF are the two C0 characters that legitimately structure multi-line
 // text (record content), so the block variant keeps them. CR is deliberately
-// NOT here: a carriage return moves the cursor to the column start and is the
-// exact character that enables line-overwrite spoofing, so it stays stripped.
+// NOT kept: a carriage return moves the cursor to the column start and is the
+// exact character that enables line-overwrite spoofing. It is dropped (not
+// blanked) in the block path so a CRLF body doesn't gain a trailing space
+// before every newline, which would corrupt the exported markdown.
 const TAB_CODE = 0x09;
 const LINE_FEED_CODE = 0x0a;
+const CARRIAGE_RETURN_CODE = 0x0d;
+
+// @todo Bidi override code points (U+202A–U+202E, U+2066–U+2069) survive here
+// and can visually reorder text to spoof a uuid or filename. Out of scope for
+// escape-injection defense; revisit if display spoofing enters the threat model.
 
 function isDangerousControlCode(codePoint: number): boolean {
   const isC1Control =
@@ -41,6 +48,12 @@ function sanitize(value: string, allowLineBreaks: boolean): string {
       (codePoint === LINE_FEED_CODE || codePoint === TAB_CODE)
     ) {
       return character;
+    }
+
+    // Drop CR outright in the block path so a CRLF body keeps clean `\n`
+    // breaks instead of gaining a trailing space on every line.
+    if (allowLineBreaks && codePoint === CARRIAGE_RETURN_CODE) {
+      return '';
     }
 
     return isDangerousControlCode(codePoint) ? ' ' : character;

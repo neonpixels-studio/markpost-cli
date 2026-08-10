@@ -193,6 +193,15 @@ describe('runSourcesCommand', () => {
         );
       expect(printedControl).toBe(false);
       expect(console.log).toHaveBeenCalledWith('Evil Source');
+      // The endpoint URL is built from the untrusted endpointSlug, and the
+      // route folder is untrusted too — assert each renders sanitized so a
+      // regression on either specific line is caught, not just by the scan.
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('wh_ slug'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('99 incoming/'),
+      );
     });
   });
 
