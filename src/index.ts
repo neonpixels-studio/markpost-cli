@@ -43,6 +43,17 @@ type Spinner = ReturnType<typeof yoctoSpinner>;
 // don't hit its temporal dead zone when the default sync runs.
 const MARK_SYNCED_CONCURRENCY = 10;
 
+// Slugs written so far, shared across every autoSync pass in this process (not
+// rebuilt per pass). autoSync deletes/marks each pass's records server-side, so
+// a later pass fetching a different record that slugifies identically would,
+// under `overwrite`, clobber the earlier pass's on-disk file — and the deleted
+// original is unrecoverable. Persisting the Set at module scope lets
+// resolveStrategyForSlug fall back to `suffix` across passes, keeping both
+// files. Lifetime is the CLI process, matching the autoSync daemon's; a fresh
+// `markpost sync` invocation is a new process and starts empty. Declared above
+// the top-level `await dispatch()` so it's initialized before writeRecords runs.
+const seenSlugs = new Set<string>();
+
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
 const SYNC_COMMAND = 'sync';
@@ -242,11 +253,11 @@ function writeRecords(
   conflictStrategy: ConflictStrategy,
   includeFrontmatter: boolean,
 ): WriteRecordsResult {
-  // One Set shared across the whole batch so `overwrite` can detect two
-  // same-slug records in a single sync and avoid clobbering (see
-  // writeMarkdown/resolveStrategyForSlug). A sequential loop preserves order
-  // and threads the same Set across every record.
-  const seenSlugs = new Set<string>();
+  // The module-scope `seenSlugs` (declared up top) is shared across the whole
+  // batch AND across every autoSync pass so `overwrite` can detect a same-slug
+  // record — whether it arrives later in this batch or in a later pass — and
+  // avoid clobbering (see writeMarkdown/resolveStrategyForSlug). A sequential
+  // loop preserves order and threads the same Set across every record.
   const written: WrittenRecord[] = [];
   const failed: FailedRecord[] = [];
   let skipped = 0;

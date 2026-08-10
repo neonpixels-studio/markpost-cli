@@ -443,6 +443,56 @@ describe('index', () => {
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
   });
 
+  it('shares seenSlugs across autoSync passes so a later same-slug record is not clobbered', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const SHARED_SLUG = 'same-title';
+    const passOneRecord: Record = { uuid: 'pass-1', title: 'Same Title', content: 'One', createdAt: '2024-01-01T00:00:00Z' };
+    const passTwoRecord: Record = { uuid: 'pass-2', title: 'Same Title', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ conflictStrategy: 'overwrite' }));
+    // Each pass fetches a distinct record that slugifies to the same slug.
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: true, records: [passOneRecord], partial: false })
+      .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
+    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+
+    // Mirror writeMarkdown's real seenSlugs bookkeeping so the test can observe
+    // whether pass one's slug is still known when pass two runs.
+    const slugKnownAtCall: boolean[] = [];
+    vi.mocked(writeMarkdown).mockImplementation((_record, _strategy, seenSlugs) => {
+      slugKnownAtCall.push(seenSlugs.has(SHARED_SLUG));
+      seenSlugs.add(SHARED_SLUG);
+      return `/mock/output/${SHARED_SLUG}.md`;
+    });
+
+    // Drive two sequential autoSync passes through the scheduler seam. `Once` so
+    // this two-pass behavior reverts to the factory default (one pass) and can't
+    // leak into later tests, whose implementations persist across the suite
+    // (beforeEach clears call history, not implementations).
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    expect(writeMarkdown).toHaveBeenCalledTimes(2);
+    const [firstCall, secondCall] = vi.mocked(writeMarkdown).mock.calls;
+    // The same Set instance reaches both passes — a per-iteration Set would be a
+    // new object and this fails.
+    expect(secondCall[2]).toBe(firstCall[2]);
+    // Pass one's slug is still known in pass two, so `overwrite` falls back to
+    // `suffix` and the earlier file is not clobbered. A per-pass Set would make
+    // this [false, false].
+    expect(slugKnownAtCall).toEqual([false, true]);
+  });
+
   it('exits early when no records are fetched', async () => {
     const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
     const { writeMarkdown } = await import('@/libs/markdown.js');
