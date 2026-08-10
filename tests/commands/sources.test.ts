@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Source } from '@/types/sources.types.js';
+import { CreatedSource, Source } from '@/types/sources.types.js';
 
 vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
 vi.mock('@/libs/sources.js', () => ({
@@ -14,6 +14,7 @@ vi.mock('chalk', () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
     greenBright: vi.fn((value: unknown) => value),
+    yellowBright: vi.fn((value: unknown) => value),
     bold: vi.fn((value: unknown) => value),
   },
 }));
@@ -41,6 +42,34 @@ const emailSource: Source = {
   lastHitAt: '2024-02-01T00:00:00Z',
   recordCount: 1,
 };
+
+// A secret-backed provider (github/zapier/shortcuts): markpost's create
+// response reveals the one-time plaintext `providerSecret` here and nowhere
+// else.
+const githubSource: CreatedSource = {
+  uuid: 'ghi-789',
+  createdAt: '2024-01-03T00:00:00Z',
+  type: 'github',
+  name: 'GitHub Source',
+  provider: 'github',
+  providerSecret: 'whsec_one_time_plaintext',
+  endpointSlug: 'gh_789xyz',
+  routeFolder: '97-incoming/',
+  lastHitAt: null,
+  recordCount: 0,
+};
+
+// Collapses every argument of every console.log AND console.error call into
+// one searchable string, so a leak assertion can't be dodged by the secret
+// landing in a second argument, a later call, or the other stream.
+const loggedText = (): string =>
+  [
+    ...vi.mocked(console.log).mock.calls,
+    ...vi.mocked(console.error).mock.calls,
+  ]
+    .flat()
+    .map((value) => String(value))
+    .join('\n');
 
 describe('buildEndpointUrl', () => {
   it('builds a webhook ingest URL for non-email source types', async () => {
@@ -170,6 +199,18 @@ describe('runSourcesCommand', () => {
         expect.stringContaining('clip-ab12@in.markpost.io'),
       );
     });
+
+    // The one-time secret must only ever surface from `create`; a source
+    // object that somehow still carries one must not leak it on list.
+    it('never prints a providerSecret carried on a listed source', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      expect(loggedText()).not.toContain('whsec_one_time_plaintext');
+    });
   });
 
   describe('create', () => {
@@ -197,6 +238,69 @@ describe('runSourcesCommand', () => {
       );
     });
 
+    it('surfaces the one-time providerSecret once when the create response carries one', async () => {
+      const { input, select } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      vi.mocked(select).mockResolvedValue('github');
+      vi.mocked(input)
+        .mockResolvedValueOnce('GitHub Source')
+        .mockResolvedValueOnce('97-incoming/')
+        .mockResolvedValueOnce('github');
+      vi.mocked(createSource).mockResolvedValue(githubSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      const secretMentions = loggedText()
+        .split('\n')
+        .filter((line) => line.includes('whsec_one_time_plaintext'));
+      expect(secretMentions).toHaveLength(1);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('shown once'),
+      );
+    });
+
+    it('prints nothing extra when the create response has providerSecret: null', async () => {
+      const { input, select } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      vi.mocked(select).mockResolvedValue('webhook');
+      vi.mocked(input)
+        .mockResolvedValueOnce('Webhook Source')
+        .mockResolvedValueOnce('99-incoming/')
+        .mockResolvedValueOnce('');
+      vi.mocked(createSource).mockResolvedValue({
+        ...webhookSource,
+        providerSecret: null,
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('shown once'),
+      );
+    });
+
+    // The realistic non-secret-provider shape omits the key entirely, not
+    // `null`; the `!providerSecret` guard must handle both.
+    it('prints nothing extra when the create response omits providerSecret', async () => {
+      const { input, select } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      vi.mocked(select).mockResolvedValue('webhook');
+      vi.mocked(input)
+        .mockResolvedValueOnce('Webhook Source')
+        .mockResolvedValueOnce('99-incoming/')
+        .mockResolvedValueOnce('');
+      vi.mocked(createSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('shown once'),
+      );
+    });
+
     it('reports an error when creation fails', async () => {
       const { input, select } = await import('@inquirer/prompts');
       const { createSource } = await import('@/libs/sources.js');
@@ -210,7 +314,9 @@ describe('runSourcesCommand', () => {
 
       await runSourcesCommand(['create']);
 
-      expect(console.error).toHaveBeenCalledWith('Failed to create source.');
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to create source.'),
+      );
     });
   });
 
@@ -310,6 +416,22 @@ describe('runSourcesCommand', () => {
       // Guards against re-reporting the same empty-list case as a second,
       // contradictory "not found" error.
       expect(console.error).not.toHaveBeenCalled();
+    });
+
+    it('never prints a providerSecret carried on an updated source', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      vi.mocked(input).mockResolvedValueOnce('00-fixed/');
+      vi.mocked(updateSource).mockResolvedValue({
+        ...githubSource,
+        routeFolder: '00-fixed/',
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'ghi-789']);
+
+      expect(loggedText()).not.toContain('whsec_one_time_plaintext');
     });
 
     it('reports an error when the update fails', async () => {

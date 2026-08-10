@@ -24,6 +24,18 @@ export type Source = {
   recordCount: number;
 };
 
+// Only markpost's create response reveals the one-time generated signing
+// secret, and only for a secret-backed provider (github/zapier/shortcuts); it
+// is null for providers that don't mint one and is absent from every
+// list/get/update response. Modelling it on a create-only type (not the base
+// `Source`) documents where the field appears; `createSourceCommand` then
+// peels it off before the shared `printSource`, and the command tests enforce
+// that list/update never leak it. See markpost server/utils/response.ts
+// (sourceSerializer, revealProviderSecret) and computeProviderSecretPlan.
+export type CreatedSource = Source & {
+  providerSecret?: string | null;
+};
+
 export type CreateSourceInput = {
   type: SourceType;
   name: string;
@@ -49,3 +61,12 @@ export type SourceResource = ApiResourceObject & {
 export type SourceApiResponse = ApiResponse<SourceResource | null>;
 
 export type SourceListApiResponse = ApiResponse<SourceResource[]>;
+
+// The create response is the one place the serializer reveals `providerSecret`,
+// so its resource attributes are `CreatedSource`, not the base `Source`.
+export type CreatedSourceResource = ApiResourceObject & {
+  type: 'sources';
+  attributes: CreatedSource;
+};
+
+export type CreateSourceApiResponse = ApiResponse<CreatedSourceResource | null>;

@@ -6,6 +6,8 @@ import {
 } from '@/libs/api.js';
 import { ApiDeleteMeta, ApiDeleteResponse } from '@/types/api.types.js';
 import {
+  CreatedSource,
+  CreateSourceApiResponse,
   CreateSourceInput,
   Source,
   SourceApiResponse,
@@ -27,7 +29,7 @@ export const fetchSources = async (): Promise<Source[]> => {
 
 export const createSource = async (
   input: CreateSourceInput,
-): Promise<Source | null> => {
+): Promise<CreatedSource | null> => {
   try {
     const body = (await authedRequest('/api/sources', {
       method: 'POST',
@@ -40,7 +42,7 @@ export const createSource = async (
           attributes: input,
         },
       }),
-    })) as SourceApiResponse;
+    })) as CreateSourceApiResponse;
 
     return unwrapResourceAttributes(body);
   } catch (error) {
