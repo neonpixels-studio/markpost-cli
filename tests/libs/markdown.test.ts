@@ -463,6 +463,24 @@ describe('writeMarkdown', () => {
       expect(ownerRetryPath).toBe(resolve(outputDirectory, 'test-title.md'));
     });
 
+    it('transfers ownership to whoever writes the base path when the prior owner\'s file was removed', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const seenSlugs = new Map<string, string>();
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
+      const basePath = resolve(outputDirectory, 'test-title.md');
+
+      writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md, owned by owner
+      rmSync(basePath, { force: true }); // user moves the file out of the vault
+      // `other` is downgraded to suffix, but the base path is now free, so it
+      // lands there and becomes the new owner.
+      const otherPath = writeMarkdown(other, 'overwrite', seenSlugs);
+      const ownerRetryPath = writeMarkdown(owner, 'overwrite', seenSlugs);
+
+      expect(otherPath).toBe(basePath);
+      expect(ownerRetryPath).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    });
+
     it('suffixes an empty-uuid record onto an already-owned slug so it cannot clobber the owner', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const seenSlugs = new Map<string, string>();

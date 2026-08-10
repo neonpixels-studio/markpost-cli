@@ -462,11 +462,13 @@ describe('index', () => {
       .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
     vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
 
-    // Mirror writeMarkdown's real ownership bookkeeping (first uuid to write a
-    // slug owns it) and snapshot the owner the map reports at each call, so the
-    // test can prove pass two sees the ownership pass one recorded. `Once` twice
-    // (writeMarkdown runs exactly once per pass) so this implementation can't
-    // leak into later tests, whose implementations persist across the suite.
+    // Stand-in for writeMarkdown that records the first writer of the shared
+    // slug and snapshots the owner the map reports at each call, so the test can
+    // prove pass two sees the entry pass one wrote into the *same* map instance.
+    // (This is not the real ownership rule — it only needs to observe cross-pass
+    // map identity.) `Once` twice (writeMarkdown runs exactly once per pass) so
+    // this implementation can't leak into later tests, whose implementations
+    // persist across the suite.
     const ownerAtCall: (string | undefined)[] = [];
     const recordOwnership = (
       record: Record,
