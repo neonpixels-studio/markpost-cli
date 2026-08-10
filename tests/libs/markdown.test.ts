@@ -448,6 +448,57 @@ describe('writeMarkdown', () => {
       );
     });
 
+    it('never reassigns slug ownership, so the original owner still overwrites its own file after a different record suffixed', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const seenSlugs = new Map<string, string>();
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
+
+      writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md
+      writeMarkdown(other, 'overwrite', seenSlugs); // suffixed to test-title-2.md
+      const ownerRetryPath = writeMarkdown(owner, 'overwrite', seenSlugs);
+
+      // If ownership were reassigned to `other`, the owner would be treated as a
+      // different record and suffixed to test-title-3.md.
+      expect(ownerRetryPath).toBe(resolve(outputDirectory, 'test-title.md'));
+    });
+
+    it('suffixes an empty-uuid record onto an already-owned slug so it cannot clobber the owner', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const seenSlugs = new Map<string, string>();
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const noUuid: Record = { ...mockRecord, uuid: '', title: 'Test Title' };
+
+      writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md
+      const noUuidPath = writeMarkdown(noUuid, 'overwrite', seenSlugs);
+
+      expect(noUuidPath).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    });
+
+    it('suffixes a suffixed write instead of claiming the base slug it never wrote', () => {
+      // A file left by a previous run occupies test-title.md, so a suffix write
+      // lands on test-title-2.md. It must not claim ownership of test-title.md;
+      // otherwise a strategy switch to `overwrite` on its retry would truncate a
+      // different record's file.
+      mockWriteFileSyncRejectingExistingPaths([
+        resolve(outputDirectory, 'test-title.md'),
+      ]);
+      const seenSlugs = new Map<string, string>();
+      const suffixed: Record = {
+        ...mockRecord,
+        uuid: 'suffixed',
+        title: 'Test Title',
+      };
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+
+      writeMarkdown(suffixed, 'suffix', seenSlugs); // test-title-2.md
+      const ownerPath = writeMarkdown(owner, 'overwrite', seenSlugs);
+
+      // `owner` is the first to write test-title.md, so it overwrites rather than
+      // being pushed to a suffix by a phantom claim from `suffixed`.
+      expect(ownerPath).toBe(resolve(outputDirectory, 'test-title.md'));
+    });
+
     it('unlinks the path before writing so a symlink is removed, not followed', () => {
       const invocationOrder: string[] = [];
       vi.mocked(rmSync).mockImplementation(() => {

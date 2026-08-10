@@ -43,21 +43,18 @@ type Spinner = ReturnType<typeof yoctoSpinner>;
 // don't hit its temporal dead zone when the default sync runs.
 const MARK_SYNCED_CONCURRENCY = 10;
 
-// Slug ownership (slug -> the uuid that first wrote it), shared across every
-// autoSync pass in this process rather than rebuilt per pass. autoSync
-// deletes/marks each pass's records server-side, so a later pass fetching a
-// *different* record that slugifies identically would, under `overwrite`,
-// clobber the earlier pass's on-disk file — and the deleted original is
-// unrecoverable. Persisting ownership at module scope lets resolveStrategyForSlug
-// downgrade only a *different* record to `suffix`, keeping both files, while a
-// re-fetched record still overwrites its own file. Lifetime is the CLI process,
-// matching the autoSync daemon's (one long process across passes); a fresh
-// `markpost sync` invocation is a new process and starts empty, so cron-style
-// single-pass invocations remain exposed to the original cross-run clobber —
-// closing that fully needs disk-derived ownership, tracked as a follow-up.
-// Declared above the top-level `await dispatch()` so it's initialized before
-// writeRecords runs, and threaded into writeRecords as an argument so that
-// function stays a function of its inputs.
+// Slug ownership (base slug -> the uuid that wrote `<slug>.md`), shared across
+// every autoSync pass in this process rather than rebuilt per pass. autoSync
+// deletes each pass's records server-side, so a later pass fetching a
+// *different* same-slug record would, under `overwrite`, clobber the earlier
+// pass's on-disk file — and the deleted original is unrecoverable. Persisting
+// ownership across passes lets resolveStrategyForSlug downgrade only a different
+// record to `suffix`. Lifetime is the CLI process (the autoSync daemon stays up
+// across passes); a fresh single-pass `markpost sync` starts empty, so a
+// cron-style loop of separate invocations does not get this cross-run guard.
+// Declared above the top-level `await dispatch()` so it exists before
+// writeRecords runs, and threaded in as an argument to keep writeRecords a
+// function of its inputs.
 const processSeenSlugs = new Map<string, string>();
 
 const [commandName, ...commandArgs] = process.argv.slice(2);

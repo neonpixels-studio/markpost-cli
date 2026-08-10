@@ -190,18 +190,16 @@ const STRATEGY_WRITERS = new Map<
   ['skip', writeIfAbsent],
 ]);
 
-// `overwrite` truncates whatever is at `<slug>.md`. That's the intended
-// behavior against a file left by a *previous* run, and against the *same*
-// record re-written in a later autoSync pass (a record whose server delete or
-// mark-synced failed is left pending and re-fetched, so it must overwrite its
-// own file, not spawn a duplicate). But two *different* records that slugify
-// identically must not clobber each other — the caller deletes every written
-// record from the server, so the clobbered one would be lost everywhere. So the
-// downgrade to `suffix` keys on ownership: `seenSlugs` maps each written slug to
-// the uuid that first claimed it, and only a *different* uuid landing on an
-// already-claimed slug falls back to suffix. Only `overwrite` needs this:
-// `suffix` and `skip` both use the exclusive flag, so a real on-disk collision
-// already routes them safely.
+// `overwrite` truncates `<slug>.md`, which is intended against a file from a
+// *previous* run and against the *same* record re-fetched in a later autoSync
+// pass (it must overwrite its own file, not spawn a duplicate). But two
+// *different* records with the same slug must not clobber each other — the
+// caller deletes every written record server-side, so the clobbered one is lost
+// everywhere. `seenSlugs` maps each written base slug to the uuid that wrote it;
+// the downgrade to `suffix` fires only when a *different* uuid lands on an
+// already-owned slug. An empty/missing uuid is treated as "different" so it can
+// never match and clobber. `suffix`/`skip` already route on-disk collisions
+// safely via the exclusive flag, so only `overwrite` consults ownership.
 const resolveStrategyForSlug = (
   conflictStrategy: ConflictStrategy,
   slug: string,
@@ -209,7 +207,7 @@ const resolveStrategyForSlug = (
   seenSlugs: Map<string, string>,
 ): ConflictStrategy => {
   const claimedByOtherRecord =
-    seenSlugs.has(slug) && seenSlugs.get(slug) !== recordUuid;
+    seenSlugs.has(slug) && (!recordUuid || seenSlugs.get(slug) !== recordUuid);
 
   if (conflictStrategy === 'overwrite' && claimedByOtherRecord) {
     return 'suffix';
@@ -270,13 +268,16 @@ export const writeMarkdown = (
     STRATEGY_WRITERS.get(effectiveStrategy) ?? writeToFirstAvailablePath;
 
   const writtenPath = writer(outputDirectory, slug, content);
-  // First claimant of a slug owns it: never reassign, or a suffixed second
-  // record would steal ownership and force the original to suffix on its retry.
-  // Only an actual write claims ownership — a `skip` collision returns null
-  // (nothing written), so it must not claim a slug it doesn't own on disk, which
-  // would wrongly downgrade a genuinely different record if the user later
-  // switches the strategy to `overwrite`.
-  if (writtenPath !== null && !seenSlugs.has(slug)) {
+  // Ownership means "this uuid wrote `<slug>.md`", so record it only when the
+  // write actually landed on the base path — never for a `skip` no-op (null) or
+  // a `suffix` write that spilled to `<slug>-2.md`. A different record is always
+  // downgraded to `suffix` (see resolveStrategyForSlug), so it can never reach
+  // the base path to steal an existing owner's slug.
+  const basePath = resolveWithinOutputDirectory(
+    outputDirectory,
+    `${slug}${MARKDOWN_EXTENSION}`,
+  );
+  if (writtenPath === basePath) {
     seenSlugs.set(slug, record.uuid);
   }
 

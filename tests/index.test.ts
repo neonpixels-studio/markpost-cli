@@ -464,15 +464,24 @@ describe('index', () => {
 
     // Mirror writeMarkdown's real ownership bookkeeping (first uuid to write a
     // slug owns it) and snapshot the owner the map reports at each call, so the
-    // test can prove pass two sees the ownership pass one recorded.
+    // test can prove pass two sees the ownership pass one recorded. `Once` twice
+    // (writeMarkdown runs exactly once per pass) so this implementation can't
+    // leak into later tests, whose implementations persist across the suite.
     const ownerAtCall: (string | undefined)[] = [];
-    vi.mocked(writeMarkdown).mockImplementation((record, _strategy, seenSlugs) => {
+    const recordOwnership = (
+      record: Record,
+      _strategy: unknown,
+      seenSlugs: Map<string, string>,
+    ): string => {
       ownerAtCall.push(seenSlugs.get(SHARED_SLUG));
       if (!seenSlugs.has(SHARED_SLUG)) {
         seenSlugs.set(SHARED_SLUG, record.uuid);
       }
       return `/mock/output/${SHARED_SLUG}.md`;
-    });
+    };
+    vi.mocked(writeMarkdown)
+      .mockImplementationOnce(recordOwnership)
+      .mockImplementationOnce(recordOwnership);
 
     // Drive two sequential autoSync passes through the scheduler seam. `Once` so
     // this two-pass behavior reverts to the factory default (one pass) and can't
