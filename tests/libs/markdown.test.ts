@@ -512,6 +512,31 @@ describe('writeMarkdown', () => {
 
       expect(() => writeMarkdown(mockRecord, 'skip')).toThrow(permissionError);
     });
+
+    it('does not claim slug ownership when it writes nothing, so a later overwrite record still owns the slug', () => {
+      // A `skip` collision writes nothing (null). If it wrongly claimed the
+      // slug, a genuinely different record would be forced onto `suffix` after
+      // the user switches the strategy to `overwrite` between passes.
+      mockWriteFileSyncRejectingExistingPaths([
+        resolve(outputDirectory, 'test-title.md'),
+      ]);
+      const seenSlugs = new Map<string, string>();
+      const skippedRecord: Record = { ...mockRecord, uuid: 'skipped' };
+      const overwriteRecord: Record = {
+        ...mockRecord,
+        uuid: 'overwriter',
+        title: 'Test Title',
+      };
+
+      expect(writeMarkdown(skippedRecord, 'skip', seenSlugs)).toBeNull();
+      const overwritePath = writeMarkdown(
+        overwriteRecord,
+        'overwrite',
+        seenSlugs,
+      );
+
+      expect(overwritePath).toBe(resolve(outputDirectory, 'test-title.md'));
+    });
   });
 });
 

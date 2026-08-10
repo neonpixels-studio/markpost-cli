@@ -272,7 +272,11 @@ export const writeMarkdown = (
   const writtenPath = writer(outputDirectory, slug, content);
   // First claimant of a slug owns it: never reassign, or a suffixed second
   // record would steal ownership and force the original to suffix on its retry.
-  if (!seenSlugs.has(slug)) {
+  // Only an actual write claims ownership — a `skip` collision returns null
+  // (nothing written), so it must not claim a slug it doesn't own on disk, which
+  // would wrongly downgrade a genuinely different record if the user later
+  // switches the strategy to `overwrite`.
+  if (writtenPath !== null && !seenSlugs.has(slug)) {
     seenSlugs.set(slug, record.uuid);
   }
 

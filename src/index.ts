@@ -51,10 +51,13 @@ const MARK_SYNCED_CONCURRENCY = 10;
 // unrecoverable. Persisting ownership at module scope lets resolveStrategyForSlug
 // downgrade only a *different* record to `suffix`, keeping both files, while a
 // re-fetched record still overwrites its own file. Lifetime is the CLI process,
-// matching the autoSync daemon's; a fresh `markpost sync` invocation is a new
-// process and starts empty. Declared above the top-level `await dispatch()` so
-// it's initialized before writeRecords runs, and threaded into writeRecords as
-// an argument so that function stays a function of its inputs.
+// matching the autoSync daemon's (one long process across passes); a fresh
+// `markpost sync` invocation is a new process and starts empty, so cron-style
+// single-pass invocations remain exposed to the original cross-run clobber —
+// closing that fully needs disk-derived ownership, tracked as a follow-up.
+// Declared above the top-level `await dispatch()` so it's initialized before
+// writeRecords runs, and threaded into writeRecords as an argument so that
+// function stays a function of its inputs.
 const processSeenSlugs = new Map<string, string>();
 
 const [commandName, ...commandArgs] = process.argv.slice(2);
