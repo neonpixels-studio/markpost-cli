@@ -397,7 +397,7 @@ describe('index', () => {
 
     expect(mockSpinner.start).toHaveBeenCalledWith('Fetching records...');
     expect(fetchAllRecords).toHaveBeenCalled();
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
     expect(mockSpinner.success).toHaveBeenCalledWith('Fetched 1 records!');
     expect(mockSpinner.start).toHaveBeenCalledWith('Writing records...');
     expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
@@ -426,8 +426,8 @@ describe('index', () => {
     await import('@/index.js');
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Set), true);
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord2, 'suffix', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord2, 'suffix', expect.any(Map), true);
     // The whole reason seenSlugs is threaded is that every record in a batch
     // shares one Set — assert the exact same instance reaches both calls, so
     // a regression to a per-record Set (which would disable the overwrite
@@ -443,7 +443,7 @@ describe('index', () => {
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
   });
 
-  it('shares seenSlugs across autoSync passes so a later same-slug record is not clobbered', async () => {
+  it('threads one shared seenSlugs map across autoSync passes so a later pass sees earlier passes\' slug ownership', async () => {
     const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
     const { writeMarkdown } = await import('@/libs/markdown.js');
     const { fetchSettings } = await import('@/libs/settings.js');
@@ -462,12 +462,15 @@ describe('index', () => {
       .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
     vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
 
-    // Mirror writeMarkdown's real seenSlugs bookkeeping so the test can observe
-    // whether pass one's slug is still known when pass two runs.
-    const slugKnownAtCall: boolean[] = [];
-    vi.mocked(writeMarkdown).mockImplementation((_record, _strategy, seenSlugs) => {
-      slugKnownAtCall.push(seenSlugs.has(SHARED_SLUG));
-      seenSlugs.add(SHARED_SLUG);
+    // Mirror writeMarkdown's real ownership bookkeeping (first uuid to write a
+    // slug owns it) and snapshot the owner the map reports at each call, so the
+    // test can prove pass two sees the ownership pass one recorded.
+    const ownerAtCall: (string | undefined)[] = [];
+    vi.mocked(writeMarkdown).mockImplementation((record, _strategy, seenSlugs) => {
+      ownerAtCall.push(seenSlugs.get(SHARED_SLUG));
+      if (!seenSlugs.has(SHARED_SLUG)) {
+        seenSlugs.set(SHARED_SLUG, record.uuid);
+      }
       return `/mock/output/${SHARED_SLUG}.md`;
     });
 
@@ -484,13 +487,13 @@ describe('index', () => {
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
     const [firstCall, secondCall] = vi.mocked(writeMarkdown).mock.calls;
-    // The same Set instance reaches both passes — a per-iteration Set would be a
+    // The exact same Map instance reaches both passes — a per-pass map would be a
     // new object and this fails.
     expect(secondCall[2]).toBe(firstCall[2]);
-    // Pass one's slug is still known in pass two, so `overwrite` falls back to
-    // `suffix` and the earlier file is not clobbered. A per-pass Set would make
-    // this [false, false].
-    expect(slugKnownAtCall).toEqual([false, true]);
+    // Pass one recorded pass-1 as the slug's owner; pass two still sees it, so a
+    // different record is downgraded to suffix (behavior proven end-to-end in
+    // markdown.test.ts). A per-pass map would make this [undefined, undefined].
+    expect(ownerAtCall).toEqual([undefined, 'pass-1']);
   });
 
   it('exits early when no records are fetched', async () => {
@@ -568,7 +571,7 @@ describe('index', () => {
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
       'suffix',
-      expect.any(Set),
+      expect.any(Map),
       true,
     );
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
@@ -656,7 +659,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
     expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Could not read settings'),
@@ -692,7 +695,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'overwrite', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'overwrite', expect.any(Map), true);
   });
 
   it('normalizes an unknown conflict strategy from settings to suffix', async () => {
@@ -711,7 +714,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
   });
 
   it('passes includeFrontmatter=false to writeMarkdown when the frontmatter setting is off', async () => {
@@ -737,7 +740,7 @@ describe('index', () => {
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
       'suffix',
-      expect.any(Set),
+      expect.any(Map),
       false,
     );
   });
@@ -1513,7 +1516,7 @@ describe('index', () => {
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
       'suffix',
-      expect.any(Set),
+      expect.any(Map),
       true,
     );
     expect(console.log).toHaveBeenCalledWith(

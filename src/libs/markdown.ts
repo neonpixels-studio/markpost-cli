@@ -191,19 +191,27 @@ const STRATEGY_WRITERS = new Map<
 ]);
 
 // `overwrite` truncates whatever is at `<slug>.md`. That's the intended
-// behavior against a file left by a *previous* run, but two records fetched
-// in the *same* run that slugify identically would clobber each other — and
-// since the caller deletes every written record from the server, the
-// clobbered one would be lost everywhere. When the slug has already been
-// written this run, fall back to suffix so both records keep a distinct file.
-// Only `overwrite` needs this: `suffix` and `skip` both use the exclusive
-// flag, so a real on-disk collision already routes them safely.
+// behavior against a file left by a *previous* run, and against the *same*
+// record re-written in a later autoSync pass (a record whose server delete or
+// mark-synced failed is left pending and re-fetched, so it must overwrite its
+// own file, not spawn a duplicate). But two *different* records that slugify
+// identically must not clobber each other — the caller deletes every written
+// record from the server, so the clobbered one would be lost everywhere. So the
+// downgrade to `suffix` keys on ownership: `seenSlugs` maps each written slug to
+// the uuid that first claimed it, and only a *different* uuid landing on an
+// already-claimed slug falls back to suffix. Only `overwrite` needs this:
+// `suffix` and `skip` both use the exclusive flag, so a real on-disk collision
+// already routes them safely.
 const resolveStrategyForSlug = (
   conflictStrategy: ConflictStrategy,
   slug: string,
-  seenSlugs: Set<string>,
+  recordUuid: string,
+  seenSlugs: Map<string, string>,
 ): ConflictStrategy => {
-  if (conflictStrategy === 'overwrite' && seenSlugs.has(slug)) {
+  const claimedByOtherRecord =
+    seenSlugs.has(slug) && seenSlugs.get(slug) !== recordUuid;
+
+  if (conflictStrategy === 'overwrite' && claimedByOtherRecord) {
     return 'suffix';
   }
 
@@ -235,15 +243,17 @@ export const ensureOutputDirectory = (): string => {
 
 // Returns the resolved path written to, or `null` when the `skip` strategy
 // left an existing file untouched. Defaults to `suffix` (markpost's own
-// default) when no strategy is supplied. `seenSlugs` is run-scoped state the
-// caller threads across a batch so `overwrite` can't lose two same-slug
-// records written in one sync (see resolveStrategyForSlug). `includeFrontmatter`
-// is the user's `frontmatter` setting; when off the file is written without a
-// frontmatter block (see buildRecordDocument).
+// default) when no strategy is supplied. `seenSlugs` maps each written slug to
+// the uuid that first claimed it; the caller threads it across a batch AND
+// across autoSync passes so `overwrite` can't lose two different same-slug
+// records while still letting a record re-overwrite its own file (see
+// resolveStrategyForSlug). `includeFrontmatter` is the user's `frontmatter`
+// setting; when off the file is written without a frontmatter block (see
+// buildRecordDocument).
 export const writeMarkdown = (
   record: Record,
   conflictStrategy: ConflictStrategy = DEFAULT_CONFLICT_STRATEGY,
-  seenSlugs: Set<string> = new Set(),
+  seenSlugs: Map<string, string> = new Map(),
   includeFrontmatter = true,
 ): string | null => {
   const outputDirectory = ensureOutputDirectory();
@@ -253,13 +263,18 @@ export const writeMarkdown = (
   const effectiveStrategy = resolveStrategyForSlug(
     conflictStrategy,
     slug,
+    record.uuid,
     seenSlugs,
   );
   const writer =
     STRATEGY_WRITERS.get(effectiveStrategy) ?? writeToFirstAvailablePath;
 
   const writtenPath = writer(outputDirectory, slug, content);
-  seenSlugs.add(slug);
+  // First claimant of a slug owns it: never reassign, or a suffixed second
+  // record would steal ownership and force the original to suffix on its retry.
+  if (!seenSlugs.has(slug)) {
+    seenSlugs.set(slug, record.uuid);
+  }
 
   return writtenPath;
 };

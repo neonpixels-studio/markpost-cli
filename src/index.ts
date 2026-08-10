@@ -43,16 +43,19 @@ type Spinner = ReturnType<typeof yoctoSpinner>;
 // don't hit its temporal dead zone when the default sync runs.
 const MARK_SYNCED_CONCURRENCY = 10;
 
-// Slugs written so far, shared across every autoSync pass in this process (not
-// rebuilt per pass). autoSync deletes/marks each pass's records server-side, so
-// a later pass fetching a different record that slugifies identically would,
-// under `overwrite`, clobber the earlier pass's on-disk file — and the deleted
-// original is unrecoverable. Persisting the Set at module scope lets
-// resolveStrategyForSlug fall back to `suffix` across passes, keeping both
-// files. Lifetime is the CLI process, matching the autoSync daemon's; a fresh
-// `markpost sync` invocation is a new process and starts empty. Declared above
-// the top-level `await dispatch()` so it's initialized before writeRecords runs.
-const seenSlugs = new Set<string>();
+// Slug ownership (slug -> the uuid that first wrote it), shared across every
+// autoSync pass in this process rather than rebuilt per pass. autoSync
+// deletes/marks each pass's records server-side, so a later pass fetching a
+// *different* record that slugifies identically would, under `overwrite`,
+// clobber the earlier pass's on-disk file — and the deleted original is
+// unrecoverable. Persisting ownership at module scope lets resolveStrategyForSlug
+// downgrade only a *different* record to `suffix`, keeping both files, while a
+// re-fetched record still overwrites its own file. Lifetime is the CLI process,
+// matching the autoSync daemon's; a fresh `markpost sync` invocation is a new
+// process and starts empty. Declared above the top-level `await dispatch()` so
+// it's initialized before writeRecords runs, and threaded into writeRecords as
+// an argument so that function stays a function of its inputs.
+const processSeenSlugs = new Map<string, string>();
 
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
@@ -221,7 +224,7 @@ function extractErrorMessage(error: unknown): string {
 function writeRecordSafely(
   record: Record,
   conflictStrategy: ConflictStrategy,
-  seenSlugs: Set<string>,
+  seenSlugs: Map<string, string>,
   includeFrontmatter: boolean,
 ): WriteOutcome {
   try {
@@ -252,12 +255,14 @@ function writeRecords(
   records: Record[],
   conflictStrategy: ConflictStrategy,
   includeFrontmatter: boolean,
+  seenSlugs: Map<string, string>,
 ): WriteRecordsResult {
-  // The module-scope `seenSlugs` (declared up top) is shared across the whole
-  // batch AND across every autoSync pass so `overwrite` can detect a same-slug
-  // record — whether it arrives later in this batch or in a later pass — and
-  // avoid clobbering (see writeMarkdown/resolveStrategyForSlug). A sequential
-  // loop preserves order and threads the same Set across every record.
+  // `seenSlugs` (the module-scope `processSeenSlugs`, threaded in) is shared
+  // across the whole batch AND across every autoSync pass so `overwrite` can
+  // detect a different same-slug record — whether it arrives later in this batch
+  // or in a later pass — and avoid clobbering (see
+  // writeMarkdown/resolveStrategyForSlug). A sequential loop preserves order and
+  // threads the same Map across every record.
   const written: WrittenRecord[] = [];
   const failed: FailedRecord[] = [];
   let skipped = 0;
@@ -574,7 +579,12 @@ async function runDefaultSync(): Promise<boolean> {
       written: writtenRecords,
       failed: failedRecords,
       skipped: skippedCount,
-    } = writeRecords(allRecords, conflictStrategy, includeFrontmatter);
+    } = writeRecords(
+      allRecords,
+      conflictStrategy,
+      includeFrontmatter,
+      processSeenSlugs,
+    );
     reportWriteOutcome(spinner, writtenRecords.length, failedRecords.length);
     writtenRecords.forEach(({ filePath }) => {
       console.log(chalk.dim(`  -> ${filePath}`));
