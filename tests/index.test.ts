@@ -477,7 +477,7 @@ describe('index', () => {
     const recordOwnership = (
       record: Record,
       _strategy: unknown,
-      seenSlugs: Map<string, string>,
+      seenSlugs: Map<string, string> = new Map(),
     ): string => {
       ownerAtCall.push(seenSlugs.get(SHARED_SLUG));
       if (!seenSlugs.has(SHARED_SLUG)) {
@@ -503,7 +503,10 @@ describe('index', () => {
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
     const [firstCall, secondCall] = vi.mocked(writeMarkdown).mock.calls;
     // The exact same Map instance reaches both passes — a per-pass map would be a
-    // new object and this fails.
+    // new object and this fails. Pin it as a real Map first: `mock.calls` records
+    // the arguments as passed, so a regression that stopped threading the map
+    // would leave both entries `undefined` and satisfy `toBe` vacuously.
+    expect(firstCall[2]).toBeInstanceOf(Map);
     expect(secondCall[2]).toBe(firstCall[2]);
     // Pass one recorded pass-1 as the slug's owner; pass two still sees it, so a
     // different record is downgraded to suffix (behavior proven end-to-end in
