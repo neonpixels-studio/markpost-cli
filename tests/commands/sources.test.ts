@@ -332,6 +332,37 @@ describe('runSourcesCommand', () => {
       );
     });
 
+    it('strips control characters from a hostile providerSecret before printing', async () => {
+      // The secret is untrusted API output like every other printed field, so a
+      // response carrying an escape must be sanitized, not written raw over the
+      // "copy it now" warning.
+      const control = String.fromCharCode(0x1b);
+      const { input, select } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      vi.mocked(select).mockResolvedValue('github');
+      vi.mocked(input)
+        .mockResolvedValueOnce('GitHub Source')
+        .mockResolvedValueOnce('97-incoming/')
+        .mockResolvedValueOnce('github');
+      vi.mocked(createSource).mockResolvedValue({
+        ...githubSource,
+        providerSecret: `whsec_${control}[2J`,
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      const printedControl = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('whsec_ [2J'),
+      );
+    });
+
     it('prints nothing extra when the create response has providerSecret: null', async () => {
       const { input, select } = await import('@inquirer/prompts');
       const { createSource } = await import('@/libs/sources.js');

@@ -91,7 +91,11 @@ const printProviderSecret = (
 
   console.log('');
   console.log(chalk.yellowBright(`  ${PROVIDER_SECRET_NOTICE}`));
-  console.log(chalk.bold(`  ${providerSecret}`));
+  // The secret is untrusted API output like every other field printSource
+  // handles, so it's sanitized too — lossless for a real signing secret, which
+  // never carries control bytes, but it stops a hostile response overwriting
+  // the "copy it now" warning above with a CSI payload.
+  console.log(chalk.bold(`  ${sanitizeForTerminal(providerSecret)}`));
 };
 
 // Every field here comes from the untrusted API response, so each is stripped
