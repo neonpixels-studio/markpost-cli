@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Spinner } from 'yocto-spinner';
 
 import { Record } from '@/types/records.types.js';
-import { UserSettings, type ConflictStrategy } from '@/types/settings.types.js';
+import { UserSettings, ConflictStrategy } from '@/types/settings.types.js';
 import { SettingsReadResult } from '@/libs/settings.js';
 
 vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
