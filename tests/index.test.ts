@@ -397,7 +397,7 @@ describe('index', () => {
 
     expect(mockSpinner.start).toHaveBeenCalledWith('Fetching records...');
     expect(fetchAllRecords).toHaveBeenCalled();
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
     expect(mockSpinner.success).toHaveBeenCalledWith('Fetched 1 records!');
     expect(mockSpinner.start).toHaveBeenCalledWith('Writing records...');
     expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
@@ -426,8 +426,8 @@ describe('index', () => {
     await import('@/index.js');
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Set), true);
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord2, 'suffix', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord2, 'suffix', expect.any(Map), true);
     // The whole reason seenSlugs is threaded is that every record in a batch
     // shares one Set — assert the exact same instance reaches both calls, so
     // a regression to a per-record Set (which would disable the overwrite
@@ -441,6 +441,70 @@ describe('index', () => {
       expect.stringContaining('/mock/output/title-2.md'),
     );
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
+  });
+
+  it('passes the same seenSlugs map instance to every autoSync pass', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const SHARED_SLUG = 'same-title';
+    const passOneRecord: Record = { uuid: 'pass-1', title: 'Same Title', content: 'One', createdAt: '2024-01-01T00:00:00Z' };
+    const passTwoRecord: Record = { uuid: 'pass-2', title: 'Same Title', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ conflictStrategy: 'overwrite' }));
+    // Each pass fetches a distinct record that slugifies to the same slug.
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: true, records: [passOneRecord], partial: false })
+      .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
+    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+
+    // Stand-in for writeMarkdown that records the first writer of the shared
+    // slug and snapshots the owner the map reports at each call, so the test can
+    // prove pass two sees the entry pass one wrote into the *same* map instance.
+    // (This is not the real ownership rule — it only needs to observe cross-pass
+    // map identity.) `Once` twice (writeMarkdown runs exactly once per pass) so
+    // this implementation can't leak into later tests, whose implementations
+    // persist across the suite.
+    const ownerAtCall: (string | undefined)[] = [];
+    const recordOwnership = (
+      record: Record,
+      _strategy: unknown,
+      seenSlugs: Map<string, string>,
+    ): string => {
+      ownerAtCall.push(seenSlugs.get(SHARED_SLUG));
+      if (!seenSlugs.has(SHARED_SLUG)) {
+        seenSlugs.set(SHARED_SLUG, record.uuid);
+      }
+      return `/mock/output/${SHARED_SLUG}.md`;
+    };
+    vi.mocked(writeMarkdown)
+      .mockImplementationOnce(recordOwnership)
+      .mockImplementationOnce(recordOwnership);
+
+    // Drive two sequential autoSync passes through the scheduler seam. `Once` so
+    // this two-pass behavior reverts to the factory default (one pass) and can't
+    // leak into later tests, whose implementations persist across the suite
+    // (beforeEach clears call history, not implementations).
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    expect(writeMarkdown).toHaveBeenCalledTimes(2);
+    const [firstCall, secondCall] = vi.mocked(writeMarkdown).mock.calls;
+    // The exact same Map instance reaches both passes — a per-pass map would be a
+    // new object and this fails.
+    expect(secondCall[2]).toBe(firstCall[2]);
+    // Pass one recorded pass-1 as the slug's owner; pass two still sees it, so a
+    // different record is downgraded to suffix (behavior proven end-to-end in
+    // markdown.test.ts). A per-pass map would make this [undefined, undefined].
+    expect(ownerAtCall).toEqual([undefined, 'pass-1']);
   });
 
   it('exits early when no records are fetched', async () => {
@@ -518,7 +582,7 @@ describe('index', () => {
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
       'suffix',
-      expect.any(Set),
+      expect.any(Map),
       true,
     );
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
@@ -606,7 +670,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
     expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Could not read settings'),
@@ -642,7 +706,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'overwrite', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'overwrite', expect.any(Map), true);
   });
 
   it('normalizes an unknown conflict strategy from settings to suffix', async () => {
@@ -661,7 +725,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Set), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
   });
 
   it('passes includeFrontmatter=false to writeMarkdown when the frontmatter setting is off', async () => {
@@ -687,7 +751,7 @@ describe('index', () => {
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
       'suffix',
-      expect.any(Set),
+      expect.any(Map),
       false,
     );
   });
@@ -1463,7 +1527,7 @@ describe('index', () => {
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
       'suffix',
-      expect.any(Set),
+      expect.any(Map),
       true,
     );
     expect(console.log).toHaveBeenCalledWith(
