@@ -23,6 +23,7 @@ import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
 import { checkConfig } from '@/libs/config.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { runSyncWithAutoSchedule } from '@/libs/scheduler.js';
 import { Record } from '@/types/records.types.js';
 import {
@@ -46,17 +47,6 @@ const MARK_SYNCED_CONCURRENCY = 10;
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
 const SYNC_COMMAND = 'sync';
-
-// Control-character code points to strip before printing untrusted text: the
-// C0 range (0x00–0x1f), DEL (0x7f), and the C1 range (0x80–0x9f, which carries
-// 8-bit CSI/OSC that some terminals still act on). Declared up here (above the
-// top-level `await dispatch()`) so they're initialized before the sync runs
-// and calls sanitizeForTerminal — a `const` below that await would sit in the
-// temporal dead zone when the sync reads it.
-const LAST_C0_CONTROL_CODE = 0x1f;
-const DELETE_CONTROL_CODE = 0x7f;
-const FIRST_C1_CONTROL_CODE = 0x80;
-const LAST_C1_CONTROL_CODE = 0x9f;
 
 // The fetch/write/delete sync is destructive (it can delete server records),
 // so it must be requested explicitly by name — never triggered by a bare,
@@ -273,30 +263,6 @@ function writeRecords(
   }
 
   return { written, failed, skipped };
-}
-
-function isControlCharacter(character: string): boolean {
-  const codePoint = character.codePointAt(0) ?? 0;
-  const isC1Control =
-    codePoint >= FIRST_C1_CONTROL_CODE && codePoint <= LAST_C1_CONTROL_CODE;
-  return (
-    codePoint <= LAST_C0_CONTROL_CODE ||
-    codePoint === DELETE_CONTROL_CODE ||
-    isC1Control
-  );
-}
-
-// Replace control characters (C0 range + DEL) in any API-controlled string
-// before it reaches the terminal. A record title is untrusted (see
-// markdown.ts slugifyTitle), so a title carrying ANSI escapes could otherwise
-// clear the screen or overwrite earlier output, including the failure warning
-// itself, with fabricated text. Done by code point rather than a regex to
-// avoid embedding control characters in source (eslint no-control-regex). The
-// uuid alongside keeps the record identifiable even if the title is emptied.
-function sanitizeForTerminal(value: string): string {
-  return Array.from(value, (character) =>
-    isControlCharacter(character) ? ' ' : character,
-  ).join('');
 }
 
 // End the write phase on the right indicator. A run where every record threw
