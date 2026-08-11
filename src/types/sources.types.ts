@@ -1,12 +1,15 @@
 import type { ApiResourceObject, ApiResponse } from '@/types/api.types.js';
 
+// Mirrors markpost's canonical source-type list (shared/utils/sourceTypes.ts).
+// Keep in lockstep: the server rejects any type absent here with a 400. RSS was
+// dropped in markpost#116 (no polling infrastructure to ingest it), so it must
+// stay out of this list — see tests/types/sources.types.test.ts.
 export const SOURCE_TYPES = [
   'webhook',
   'email',
   'stripe',
   'github',
   'zapier',
-  'rss',
   'shortcuts',
 ] as const;
 

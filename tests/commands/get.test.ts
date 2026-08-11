@@ -85,6 +85,53 @@ describe('runGetCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('strips control characters from untrusted record fields before printing', async () => {
+    // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
+    const control = String.fromCharCode(0x1b);
+    const evilRecord: Record = {
+      uuid: `id${control}1`,
+      title: `A${control}B`,
+      content: `C${control}D`,
+      createdAt: `2024${control}01`,
+    };
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(evilRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['id-1']);
+
+    const printedControl = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && arg.includes(control),
+      );
+    expect(printedControl).toBe(false);
+    expect(console.log).toHaveBeenCalledWith('A B');
+    expect(console.log).toHaveBeenCalledWith('C D');
+  });
+
+  it('preserves newlines and tabs in multi-line content while still stripping escapes', async () => {
+    // The markdown body must survive intact so `markpost get <uuid> > note.md`
+    // stays a faithful export; only the ANSI escape is removed.
+    const control = String.fromCharCode(0x1b);
+    const multiLineContent = `# Heading\n\n- item one\n\titem two${control}[2J`;
+    const record: Record = {
+      uuid: 'id-1',
+      title: 'Title',
+      content: multiLineContent,
+      createdAt: '2024-01-01T00:00:00Z',
+    };
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(record);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['id-1']);
+
+    expect(console.log).toHaveBeenCalledWith(
+      '# Heading\n\n- item one\n\titem two [2J',
+    );
+  });
+
   it('catches and logs an error when checkConfig throws', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     vi.mocked(checkConfig).mockRejectedValue(new Error('boom'));

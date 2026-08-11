@@ -9,7 +9,7 @@ import {
 import { ApiTimeoutError } from '@/libs/api.js';
 import { logErrorMessage } from '@/libs/errors.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
-import { Source } from '@/types/sources.types.js';
+import { Source, SourceType } from '@/types/sources.types.js';
 
 // @/libs/api.js imports @/libs/config.js, which constructs a real
 // `conf`-backed store (touching the developer's actual config directory) as
@@ -277,7 +277,8 @@ describe('createSource', () => {
       false,
     );
     const result = await createSource({
-      type: 'bogus',
+      // Deliberately invalid type to exercise the server-side rejection path.
+      type: 'bogus' as SourceType,
       name: 'Test Source',
       routeFolder: '99-incoming/',
     });

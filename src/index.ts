@@ -23,6 +23,7 @@ import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
 import { checkConfig } from '@/libs/config.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { runSyncWithAutoSchedule } from '@/libs/scheduler.js';
 import { Record } from '@/types/records.types.js';
 import {
@@ -43,20 +44,20 @@ type Spinner = ReturnType<typeof yoctoSpinner>;
 // don't hit its temporal dead zone when the default sync runs.
 const MARK_SYNCED_CONCURRENCY = 10;
 
+// Slug ownership (resolved `<slug>.md` path -> the uuid that wrote it), shared
+// across every autoSync pass in this process rather than rebuilt per pass.
+// autoSync deletes each pass's records server-side, so a later pass fetching a
+// *different* same-slug record would, under `overwrite`, clobber the earlier
+// pass's on-disk file — and the deleted original is unrecoverable. Persisting
+// ownership across passes lets resolveStrategyForSlug downgrade only a different
+// record to `suffix`. Lifetime is the CLI process (the autoSync daemon stays up
+// across passes); a cron-style loop of separate single-pass `markpost sync`
+// invocations starts empty each time and does not get this cross-run guard.
+const processSeenSlugs = new Map<string, string>();
+
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
 const SYNC_COMMAND = 'sync';
-
-// Control-character code points to strip before printing untrusted text: the
-// C0 range (0x00–0x1f), DEL (0x7f), and the C1 range (0x80–0x9f, which carries
-// 8-bit CSI/OSC that some terminals still act on). Declared up here (above the
-// top-level `await dispatch()`) so they're initialized before the sync runs
-// and calls sanitizeForTerminal — a `const` below that await would sit in the
-// temporal dead zone when the sync reads it.
-const LAST_C0_CONTROL_CODE = 0x1f;
-const DELETE_CONTROL_CODE = 0x7f;
-const FIRST_C1_CONTROL_CODE = 0x80;
-const LAST_C1_CONTROL_CODE = 0x9f;
 
 // The fetch/write/delete sync is destructive (it can delete server records),
 // so it must be requested explicitly by name — never triggered by a bare,
@@ -210,7 +211,7 @@ function extractErrorMessage(error: unknown): string {
 function writeRecordSafely(
   record: Record,
   conflictStrategy: ConflictStrategy,
-  seenSlugs: Set<string>,
+  seenSlugs: Map<string, string>,
   includeFrontmatter: boolean,
 ): WriteOutcome {
   try {
@@ -241,12 +242,11 @@ function writeRecords(
   records: Record[],
   conflictStrategy: ConflictStrategy,
   includeFrontmatter: boolean,
+  seenSlugs: Map<string, string>,
 ): WriteRecordsResult {
-  // One Set shared across the whole batch so `overwrite` can detect two
-  // same-slug records in a single sync and avoid clobbering (see
-  // writeMarkdown/resolveStrategyForSlug). A sequential loop preserves order
-  // and threads the same Set across every record.
-  const seenSlugs = new Set<string>();
+  // `seenSlugs` (the module-scope `processSeenSlugs`) is threaded in so this
+  // stays a function of its inputs. A sequential loop preserves order and shares
+  // the one Map across every record; ownership semantics live in writeMarkdown.
   const written: WrittenRecord[] = [];
   const failed: FailedRecord[] = [];
   let skipped = 0;
@@ -273,30 +273,6 @@ function writeRecords(
   }
 
   return { written, failed, skipped };
-}
-
-function isControlCharacter(character: string): boolean {
-  const codePoint = character.codePointAt(0) ?? 0;
-  const isC1Control =
-    codePoint >= FIRST_C1_CONTROL_CODE && codePoint <= LAST_C1_CONTROL_CODE;
-  return (
-    codePoint <= LAST_C0_CONTROL_CODE ||
-    codePoint === DELETE_CONTROL_CODE ||
-    isC1Control
-  );
-}
-
-// Replace control characters (C0 range + DEL) in any API-controlled string
-// before it reaches the terminal. A record title is untrusted (see
-// markdown.ts slugifyTitle), so a title carrying ANSI escapes could otherwise
-// clear the screen or overwrite earlier output, including the failure warning
-// itself, with fabricated text. Done by code point rather than a regex to
-// avoid embedding control characters in source (eslint no-control-regex). The
-// uuid alongside keeps the record identifiable even if the title is emptied.
-function sanitizeForTerminal(value: string): string {
-  return Array.from(value, (character) =>
-    isControlCharacter(character) ? ' ' : character,
-  ).join('');
 }
 
 // End the write phase on the right indicator. A run where every record threw
@@ -563,7 +539,12 @@ async function runDefaultSync(): Promise<boolean> {
       written: writtenRecords,
       failed: failedRecords,
       skipped: skippedCount,
-    } = writeRecords(allRecords, conflictStrategy, includeFrontmatter);
+    } = writeRecords(
+      allRecords,
+      conflictStrategy,
+      includeFrontmatter,
+      processSeenSlugs,
+    );
     reportWriteOutcome(spinner, writtenRecords.length, failedRecords.length);
     writtenRecords.forEach(({ filePath }) => {
       console.log(chalk.dim(`  -> ${filePath}`));

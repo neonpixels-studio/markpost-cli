@@ -215,7 +215,7 @@ describe('writeMarkdown', () => {
       },
     };
 
-    writeMarkdown(syncedRecord, 'suffix', new Set(), false);
+    writeMarkdown(syncedRecord, 'suffix', new Map(), false);
 
     const [, writtenContent] = vi.mocked(writeFileSync).mock.calls[0];
     expect(writtenContent).toBe('# Deploy\n\nCommit shipped.');
@@ -394,7 +394,7 @@ describe('writeMarkdown', () => {
 
     it('falls back to a suffix for a second same-slug record in one run so neither is clobbered', () => {
       mockWriteFileSyncRejectingExistingPaths();
-      const seenSlugs = new Set<string>();
+      const seenSlugs = new Map<string, string>();
       const firstRecord: Record = {
         ...mockRecord,
         uuid: 'first',
@@ -415,7 +415,7 @@ describe('writeMarkdown', () => {
 
     it('keeps suffixing subsequent same-slug records in one run', () => {
       mockWriteFileSyncRejectingExistingPaths();
-      const seenSlugs = new Set<string>();
+      const seenSlugs = new Map<string, string>();
 
       const paths = ['first', 'second', 'third'].map((uuid) =>
         writeMarkdown({ ...mockRecord, uuid, title: 'Test Title' }, 'overwrite', seenSlugs),
@@ -426,6 +426,116 @@ describe('writeMarkdown', () => {
         resolve(outputDirectory, 'test-title-2.md'),
         resolve(outputDirectory, 'test-title-3.md'),
       ]);
+    });
+
+    it('overwrites its own file when the same record is written again with a shared seenSlugs (autoSync retry), not a suffixed duplicate', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      // A record whose server delete/mark-synced failed is left pending and
+      // re-fetched next pass. Sharing seenSlugs across passes must not downgrade
+      // it to `suffix` — same uuid still owns its slug and overwrites in place.
+      const seenSlugs = new Map<string, string>();
+      const record: Record = { ...mockRecord, uuid: 'same', title: 'Test Title' };
+
+      const firstPath = writeMarkdown(record, 'overwrite', seenSlugs);
+      const secondPath = writeMarkdown(record, 'overwrite', seenSlugs);
+
+      expect(firstPath).toBe(resolve(outputDirectory, 'test-title.md'));
+      expect(secondPath).toBe(resolve(outputDirectory, 'test-title.md'));
+      expect(writeFileSync).not.toHaveBeenCalledWith(
+        resolve(outputDirectory, 'test-title-2.md'),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('never reassigns slug ownership, so the original owner still overwrites its own file after a different record suffixed', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const seenSlugs = new Map<string, string>();
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
+
+      writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md
+      writeMarkdown(other, 'overwrite', seenSlugs); // suffixed to test-title-2.md
+      const ownerRetryPath = writeMarkdown(owner, 'overwrite', seenSlugs);
+
+      // If ownership were reassigned to `other`, the owner would be treated as a
+      // different record and suffixed to test-title-3.md.
+      expect(ownerRetryPath).toBe(resolve(outputDirectory, 'test-title.md'));
+    });
+
+    it('transfers ownership to whoever writes the base path when the prior owner\'s file was removed', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const seenSlugs = new Map<string, string>();
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
+      const basePath = resolve(outputDirectory, 'test-title.md');
+
+      writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md, owned by owner
+      rmSync(basePath, { force: true }); // user moves the file out of the vault
+      // `other` is downgraded to suffix, but the base path is now free, so it
+      // lands there and becomes the new owner.
+      const otherPath = writeMarkdown(other, 'overwrite', seenSlugs);
+      const ownerRetryPath = writeMarkdown(owner, 'overwrite', seenSlugs);
+
+      expect(otherPath).toBe(basePath);
+      expect(ownerRetryPath).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    });
+
+    it('suffixes an empty-uuid record onto an already-owned slug so it cannot clobber the owner', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const seenSlugs = new Map<string, string>();
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const noUuid: Record = { ...mockRecord, uuid: '', title: 'Test Title' };
+
+      writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md
+      const noUuidPath = writeMarkdown(noUuid, 'overwrite', seenSlugs);
+
+      expect(noUuidPath).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    });
+
+    it('suffixes a suffixed write instead of claiming the base slug it never wrote', () => {
+      // A file left by a previous run occupies test-title.md, so a suffix write
+      // lands on test-title-2.md. It must not claim ownership of test-title.md;
+      // otherwise a strategy switch to `overwrite` on its retry would truncate a
+      // different record's file.
+      mockWriteFileSyncRejectingExistingPaths([
+        resolve(outputDirectory, 'test-title.md'),
+      ]);
+      const seenSlugs = new Map<string, string>();
+      const suffixed: Record = {
+        ...mockRecord,
+        uuid: 'suffixed',
+        title: 'Test Title',
+      };
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+
+      writeMarkdown(suffixed, 'suffix', seenSlugs); // test-title-2.md
+      const ownerPath = writeMarkdown(owner, 'overwrite', seenSlugs);
+
+      // `owner` is the first to write test-title.md, so it overwrites rather than
+      // being pushed to a suffix by a phantom claim from `suffixed`.
+      expect(ownerPath).toBe(resolve(outputDirectory, 'test-title.md'));
+    });
+
+    it('keys ownership by resolved path, so a mid-run outputDirectory change does not suppress overwrite in the new directory', () => {
+      const otherDirectory = '/mock/output-2';
+      // The new directory already holds a same-slug file from a previous run, so
+      // a wrongly-suppressed overwrite would be visible as a suffix.
+      mockWriteFileSyncRejectingExistingPaths([
+        resolve(otherDirectory, 'test-title.md'),
+      ]);
+      const seenSlugs = new Map<string, string>();
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
+
+      writeMarkdown(owner, 'overwrite', seenSlugs); // /mock/output/test-title.md
+      process.env.OUTPUT_DIRECTORY = otherDirectory; // user changes the setting
+      const otherPath = writeMarkdown(other, 'overwrite', seenSlugs);
+
+      // Ownership was recorded for the old dir's path, so the new dir's base path
+      // is unclaimed and `other` overwrites it. Keyed by bare slug, `other` would
+      // be wrongly downgraded to test-title-2.md.
+      expect(otherPath).toBe(resolve(otherDirectory, 'test-title.md'));
     });
 
     it('unlinks the path before writing so a symlink is removed, not followed', () => {
@@ -491,6 +601,31 @@ describe('writeMarkdown', () => {
       });
 
       expect(() => writeMarkdown(mockRecord, 'skip')).toThrow(permissionError);
+    });
+
+    it('does not claim slug ownership when it writes nothing, so a later overwrite record still owns the slug', () => {
+      // A `skip` collision writes nothing (null). If it wrongly claimed the
+      // slug, a genuinely different record would be forced onto `suffix` after
+      // the user switches the strategy to `overwrite` between passes.
+      mockWriteFileSyncRejectingExistingPaths([
+        resolve(outputDirectory, 'test-title.md'),
+      ]);
+      const seenSlugs = new Map<string, string>();
+      const skippedRecord: Record = { ...mockRecord, uuid: 'skipped' };
+      const overwriteRecord: Record = {
+        ...mockRecord,
+        uuid: 'overwriter',
+        title: 'Test Title',
+      };
+
+      expect(writeMarkdown(skippedRecord, 'skip', seenSlugs)).toBeNull();
+      const overwritePath = writeMarkdown(
+        overwriteRecord,
+        'overwrite',
+        seenSlugs,
+      );
+
+      expect(overwritePath).toBe(resolve(outputDirectory, 'test-title.md'));
     });
   });
 });
