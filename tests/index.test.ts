@@ -3,6 +3,7 @@ import type { Spinner } from 'yocto-spinner';
 
 import { Record } from '@/types/records.types.js';
 import { UserSettings } from '@/types/settings.types.js';
+import type { ConflictStrategy } from '@/types/settings.types.js';
 import { SettingsReadResult } from '@/libs/settings.js';
 
 vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
@@ -476,9 +477,13 @@ describe('index', () => {
     const ownerAtCall: (string | undefined)[] = [];
     const recordOwnership = (
       record: Record,
-      _strategy: unknown,
-      seenSlugs: Map<string, string>,
-    ): string => {
+      _conflictStrategy?: ConflictStrategy,
+      seenSlugs?: Map<string, string>,
+      _includeFrontmatter?: boolean,
+    ): string | null => {
+      if (!seenSlugs) {
+        throw Error('recordOwnership mock requires the seenSlugs map');
+      }
       ownerAtCall.push(seenSlugs.get(SHARED_SLUG));
       if (!seenSlugs.has(SHARED_SLUG)) {
         seenSlugs.set(SHARED_SLUG, record.uuid);
