@@ -75,6 +75,29 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   }
 };
 
+const PROVIDER_SECRET_NOTICE =
+  'Signing secret (shown once — copy it now, it cannot be retrieved later):';
+
+// markpost reveals the generated signing secret exactly once — in the create
+// response for a secret-backed provider (github/zapier/shortcuts). It is null
+// everywhere else, so this only surfaces a non-empty value, and only from
+// `create` (never list/update, which is why it lives outside `printSource`).
+const printProviderSecret = (
+  providerSecret: string | null | undefined,
+): void => {
+  if (!providerSecret) {
+    return;
+  }
+
+  console.log('');
+  console.log(chalk.yellowBright(`  ${PROVIDER_SECRET_NOTICE}`));
+  // The secret is untrusted API output like every other field printSource
+  // handles, so it's sanitized too — lossless for a real signing secret, which
+  // never carries control bytes, but it stops a hostile response overwriting
+  // the "copy it now" warning above with a CSI payload.
+  console.log(chalk.bold(`  ${sanitizeForTerminal(providerSecret)}`));
+};
+
 // Every field here comes from the untrusted API response, so each is stripped
 // of control/ANSI escapes before printing (see terminal.ts): name, uuid, type,
 // endpoint (built from endpointSlug), routeFolder, recordCount, and lastHitAt.
@@ -124,22 +147,36 @@ const createSourceCommand = async (): Promise<void> => {
     default: '',
   });
 
-  const source = await createSource({
+  const created = await createSource({
     type,
     name,
     routeFolder,
     provider: provider || undefined,
   });
 
-  if (!source) {
-    console.error(chalk.redBright('Failed to create source.'));
+  if (!created) {
+    // A secret-backed source may still have been created server-side with its
+    // one-time secret in the response the CLI just discarded; that secret is
+    // now unrecoverable, so point the user at how to recover deliberately
+    // rather than letting a blind retry orphan a source.
+    console.error(
+      chalk.redBright(
+        'Failed to create source. Run `markpost sources list` to check whether it was created anyway — if it was, its one-time signing secret is unrecoverable, so delete and recreate the source to mint a new one.',
+      ),
+    );
     return;
   }
+
+  // Peel the one-time secret off before handing the rest to the shared
+  // `printSource`, so the secret physically isn't on the object any list/update
+  // printer ever receives.
+  const { providerSecret, ...source } = created;
 
   console.log(
     chalk.greenBright(`Created source "${sanitizeForTerminal(source.name)}"`),
   );
   printSource(source);
+  printProviderSecret(providerSecret);
 };
 
 // Shared by update and delete: list existing sources and let the user pick
