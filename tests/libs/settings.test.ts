@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchSettings, resolveSyncSettings } from '@/libs/settings.js';
+import {
+  fetchSettings,
+  resolveSyncSettings,
+  updateSettings,
+} from '@/libs/settings.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { logErrorMessage } from '@/libs/errors.js';
 import {
@@ -161,6 +165,74 @@ describe('fetchSettings', () => {
     mockFetch({ data: null });
 
     expect(await fetchSettings()).toEqual({ ok: true, settings: null });
+  });
+});
+
+describe('updateSettings', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('calls fetch with PUT, correct headers, and JSON:API body', async () => {
+    mockFetch({ data: { attributes: mockSettings } });
+
+    await updateSettings({ autoDelete: false, conflictStrategy: 'overwrite' });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/settings',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: 'Bearer test-token',
+        },
+        body: JSON.stringify({
+          data: {
+            type: 'user_settings',
+            attributes: { autoDelete: false, conflictStrategy: 'overwrite' },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('returns the updated settings attributes on success', async () => {
+    mockFetch({ data: { attributes: mockSettings } });
+
+    expect(await updateSettings({ autoSync: true })).toEqual(mockSettings);
+  });
+
+  it('returns null and logs when a non-2xx response carries errors', async () => {
+    mockFetch(
+      { data: { errors: [{ title: 'Unauthorized', detail: 'No token' }] } },
+      false,
+    );
+
+    expect(await updateSettings({ autoSync: true })).toBeNull();
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'updateSettings',
+      expect.stringContaining('Unauthorized'),
+    );
+  });
+
+  it('returns null and logs when fetch rejects', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network down'));
+
+    expect(await updateSettings({ frontmatter: false })).toBeNull();
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'updateSettings',
+      'Network down',
+    );
+  });
+
+  // A timeout must escape the resilient `null` fallback so a write that stalled
+  // surfaces loudly rather than silently reporting "failed to update".
+  it('propagates a timeout as ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+
+    await expect(updateSettings({ autoSync: true })).rejects.toBeInstanceOf(
+      ApiTimeoutError,
+    );
   });
 });
 
