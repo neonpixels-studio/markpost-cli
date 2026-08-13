@@ -270,6 +270,52 @@ describe('runSourcesCommand', () => {
       );
     });
 
+    it('prints the sources as a parseable JSON array with computed endpoints when --json is passed', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource, emailSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      const parsed = JSON.parse(output);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0]).toMatchObject({
+        uuid: 'abc-123',
+        name: 'Webhook Source',
+        endpoint: 'https://ingest.markpost.io/v1/hooks/wh_abc12345',
+      });
+      expect(parsed[1]).toMatchObject({
+        uuid: 'def-456',
+        endpoint: 'clip-ab12@in.markpost.io',
+      });
+    });
+
+    it('prints an empty JSON array (not "No sources found.") for --json with no sources', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      expect(console.log).not.toHaveBeenCalledWith('No sources found.');
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toEqual([]);
+    });
+
+    // The JSON path enumerates the Source contract fields rather than spreading
+    // the object, so a one-time providerSecret riding on a malformed list
+    // response can never surface — same invariant the pretty path holds.
+    it('never leaks a providerSecret carried on a listed source in --json mode', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      expect(loggedText()).not.toContain('whsec_one_time_plaintext');
+    });
+
     it('renders "never hit" for an empty lastHitAt', async () => {
       const { fetchSources } = await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([

@@ -1,3 +1,4 @@
+import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchRecord } from '@/libs/records.js';
 import { checkConfig } from '@/libs/config.js';
@@ -6,15 +7,17 @@ import {
   sanitizeForTerminal,
 } from '@/libs/terminal.js';
 import { failWithUsage } from '@/libs/usage.js';
+import { printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
-export const USAGE = `Usage: markpost get <uuid>
+export const USAGE = `Usage: markpost get <uuid> [--json]
 
-  uuid  UUID of the record to fetch and display`;
+  uuid    UUID of the record to fetch and display
+  --json  Print the record as JSON instead of formatted text`;
 
 export const runGetCommand = async (args: string[]): Promise<void> => {
   try {
-    const [uuid] = args;
+    const { uuid, json } = parseGetArgs(args);
 
     if (!uuid) {
       failWithUsage('No uuid given.', USAGE);
@@ -31,11 +34,33 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
+    if (json) {
+      printJson(record);
+      return;
+    }
+
     printRecord(record);
   } catch (error) {
     console.error(chalk.redBright(error));
     process.exitCode = 1;
   }
+};
+
+// `parseArgs` accepts the uuid and `--json` in either order and throws on an
+// unknown flag (the command's outer catch surfaces it). The uuid is the first
+// positional; any extra positional is ignored, matching the prior behavior.
+const parseGetArgs = (
+  args: string[],
+): { uuid: string | undefined; json: boolean } => {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      json: { type: 'boolean' },
+    },
+  });
+
+  return { uuid: positionals[0], json: values.json ?? false };
 };
 
 // Every field here comes from the untrusted API response, so each is stripped

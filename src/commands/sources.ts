@@ -9,6 +9,7 @@ import {
 import { checkConfig } from '@/libs/config.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage } from '@/libs/usage.js';
+import { JSON_FLAG, printJson } from '@/libs/output.js';
 import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
 
 // Mirror the endpoint constants markpost's web app uses in
@@ -19,7 +20,7 @@ const EMAIL_DOMAIN = 'in.markpost.io';
 
 export const USAGE = `Usage: markpost sources <list|create|update|delete> [uuid]
 
-  list           List all sources
+  list           List all sources (pass --json for machine-readable output)
   create         Create a new source (prompts for details)
   update [uuid]  Update a source's route folder; prompts to pick one if uuid is omitted
   delete [uuid]  Delete a source; prompts to pick one if uuid is omitted`;
@@ -41,9 +42,9 @@ export const buildEndpointUrl = (
 // named "toString" from resolving to a prototype member.
 const SOURCES_HANDLERS = new Map<
   string,
-  (uuid: string | undefined) => Promise<void>
+  (uuid: string | undefined, json: boolean) => Promise<void>
 >([
-  ['list', () => listSources()],
+  ['list', (_uuid, json) => listSources(json)],
   ['create', () => createSourceCommand()],
   ['update', (uuid) => updateSourceCommand(uuid)],
   ['delete', (uuid) => deleteSourceCommand(uuid)],
@@ -60,9 +61,14 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
+  // Only `list` reads --json; the other handlers ignore it. It's parsed here as
+  // a plain presence check (not parseArgs) so update/delete keep taking a bare
+  // uuid positional exactly as before.
+  const json = args.includes(JSON_FLAG);
+
   try {
     await checkConfig();
-    await handler(uuid);
+    await handler(uuid, json);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
     // that's a user abort, not a command failure, so don't flag it non-zero.
@@ -122,8 +128,35 @@ const printSource = (source: Source): void => {
   );
 };
 
-const listSources = async (): Promise<void> => {
+// The JSON view of a source: the Source contract fields plus the computed
+// `endpoint` so consumers get the same ingest URL the pretty output shows
+// without re-deriving it. Fields are enumerated (not spread) on purpose — a
+// spread would carry a `providerSecret` if a malformed/hostile list response
+// ever attached one, and list must never surface that one-time secret (only
+// `create` does). This whitelist is what keeps the JSON path as safe as the
+// pretty printer, which likewise names each field it prints.
+const serializeSourceForJson = (source: Source): Record<string, unknown> => ({
+  uuid: source.uuid,
+  createdAt: source.createdAt,
+  type: source.type,
+  name: source.name,
+  provider: source.provider,
+  endpointSlug: source.endpointSlug,
+  endpoint: buildEndpointUrl(source.type, source.endpointSlug),
+  routeFolder: source.routeFolder,
+  lastHitAt: source.lastHitAt,
+  recordCount: source.recordCount,
+});
+
+const listSources = async (json: boolean): Promise<void> => {
   const sources = await fetchSources();
+
+  // JSON mode prints the array (empty included, as `[]`) with no "No sources
+  // found." line so the stdout stays valid JSON for `jq`.
+  if (json) {
+    printJson(sources.map(serializeSourceForJson));
+    return;
+  }
 
   if (sources.length === 0) {
     console.log('No sources found.');

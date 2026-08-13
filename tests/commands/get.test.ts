@@ -132,6 +132,57 @@ describe('runGetCommand', () => {
     );
   });
 
+  it('prints the record as a single parseable JSON object with --json', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--json']);
+
+    // One stdout write, and it is JSON — not the labeled "uuid:       " line.
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+    expect(output).not.toContain('uuid:       ');
+    expect(JSON.parse(output)).toMatchObject({
+      uuid: 'abc-123',
+      title: 'Test Title',
+      content: 'Test Content',
+      createdAt: '2024-01-01T00:00:00Z',
+    });
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  it('accepts --json before the uuid', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['--json', 'abc-123']);
+
+    expect(fetchRecord).toHaveBeenCalledWith('abc-123');
+    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+    expect(JSON.parse(output).uuid).toBe('abc-123');
+  });
+
+  // The JSON path stays faithful rather than terminal-sanitizing: no raw
+  // control byte reaches stdout (JSON.stringify escapes it to a printable \u form), but the
+  // value round-trips losslessly, unlike the pretty path that blanks escapes.
+  it('emits faithful, JSON-escaped values on the --json path without stripping data', async () => {
+    const control = String.fromCharCode(0x1b);
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      title: `A${control}B`,
+    });
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--json']);
+
+    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+    expect(output).not.toContain(control);
+    expect(JSON.parse(output).title).toBe(`A${control}B`);
+  });
+
   it('catches and logs an error when checkConfig throws', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     vi.mocked(checkConfig).mockRejectedValue(new Error('boom'));
