@@ -1141,6 +1141,53 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('reports only the timed-out record when the timeout lands in the final batch', async () => {
+    const records: Record[] = Array.from({ length: 10 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // The ten records fill exactly one batch, so uuid-9's timeout leaves nothing
+    // unattempted — only the timed-out record itself is pending.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(uuid === 'uuid-9' ? MARK_TIMED_OUT : MARK_SYNCED),
+    );
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(10);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('1 record(s) still pending'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 9 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it('aborts on a timeout in a later batch, not just the first', async () => {
     const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
       uuid: `uuid-${index}`,
