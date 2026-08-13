@@ -75,6 +75,18 @@ describe('runSettingsCommand', () => {
     expect(checkConfig).toHaveBeenCalled();
   });
 
+  it('gates the handler on config: a rejected config check runs no API call', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    vi.mocked(checkConfig).mockRejectedValueOnce(new Error('not configured'));
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSettingsCommand } = await import('@/commands/settings.js');
+
+    await runSettingsCommand(['get']);
+
+    expect(fetchSettings).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
   it('errors to stderr and exits 1 when no subcommand is given', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     const { runSettingsCommand } = await import('@/commands/settings.js');
@@ -290,6 +302,35 @@ describe('settings set', () => {
     expect(updateSettings).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Invalid field `autoSync`'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('rejects a repeated key rather than silently last-wins', async () => {
+    const { updateSettings } = await import('@/libs/settings.js');
+    const { runSettingsCommand } = await import('@/commands/settings.js');
+
+    await runSettingsCommand(['set', 'autoDelete=true', 'autoDelete=false']);
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('autoDelete: given more than once.'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // splitPair keeps everything after the first `=` as the value, so a value
+  // carrying its own `=` is validated intact (here rejected as off-contract)
+  // rather than truncated to `over`.
+  it('does not truncate a value that contains an `=`', async () => {
+    const { updateSettings } = await import('@/libs/settings.js');
+    const { runSettingsCommand } = await import('@/commands/settings.js');
+
+    await runSettingsCommand(['set', 'conflictStrategy=over=write']);
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('over=write'),
     );
     expect(process.exitCode).toBe(1);
   });

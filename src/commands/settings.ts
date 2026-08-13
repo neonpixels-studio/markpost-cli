@@ -88,6 +88,14 @@ const applyField = (
   key: string,
   rawValue: string,
 ): string | null => {
+  // A repeated key would otherwise last-wins silently — the one hole in an
+  // otherwise fail-loud parser, and the case most likely to come from a
+  // scripted loop or an edited shell-history line where the user can't see
+  // which value actually won.
+  if (key in input) {
+    return `${key}: given more than once.`;
+  }
+
   if (isBooleanSettingKey(key)) {
     const parsed = parseBoolean(rawValue);
 
