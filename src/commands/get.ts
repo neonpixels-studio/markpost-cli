@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { fetchRecord } from '@/libs/records.js';
+import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import {
   sanitizeBlockForTerminal,
@@ -33,7 +34,13 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 
     printRecord(record);
   } catch (error) {
-    console.error(chalk.redBright(error));
+    // A systemic auth/5xx failure now re-throws from fetchRecord (issue #89):
+    // surface its classified, actionable message with a non-zero exit rather
+    // than the generic "Failed to fetch record" a not-found (null) produces.
+    // Sanitize — the message can be server-derived.
+    console.error(
+      chalk.redBright(sanitizeForTerminal(describeApiError(error))),
+    );
     process.exitCode = 1;
   }
 };

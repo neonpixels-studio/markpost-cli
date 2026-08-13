@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchAllRecords, RecordListFilters } from '@/libs/records.js';
+import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage } from '@/libs/usage.js';
@@ -34,7 +35,13 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
     await checkConfig();
     await listRecords(filters);
   } catch (error) {
-    console.error(chalk.redBright(error));
+    // A systemic auth/5xx failure now re-throws from fetchAllRecords (issue
+    // #89): surface its classified, actionable message with a non-zero exit,
+    // distinct from the generic "Failed to fetch records" a non-systemic
+    // failure produces. Sanitize — the message can be server-derived.
+    console.error(
+      chalk.redBright(sanitizeForTerminal(describeApiError(error))),
+    );
     process.exitCode = 1;
   }
 };

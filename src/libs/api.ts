@@ -97,6 +97,12 @@ export const rethrowIfTimeout = (error: unknown): void => {
   }
 };
 
+// Pulls a printable string off an unknown thrown value: an `Error`'s message,
+// otherwise its `String()` form. Shared by `logApiFailure` and
+// `describeApiError` so neither re-derives the extraction.
+const messageFromError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 // The one way to report a failed API call from a resilient catch: re-throw a
 // timeout (fail loud) and log every other error. Bundling both halves means
 // a new call site can't log-and-swallow a timeout by forgetting the rethrow,
@@ -105,10 +111,7 @@ export const rethrowIfTimeout = (error: unknown): void => {
 export const logApiFailure = (context: string, error: unknown): void => {
   rethrowIfTimeout(error);
 
-  logErrorMessage(
-    context,
-    error instanceof Error ? error.message : String(error),
-  );
+  logErrorMessage(context, messageFromError(error));
 };
 
 // Auth/authorization failures that doom the whole batch, not one request:
@@ -154,6 +157,15 @@ export class ApiRequestError extends Error {
   get isSystemic(): boolean {
     return this.isAuthFailure || this.isRateLimited || this.isServerError;
   }
+
+  // Permanent = won't clear on a blind retry: a dead/missing token (401) or a
+  // forbidden account state — sign-ups disabled or a plan limit (403) — needs a
+  // human to fix config or the account first. A rate-limit (429) or 5xx is
+  // systemic-but-transient, so it stays out: an autoSync daemon should keep
+  // retrying those on its next pass ("retry shortly"), not shut down for good.
+  get isPermanent(): boolean {
+    return this.isAuthFailure;
+  }
 }
 
 // Narrowing guard: true only for a systemic `ApiRequestError`. A network
@@ -186,6 +198,20 @@ const failureKind = (error: ApiRequestError): string => {
 // Human-readable summary of a systemic failure for the abort message.
 export const describeSystemicFailure = (error: ApiRequestError): string => {
   return `${failureKind(error)} (HTTP ${error.statusCode}): ${error.message}`;
+};
+
+// The clearest user-facing message for any error surfaced from an API call: a
+// systemic `ApiRequestError` (auth/rate-limit/5xx) gets its classified,
+// actionable description (`describeSystemicFailure`); anything else falls back
+// to its raw message. Keeps command-layer catches from re-deriving the
+// systemic-vs-generic split at every call site. Callers sanitize the result
+// before printing — a server-derived message can carry a terminal escape.
+export const describeApiError = (error: unknown): string => {
+  if (isSystemicApiFailure(error)) {
+    return describeSystemicFailure(error);
+  }
+
+  return messageFromError(error);
 };
 
 export const formatErrorMessages = (errors: ApiError[]) => {

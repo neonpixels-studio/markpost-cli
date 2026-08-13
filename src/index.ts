@@ -6,6 +6,7 @@ import {
   markRecordSynced,
   PENDING_STATUS,
 } from '@/libs/records.js';
+import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
 import { ensureOutputDirectory, writeMarkdown } from '@/libs/markdown.js';
 import { fetchSettings, SettingsReadResult } from '@/libs/settings.js';
 import { runPushCommand, USAGE as PUSH_USAGE } from '@/commands/push.js';
@@ -432,6 +433,12 @@ function reportIncompleteSync(partial: boolean): void {
 async function runDefaultSync(): Promise<boolean> {
   const spinner = yoctoSpinner({ spinner: cliSpinners.dots });
 
+  // Hoisted to function scope so the outer catch can honor it: a transient
+  // systemic failure (rate-limit/5xx) should let an autoSync daemon retry next
+  // pass rather than shut it down. Defaults off so an early crash (before
+  // settings are read) never spins a daemon that just keeps crashing.
+  let autoSync = false;
+
   try {
     await checkConfig();
 
@@ -471,7 +478,7 @@ async function runDefaultSync(): Promise<boolean> {
     // we don't spin up a self-scheduling daemon (mirrors the conservative
     // autoDelete above). Frontmatter defaults to on — the safe,
     // non-destructive default, matching how conflictStrategy falls back.
-    const autoSync = settingsResult.ok
+    autoSync = settingsResult.ok
       ? normalizeAutoSync(settings?.autoSync)
       : false;
     const includeFrontmatter = settingsResult.ok
@@ -601,19 +608,30 @@ async function runDefaultSync(): Promise<boolean> {
     }
 
     spinner.start('Deleting records...');
-    // deleteRecords swallows its own errors to null but re-throws a timeout.
-    // Log the timeout's reason (deleteRecords never got to log it, since the
-    // rethrow happens before its logger) and route it to the same null branch
-    // below, so the user gets both the "why" and the specific "remain on the
-    // server" consequence with a non-zero exit — not the generic outer
-    // catch's "Something went wrong!".
+    // deleteRecords swallows its own per-request errors to null but re-throws a
+    // timeout and any systemic auth/5xx failure. Describe the reason
+    // (deleteRecords never got to log a re-thrown error, since the rethrow
+    // happens before its logger — and `describeApiError` classifies a systemic
+    // failure) and route it to the same null branch below, so the user gets
+    // both the "why" and the specific "remain on the server" consequence with a
+    // non-zero exit — not the generic outer catch's "Something went wrong!".
+    // A PERMANENT delete failure (dead token, forbidden account) will recur on
+    // every pass, so it must also stop the autoSync self-scheduling below —
+    // otherwise the daemon wakes every few minutes, re-fetches the same pending
+    // records, and re-writes them as `-2`/`-3` duplicates against a server it
+    // already knows it can't delete from. A transient failure (rate-limit/5xx,
+    // timeout) is worth another pass, so it keeps autoSync alive. Captured here
+    // so the failure branch can tell the two apart.
+    let deletePermanentlyFailed = false;
     const deleteMeta = await deleteRecords(
       writtenRecords.map(({ record }) => record.uuid),
     ).catch((error: unknown) => {
+      deletePermanentlyFailed =
+        isSystemicApiFailure(error) && error.isPermanent;
       // Sanitize before printing, same threat as the outer catch: a
-      // server- or API-derived message (here a timeout) can embed an escape.
+      // server- or API-derived message can embed an escape.
       console.error(
-        chalk.redBright(sanitizeForTerminal(extractErrorMessage(error))),
+        chalk.redBright(sanitizeForTerminal(describeApiError(error))),
       );
 
       return null;
@@ -626,7 +644,9 @@ async function runDefaultSync(): Promise<boolean> {
         'Failed to delete records from the server — they were written locally but remain on the server.',
       );
       process.exitCode = 1;
-      return autoSync;
+      // Don't keep rescheduling into a known-permanent failure; a transient one
+      // still retries next pass.
+      return deletePermanentlyFailed ? false : autoSync;
     }
 
     spinner.success(`Deleted ${deleteMeta.deleted} records!`);
@@ -634,14 +654,35 @@ async function runDefaultSync(): Promise<boolean> {
     reportIncompleteSync(recordsResult.partial);
     return autoSync;
   } catch (error) {
+    process.exitCode = 1;
+
+    // A systemic API failure (expired/invalid token, rate limit, 5xx) doomed
+    // the whole read. Route the classified, actionable detail (e.g. "run
+    // `markpost config`") through console.error so it prints unconditionally —
+    // `spinner.error` no-ops when no spinner is active — and a cron log always
+    // says *why* the sync died; the spinner headline is just the interactive
+    // cue. Sanitize — the message is server-derived and can embed an escape.
+    if (isSystemicApiFailure(error)) {
+      spinner.error('Sync failed.');
+      // `describeApiError` yields the classified `describeSystemicFailure`
+      // text inside this guard, so we don't call the latter directly.
+      console.error(
+        chalk.redBright(sanitizeForTerminal(describeApiError(error))),
+      );
+      // A permanent failure (dead token, forbidden account) won't clear on
+      // retry — stop the autoSync daemon. A transient one (rate-limit/5xx) is
+      // worth another pass, so keep autoSync alive to retry ("retry shortly").
+      return error.isPermanent ? false : autoSync;
+    }
+
     spinner.error('Something went wrong!');
-    // Systemic errors surface here (unset output dir, a failed fetch/delete).
+    // Other errors surface here (unset output dir, a non-systemic failure).
     // Sanitize before printing: a server- or API-derived message can embed an
     // escape sequence, same threat the per-record failure path guards against.
+    // `describeApiError` returns the bare message for these non-systemic cases.
     console.error(
-      chalk.redBright(sanitizeForTerminal(extractErrorMessage(error))),
+      chalk.redBright(sanitizeForTerminal(describeApiError(error))),
     );
-    process.exitCode = 1;
     // Don't self-schedule after an unexpected failure — a crashing run
     // shouldn't spin a daemon that just keeps crashing.
     return false;
