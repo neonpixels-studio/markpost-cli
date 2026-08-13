@@ -30,9 +30,14 @@ const SYNCED_STATUS = 'synced';
 // rest of the batch still runs. `MARK_TIMED_OUT` — the PATCH hit the request
 // timeout, a signal the server is hung; the batch runner stops on the first one
 // rather than paying the full timeout on every remaining record.
-export const MARK_SYNCED = 'synced';
-export const MARK_FAILED = 'failed';
-export const MARK_TIMED_OUT = 'timed-out';
+//
+// Values are prefixed (`mark-*`) so they never collide with the wire
+// `SYNCED_STATUS = 'synced'` above: these are internal outcome tags, not the
+// status string sent to the server, and an accidental cross-comparison should
+// not silently type-check as equal.
+export const MARK_SYNCED = 'mark-synced';
+export const MARK_FAILED = 'mark-failed';
+export const MARK_TIMED_OUT = 'mark-timed-out';
 
 export type MarkSyncedOutcome =
   typeof MARK_SYNCED | typeof MARK_FAILED | typeof MARK_TIMED_OUT;
