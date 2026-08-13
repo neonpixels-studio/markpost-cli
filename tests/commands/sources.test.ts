@@ -320,18 +320,37 @@ describe('runSourcesCommand', () => {
       expect(loggedText()).not.toContain('whsec_one_time_plaintext');
     });
 
-    // --json must be parsed as a flag, never fall into the uuid slot: a bare
-    // `sources delete --json` has to reach the picker, not fire a DELETE for a
-    // source literally named "--json".
-    it('treats --json as a flag on delete, not as a uuid to delete', async () => {
+    // --json is parsed as a flag (never the uuid slot) and rejected on the
+    // subcommands that don't render JSON, so `sources delete --json` neither
+    // fires a DELETE for a source named "--json" nor silently ignores the flag.
+    it('rejects --json on delete rather than treating it as a uuid or ignoring it', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
       const { fetchSources, deleteSource } = await import('@/libs/sources.js');
-      vi.mocked(fetchSources).mockResolvedValue([]);
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
       await runSourcesCommand(['delete', '--json']);
 
       expect(deleteSource).not.toHaveBeenCalled();
-      expect(console.log).toHaveBeenCalledWith('No sources to delete.');
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--json is only supported by `sources list`.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A script doing `sources create --json | jq` must fail loudly, not exit 0
+    // with human text — losing the one-time signing secret it meant to capture.
+    it('rejects --json on create before prompting or calling the API', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { createSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create', '--json']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(createSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     });
 
     it('exits 1 on a mistyped flag instead of silently printing human text', async () => {

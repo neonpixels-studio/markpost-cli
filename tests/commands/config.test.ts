@@ -229,7 +229,11 @@ describe('runConfigCommand', () => {
     it('stores the trimmed value', async () => {
       const runConfigCommand = await importCommand();
 
-      await runConfigCommand(['set', 'outputDirectory', '  /home/user/notes  ']);
+      await runConfigCommand([
+        'set',
+        'outputDirectory',
+        '  /home/user/notes  ',
+      ]);
 
       expect(mockSetConfigValue).toHaveBeenCalledWith(
         'outputDirectory',

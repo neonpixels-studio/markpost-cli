@@ -9,7 +9,7 @@ import {
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage } from '@/libs/usage.js';
+import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { printJson } from '@/libs/output.js';
 import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
 
@@ -41,11 +41,15 @@ export const buildEndpointUrl = (
 // never pass the guard without a handler (which would otherwise risk falling
 // through to the destructive delete). A Map (not an object) keeps a subcommand
 // named "toString" from resolving to a prototype member.
+// Only `list` renders JSON; the other subcommands are interactive or emit a
+// one-off result, so --json means nothing to them.
+const LIST_SUBCOMMAND = 'list';
+
 const SOURCES_HANDLERS = new Map<
   string,
   (uuid: string | undefined, json: boolean) => Promise<void>
 >([
-  ['list', (_uuid, json) => listSources(json)],
+  [LIST_SUBCOMMAND, (_uuid, json) => listSources(json)],
   ['create', () => createSourceCommand()],
   ['update', (uuid) => updateSourceCommand(uuid)],
   ['delete', (uuid) => deleteSourceCommand(uuid)],
@@ -55,8 +59,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   try {
     // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
     // still prompts rather than trying to delete a source named "--json") and
-    // rejects an unknown/mistyped flag, matching how `get` and `records list`
-    // parse. Only `list` reads json; the other handlers ignore the argument.
+    // rejects an unknown/mistyped flag. Only `list` reads json.
     const { values, positionals } = parseArgs({
       args,
       allowPositionals: true,
@@ -66,6 +69,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     });
     const [subcommand, uuid] = positionals;
     const handler = SOURCES_HANDLERS.get(subcommand);
+    const json = values.json ?? false;
 
     // Validate before the config check so a bad subcommand fails on usage
     // alone, without needing a configured account.
@@ -74,8 +78,20 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
+    // Reject --json where it does nothing rather than silently ignoring it:
+    // `sources create --json | jq` would otherwise "succeed" with human text on
+    // stdout, and the one-time signing secret it was trying to capture would be
+    // lost (see createSourceCommand's unrecoverable-secret warning).
+    if (json && subcommand !== LIST_SUBCOMMAND) {
+      failWithUsage(
+        `--json is only supported by \`sources ${LIST_SUBCOMMAND}\`.`,
+        USAGE,
+      );
+      return;
+    }
+
     await checkConfig();
-    await handler(uuid, values.json ?? false);
+    await handler(uuid, json);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
     // that's a user abort, not a command failure, so don't flag it non-zero.
@@ -145,11 +161,12 @@ const printSource = (source: Source): void => {
 // paths (`get`, `records list`) intentionally pass the whole record through
 // instead: a record carries no secret sibling field, and a faithful passthrough
 // keeps new server fields visible rather than silently dropping them. The
-// `Source & { endpoint: string }` return type makes a future Source field fail
-// the build here until it is deliberately included or excluded.
+// `Required<Source> & { endpoint: string }` return type makes a future Source
+// field — required or optional — fail the build here until it is deliberately
+// included or excluded.
 const serializeSourceForJson = (
   source: Source,
-): Source & { endpoint: string } => ({
+): Required<Source> & { endpoint: string } => ({
   uuid: source.uuid,
   createdAt: source.createdAt,
   type: source.type,

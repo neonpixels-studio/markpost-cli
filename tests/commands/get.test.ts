@@ -165,23 +165,28 @@ describe('runGetCommand', () => {
   });
 
   // The JSON path stays faithful rather than terminal-sanitizing: no raw
-  // control byte reaches stdout (JSON.stringify escapes it to a printable \u form), but the
+  // control byte reaches stdout (it is escaped to a printable \u form), but the
   // value round-trips losslessly, unlike the pretty path that blanks escapes.
-  it('emits faithful, JSON-escaped values on the --json path without stripping data', async () => {
-    const control = String.fromCharCode(0x1b);
-    const { fetchRecord } = await import('@/libs/records.js');
-    vi.mocked(fetchRecord).mockResolvedValue({
-      ...mockRecord,
-      title: `A${control}B`,
-    });
-    const { runGetCommand } = await import('@/commands/get.js');
+  // Covers a C0 escape (0x1b, escaped by JSON.stringify) and a C1 escape
+  // (0x9b/CSI, escaped by printJson since JSON.stringify leaves it raw).
+  it.each([0x1b, 0x9b])(
+    'emits faithful, \\u-escaped values on the --json path for control 0x%x',
+    async (codePoint) => {
+      const control = String.fromCharCode(codePoint);
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue({
+        ...mockRecord,
+        title: `A${control}B`,
+      });
+      const { runGetCommand } = await import('@/commands/get.js');
 
-    await runGetCommand(['abc-123', '--json']);
+      await runGetCommand(['abc-123', '--json']);
 
-    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
-    expect(output).not.toContain(control);
-    expect(JSON.parse(output).title).toBe(`A${control}B`);
-  });
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(output).not.toContain(control);
+      expect(JSON.parse(output).title).toBe(`A${control}B`);
+    },
+  );
 
   it('writes nothing to stdout and exits 1 when the record is missing, even with --json', async () => {
     const { fetchRecord } = await import('@/libs/records.js');
