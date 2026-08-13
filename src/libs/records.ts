@@ -104,6 +104,14 @@ export type RecordListFilters = {
 // can't tell apart from a complete one — the same fail-loud concern one page
 // in. The caller surfaces `partial` (warn + non-zero exit); the unfetched
 // pages stay on the server for a later run.
+//
+// `partial` covers only NON-systemic later-page failures (a transient network
+// blip, a malformed page). A systemic failure (auth/5xx) or a request timeout
+// on ANY page — including a later one — rejects instead: `fetchPaginatedRecords`
+// re-throws it and this function has no catch, so the whole read fails loud and
+// discards the pages already collected (a dead token or down server will only
+// keep failing). Those cases never reach the `{ ok: true, partial: true }`
+// shape; the caller's catch surfaces the classified cause.
 export type FetchAllRecordsResult =
   { ok: true; records: Record[]; partial: boolean } | { ok: false };
 
@@ -134,9 +142,11 @@ export const fetchAllRecords = async (
   // filtered listings: markpost rejects an invalid `filter[source]` with a
   // 400, and returning `[]` here would render that as "No records found.", a
   // silent failure. fetchPaginatedRecords has already logged the underlying
-  // cause; the command surfaces the failure and exits non-zero. A
-  // subsequent-page failure still returns the pages already collected (the
-  // error is logged) so partial progress isn't discarded.
+  // cause; the command surfaces the failure and exits non-zero. A NON-systemic
+  // subsequent-page failure (`null`) still returns the pages already collected
+  // and flags `partial` so progress isn't discarded; a systemic failure or a
+  // timeout on any page instead re-throws (see the type doc above), so the
+  // whole read fails loud rather than writing/deleting a partial set.
   if (!initial) {
     return { ok: false };
   }
@@ -185,9 +195,10 @@ export const fetchAllRecords = async (
     );
 
     if (!subsequent) {
-      // A later page failed (`fetchPaginatedRecords` already logged why). Stop,
-      // but mark the read incomplete so the caller doesn't present a truncated
-      // set as the whole.
+      // A later page failed NON-systemically (`fetchPaginatedRecords` already
+      // logged why). Stop, but mark the read incomplete so the caller doesn't
+      // present a truncated set as the whole. A systemic failure or timeout on
+      // this page wouldn't reach here — it re-throws out of this loop instead.
       partial = true;
       break;
     }
@@ -279,6 +290,15 @@ export const fetchPaginatedRecords = async (
 
     return { records, meta, links };
   } catch (error) {
+    // Auth (401/403), rate-limit (429), and 5xx failures doom every page of
+    // the read, not just this one, so surface them to the caller to fail-fast
+    // (mirroring createRecord) instead of collapsing them to null — which
+    // fetchAllRecords can't tell apart from a genuinely empty result and would
+    // report as a silent "No new records" success (issue #89).
+    if (isSystemicApiFailure(error)) {
+      throw error;
+    }
+
     logApiFailure(`fetchPaginatedRecords`, error);
 
     return null;
@@ -397,6 +417,14 @@ export const fetchRecord = async (uuid: string): Promise<Record | null> => {
 
     return unwrapResourceAttributes(body);
   } catch (error) {
+    // A systemic auth/5xx failure is not "record not found" — re-throw it
+    // (mirroring createRecord) so `get` reports the real cause with a non-zero
+    // exit, instead of the generic "Failed to fetch record" a null return
+    // produces. A genuine 404 stays non-systemic and still returns null.
+    if (isSystemicApiFailure(error)) {
+      throw error;
+    }
+
     logApiFailure(`fetchRecord["${uuid}"]`, error);
 
     return null;
@@ -424,6 +452,14 @@ export const deleteRecords = async (
 
     return body.meta ?? null;
   } catch (error) {
+    // A systemic auth/5xx failure will recur for the whole batch, so re-throw
+    // it (mirroring createRecord) to surface the real cause rather than the
+    // generic delete-failure message a null return produces. The sync's
+    // inline catch prints it and still leaves the records on the server.
+    if (isSystemicApiFailure(error)) {
+      throw error;
+    }
+
     logApiFailure(`deleteRecords["${uuids.join(', ')}"]`, error);
 
     return null;

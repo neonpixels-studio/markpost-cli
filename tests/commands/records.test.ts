@@ -255,9 +255,7 @@ describe('runRecordsCommand', () => {
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: expect.stringContaining('bogus'),
-        }),
+        expect.stringContaining('bogus'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -270,9 +268,7 @@ describe('runRecordsCommand', () => {
 
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: '--source needs a non-empty value.',
-        }),
+        expect.stringContaining('--source needs a non-empty value.'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -285,9 +281,7 @@ describe('runRecordsCommand', () => {
 
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: expect.stringContaining('Unexpected argument "webhook"'),
-        }),
+        expect.stringContaining('Unexpected argument "webhook"'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -306,9 +300,9 @@ describe('runRecordsCommand', () => {
 
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: '--source was given more than once. Pass it only once.',
-        }),
+        expect.stringContaining(
+          '--source was given more than once. Pass it only once.',
+        ),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -321,9 +315,7 @@ describe('runRecordsCommand', () => {
 
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: '--source needs a non-empty value.',
-        }),
+        expect.stringContaining('--source needs a non-empty value.'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -354,9 +346,7 @@ describe('runRecordsCommand', () => {
 
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: expect.stringContaining('search'),
-        }),
+        expect.stringContaining('search'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -388,11 +378,11 @@ describe('runRecordsCommand', () => {
 
       expect(console.log).not.toHaveBeenCalledWith('No records found.');
       // Assert the specific fetch-failure message, not a bare console.error
-      // call any other throw in the command would also satisfy.
+      // call any other throw in the command would also satisfy. The command
+      // now prints the composed message string (see describeApiError), not the
+      // raw Error object.
       expect(console.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: 'Failed to fetch records from the server.',
-        }),
+        expect.stringContaining('Failed to fetch records from the server.'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -451,9 +441,29 @@ describe('runRecordsCommand', () => {
     await runRecordsCommand(['list']);
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'Network error' }),
+      expect.stringContaining('Network error'),
     );
     expect(deleteRecords).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A systemic auth failure (expired token) now re-throws from fetchAllRecords
+  // and must surface its classified, actionable message with a non-zero exit —
+  // never masquerade as "No records found." (issue #89).
+  it('surfaces a systemic auth failure with a classified message and non-zero exit', async () => {
+    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchAllRecords).mockRejectedValue(
+      new ApiRequestError('Invalid or missing API token', 401),
+    );
+    const { runRecordsCommand } = await import('@/commands/records.js');
+
+    await runRecordsCommand(['list']);
+
+    expect(console.log).not.toHaveBeenCalledWith('No records found.');
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Authentication failed (HTTP 401)'),
+    );
     expect(process.exitCode).toBe(1);
   });
 });

@@ -85,6 +85,54 @@ describe('runGetCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // A systemic auth failure (expired token) now re-throws from fetchRecord and
+  // must surface its classified, actionable message with a non-zero exit —
+  // distinct from the generic "Failed to fetch record" a genuine 404 produces
+  // (issue #89).
+  it('surfaces a systemic auth failure with a classified message, not "not found"', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchRecord).mockRejectedValue(
+      new ApiRequestError('Invalid or missing API token', 401),
+    );
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Authentication failed (HTTP 401)'),
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Failed to fetch record'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // The systemic message is server-derived, so it must be stripped of terminal
+  // escapes before printing. Pins the sanitize wrap so removing it fails here.
+  it('strips terminal escapes from a server-derived systemic error message', async () => {
+    // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
+    const escape = String.fromCharCode(0x1b);
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchRecord).mockRejectedValue(
+      new ApiRequestError(`${escape}[2JInvalid token`, 401),
+    );
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedEscape = vi
+      .mocked(console.error)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && arg.includes(escape),
+      );
+    expect(printedEscape).toBe(false);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Authentication failed (HTTP 401)'),
+    );
+  });
+
   it('strips control characters from untrusted record fields before printing', async () => {
     // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
     const control = String.fromCharCode(0x1b);

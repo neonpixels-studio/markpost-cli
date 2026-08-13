@@ -558,6 +558,102 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // The core of issue #89: an expired/invalid token surfaces as a systemic
+  // ApiRequestError (401) re-thrown from fetchAllRecords. The sync must fail
+  // loud — a classified, actionable spinner message and a non-zero exit —
+  // never report "No new records, exiting..." and exit 0 (a silent failure a
+  // cron job would treat as success). It must also write and delete nothing,
+  // and stop autoSync from rescheduling into the same dead token.
+  it('fails loud and exits non-zero on an expired-token (401) sync — not a silent success', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    let scheduledAutoSync: boolean | undefined;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    // autoSync on by default — the failure must still return `false`.
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
+    // A leading ESC (0x1b) stands in for a server-derived escape sequence in
+    // the message, so this also pins the sync-path sanitize wrap.
+    const escape = String.fromCharCode(0x1b);
+    vi.mocked(fetchAllRecords).mockRejectedValue(
+      new ApiRequestError(
+        `${escape}[2JInvalid or missing API token — run \`markpost config\` to set a valid one`,
+        401,
+      ),
+    );
+
+    await import('@/index.js');
+
+    // The classified systemic message prints via console.error (guaranteed
+    // output), not the generic "Something went wrong!" — so a cron log says the
+    // token is the problem.
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Authentication failed (HTTP 401)'),
+    );
+    // The server-derived escape must be stripped before printing.
+    const printedEscape = vi
+      .mocked(console.error)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && arg.includes(escape),
+      );
+    expect(printedEscape).toBe(false);
+    expect(mockSpinner.error).not.toHaveBeenCalledWith('Something went wrong!');
+    // The silent-success path must never fire.
+    expect(mockSpinner.success).not.toHaveBeenCalledWith(
+      'No new records, exiting...',
+    );
+    expect(writeMarkdown).not.toHaveBeenCalled();
+    expect(deleteRecords).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    // A dead token recurs, so the scheduler must not spin another pass.
+    expect(scheduledAutoSync).toBe(false);
+  });
+
+  // The same fail-fast holds for a non-auth systemic failure (a 5xx): its
+  // classified message surfaces and the run never reports "No new records".
+  // BUT a 5xx is transient, so — unlike a dead token — it must NOT kill the
+  // autoSync daemon: the run reports autoSync back so the scheduler retries.
+  it('fails loud on a systemic server (503) fetch failure but keeps autoSync alive to retry', async () => {
+    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    let scheduledAutoSync: boolean | undefined;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoSync: true }));
+    vi.mocked(fetchAllRecords).mockRejectedValue(
+      new ApiRequestError('Service unavailable', 503),
+    );
+
+    await import('@/index.js');
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Server error (HTTP 503)'),
+    );
+    expect(mockSpinner.success).not.toHaveBeenCalledWith(
+      'No new records, exiting...',
+    );
+    expect(process.exitCode).toBe(1);
+    // Transient failure: the daemon must retry, so autoSync is preserved.
+    expect(scheduledAutoSync).toBe(true);
+  });
+
   // A partial read (a later page failed mid-pagination) must fail loud too —
   // exit non-zero and mark the spinner errored — while still syncing the pages
   // that were fetched, so cron never treats a truncated sync as clean.
@@ -1231,6 +1327,89 @@ describe('index', () => {
       expect.stringContaining('Deleted'),
     );
     expect(process.exitCode).toBe(1);
+  });
+
+  // A systemic delete failure (dead token) re-throws from deleteRecords: the
+  // sync must surface its classified message, fail loud, AND stop rescheduling
+  // the autoSync daemon — otherwise it wakes every few minutes and re-writes
+  // the same records as duplicates against a server it can't delete from.
+  it('surfaces a systemic delete failure and stops autoSync from rescheduling', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    let scheduledAutoSync: boolean | undefined;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    // autoSync on, so a naive delete-failure path would return `true` and keep
+    // the daemon alive.
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoSync: true }));
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(deleteRecords).mockRejectedValue(
+      new ApiRequestError('Invalid or missing API token', 401),
+    );
+
+    await import('@/index.js');
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Authentication failed (HTTP 401)'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to delete records'),
+    );
+    expect(process.exitCode).toBe(1);
+    // The run reported autoSync off, so the scheduler won't spin another pass.
+    expect(scheduledAutoSync).toBe(false);
+  });
+
+  // A TRANSIENT delete failure (5xx) also fails loud, but must keep autoSync
+  // alive — the server may recover, and the records are still pending, so the
+  // next pass should retry rather than the daemon shutting down permanently.
+  it('keeps autoSync alive after a transient (503) delete failure', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    let scheduledAutoSync: boolean | undefined;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoSync: true }));
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(deleteRecords).mockRejectedValue(
+      new ApiRequestError('Service unavailable', 503),
+    );
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to delete records'),
+    );
+    expect(process.exitCode).toBe(1);
+    expect(scheduledAutoSync).toBe(true);
   });
 
   // Tests 1 and 2 share the same arrange: two records where mockRecord's write
