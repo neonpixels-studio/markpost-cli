@@ -31,6 +31,22 @@ const KEY_VALUE_SEPARATOR = '=';
 const BOOLEAN_TRUE = 'true';
 const BOOLEAN_FALSE = 'false';
 
+// Width the settable-key labels pad to so their accepted-value columns line up.
+// `conflictStrategy` (the longest key) plus two spaces sets it.
+const KEY_LABEL_WIDTH = CONFLICT_STRATEGY_KEY.length + 2;
+
+const BOOLEAN_VALUES_HINT = `${BOOLEAN_TRUE}|${BOOLEAN_FALSE}`;
+
+// Derive the `settable keys` block from the same constants the parser validates
+// against, so adding or renaming a key can't leave the usage text (or `get`
+// output) silently describing fields that no longer match what `set` accepts.
+const SETTABLE_KEYS_USAGE = [
+  ...BOOLEAN_SETTING_KEYS.map(
+    (key) => `    ${key.padEnd(KEY_LABEL_WIDTH)}${BOOLEAN_VALUES_HINT}`,
+  ),
+  `    ${CONFLICT_STRATEGY_KEY.padEnd(KEY_LABEL_WIDTH)}${CONFLICT_STRATEGIES.join('|')}`,
+].join('\n');
+
 export const USAGE = `Usage: markpost settings <get|set> [key=value ...]
 
   get              Print the current server-side sync settings
@@ -38,10 +54,7 @@ export const USAGE = `Usage: markpost settings <get|set> [key=value ...]
                    markpost settings set autoDelete=false conflictStrategy=overwrite
 
   settable keys:
-    autoSync          ${BOOLEAN_TRUE}|${BOOLEAN_FALSE}
-    autoDelete        ${BOOLEAN_TRUE}|${BOOLEAN_FALSE}
-    frontmatter       ${BOOLEAN_TRUE}|${BOOLEAN_FALSE}
-    ${CONFLICT_STRATEGY_KEY}  ${CONFLICT_STRATEGIES.join('|')}`;
+${SETTABLE_KEYS_USAGE}`;
 
 // A parse either yields a typed value or a human-readable reason it failed, so
 // the caller reports the exact problem instead of a generic "invalid value".
