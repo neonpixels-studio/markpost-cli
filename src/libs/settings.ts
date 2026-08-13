@@ -11,8 +11,10 @@ import {
   normalizeAutoSync,
   normalizeConflictStrategy,
   normalizeFrontmatterEnabled,
+  UpdateSettingsInput,
   UserSettings,
   UserSettingsApiResponse,
+  USER_SETTINGS_RESOURCE_TYPE,
 } from '@/types/settings.types.js';
 
 // A read either succeeded (`ok: true`) or failed. On success `settings` may
@@ -47,6 +49,39 @@ export const fetchSettings = async (): Promise<SettingsReadResult> => {
     logApiFailure('fetchSettings', error);
 
     return { ok: false };
+  }
+};
+
+// Writes one or more settings through the same `authedRequest` seam as the
+// read (auth + error parsing + request timeout), mirroring the JSON:API
+// PUT body markpost's `PUT /api/settings` expects. Returns the server's
+// updated attributes, or `null` on any failure — the resilient shape
+// `updateSource` uses, so a command can report the failure without a crash.
+// A timeout still propagates via `logApiFailure` (fail loud) rather than
+// collapsing to `null`. The caller validates field names/values before
+// calling, so the payload only ever carries contract-valid attributes.
+export const updateSettings = async (
+  input: UpdateSettingsInput,
+): Promise<UserSettings | null> => {
+  try {
+    const body = (await authedRequest('/api/settings', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/vnd.api+json',
+      },
+      body: JSON.stringify({
+        data: {
+          type: USER_SETTINGS_RESOURCE_TYPE,
+          attributes: input,
+        },
+      }),
+    })) as UserSettingsApiResponse;
+
+    return unwrapResourceAttributes(body);
+  } catch (error) {
+    logApiFailure('updateSettings', error);
+
+    return null;
   }
 };
 

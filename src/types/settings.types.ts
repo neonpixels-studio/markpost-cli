@@ -46,6 +46,25 @@ export type UserSettingsResource = ApiResourceObject & {
 
 export type UserSettingsApiResponse = ApiResponse<UserSettingsResource | null>;
 
+// The JSON:API resource `type` markpost's settings serializer emits and that
+// PUT /api/settings echoes back — sent on the request body so the write
+// mirrors the same contract the read returns.
+export const USER_SETTINGS_RESOURCE_TYPE = 'user_settings';
+
+// The subset of markpost's PUT /api/settings contract
+// (server/api/settings/index.put.ts) the CLI lets a user change: only the four
+// fields the CLI itself reads and acts on during a sync. The contract also
+// accepts `vaultDir`/`filenameTemplate`/`theme`/`accentColor`, but the CLI
+// never consumes those, so it deliberately doesn't offer to set them here.
+// Every key is optional — a `set` updates one or more fields and leaves the
+// rest untouched (markpost upserts only the attributes present in the body).
+export type UpdateSettingsInput = {
+  autoSync?: boolean;
+  autoDelete?: boolean;
+  frontmatter?: boolean;
+  conflictStrategy?: ConflictStrategy;
+};
+
 export const isConflictStrategy = (
   value: string,
 ): value is ConflictStrategy => {
