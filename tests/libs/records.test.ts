@@ -7,6 +7,9 @@ import {
   fetchPaginatedRecords,
   fetchRecord,
   markRecordSynced,
+  MARK_FAILED,
+  MARK_SYNCED,
+  MARK_TIMED_OUT,
 } from '@/libs/records.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
@@ -1049,17 +1052,18 @@ describe('markRecordSynced', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  // Unlike the other record calls, a mark-synced timeout is non-fatal: the
-  // file is already written, so a stalled PATCH is logged and reported as
-  // `false` (leaving the record to re-sync next run) rather than re-thrown to
-  // abort the whole sync. The AbortSignal still bounds the wait so it can't
-  // hang forever.
-  it('returns false on a request timeout instead of re-throwing', async () => {
+  // Unlike the other record calls, a mark-synced timeout is non-fatal: the file
+  // is already written, so a stalled PATCH is logged and reported as its own
+  // `MARK_TIMED_OUT` outcome (leaving the record to re-sync next run) rather than
+  // re-thrown to abort the whole sync. The distinct outcome lets the batch runner
+  // stop on the first timeout instead of paying it on every remaining record. The
+  // AbortSignal still bounds the wait so it can't hang forever.
+  it('returns the timed-out outcome on a request timeout instead of re-throwing', async () => {
     global.fetch = vi
       .fn()
       .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      false,
+      MARK_TIMED_OUT,
     );
   });
 
@@ -1103,49 +1107,49 @@ describe('markRecordSynced', () => {
     ).toBe(false);
   });
 
-  it('returns true on success', async () => {
+  it('returns the synced outcome on success', async () => {
     mockFetch({ data: { attributes: mockRecord } });
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      true,
+      MARK_SYNCED,
     );
   });
 
   // A 2xx that carries no resource body must count as success, not a spurious
   // failure that warns the user of duplicates that never appear.
-  it('returns true for a 2xx response with a null data body', async () => {
+  it('returns the synced outcome for a 2xx response with a null data body', async () => {
     mockFetch({ data: null });
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      true,
+      MARK_SYNCED,
     );
   });
 
   // A 200 carrying an unparseable body (e.g. an HTML page from a proxy) must
   // fail rather than be reported as a silent success that leaves the record
   // pending and re-duplicated next run.
-  it('returns false for a 2xx response whose body is not valid JSON', async () => {
+  it('returns the failed outcome for a 2xx response whose body is not valid JSON', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.reject(new Error('Unexpected token < in JSON')),
     });
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      false,
+      MARK_FAILED,
     );
   });
 
-  it('returns false when the response contains errors', async () => {
+  it('returns the failed outcome when the response contains errors', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Not Found', detail: 'Record missing' }] } },
       false,
     );
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      false,
+      MARK_FAILED,
     );
   });
 
-  it('returns false on network failure', async () => {
+  it('returns the failed outcome on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      false,
+      MARK_FAILED,
     );
   });
 });

@@ -1,4 +1,5 @@
 import {
+  ApiTimeoutError,
   authedRequest,
   isSystemicApiFailure,
   logApiFailure,
@@ -23,6 +24,18 @@ import {
 // `pending` and, once a record is written, PATCHes it to `synced`.
 export const PENDING_STATUS = 'pending';
 const SYNCED_STATUS = 'synced';
+
+// Result of marking one record synced. `MARK_SYNCED` — the server accepted the
+// PATCH. `MARK_FAILED` — a non-timeout error; the record stays pending and the
+// rest of the batch still runs. `MARK_TIMED_OUT` — the PATCH hit the request
+// timeout, a signal the server is hung; the batch runner stops on the first one
+// rather than paying the full timeout on every remaining record.
+export const MARK_SYNCED = 'synced';
+export const MARK_FAILED = 'failed';
+export const MARK_TIMED_OUT = 'timed-out';
+
+export type MarkSyncedOutcome =
+  typeof MARK_SYNCED | typeof MARK_FAILED | typeof MARK_TIMED_OUT;
 
 // markpost paginates with a cursor: each response's `links.next` embeds the
 // `page[after]` cursor to request the following page, and is `null` once
@@ -333,26 +346,28 @@ export const createRecord = async (
 //
 // Goes through `authedRequest` so the PATCH inherits the same request timeout
 // as every other API call (a stalled connection can't hang the sync forever).
-// Unlike the fetch helpers above, a failure here is logged and reported as
-// `false` rather than re-thrown — including a timeout: this is non-critical
-// post-write bookkeeping (the file is already on disk), so a failed mark
-// simply leaves the record `pending` to re-sync next run, which is far less
-// disruptive than aborting the whole sync after files have landed. The
-// timeout's job here is purely to bound the wait, not to fail loud.
+// Unlike the fetch helpers above, a failure here is logged rather than
+// re-thrown: this is non-critical post-write bookkeeping (the file is already
+// on disk), so a failed mark simply leaves the record `pending` to re-sync
+// next run, which is far less disruptive than aborting the whole sync after
+// files have landed.
 //
-// Returns a plain success boolean rather than the updated record: the caller
-// only needs to know whether the server accepted the change. Reading it back
-// as a resource would mis-report a legitimate 2xx that carries no `data`
-// (markpost's PATCH always returns the record, but a `data: null` shape still
-// counts as success here) as a failure, wrongly warning the user of
-// duplicates. `filePath` is sent deliberately — markpost stores it on the
-// record so its UI can show where a synced note landed; it's the user's own
-// local path going to their own account, not a third-party leak.
+// Returns a three-way outcome rather than a bare boolean so the caller can
+// tell a per-record failure (`MARK_FAILED`, keep going — the next record may
+// succeed) apart from a timeout (`MARK_TIMED_OUT`). A timeout signals a hung
+// server, so the caller stops the remaining batches instead of burning the
+// full request timeout on every one; the record still stays `pending` either
+// way. Reading the body back as a resource would mis-report a legitimate 2xx
+// that carries no `data` (markpost's PATCH always returns the record, but a
+// `data: null` shape still counts as success here) as a failure, wrongly
+// warning the user of duplicates. `filePath` is sent deliberately — markpost
+// stores it on the record so its UI can show where a synced note landed; it's
+// the user's own local path going to their own account, not a third-party leak.
 export const markRecordSynced = async (
   uuid: string,
   filePath: string,
   syncedAt: string = new Date().toISOString(),
-): Promise<boolean> => {
+): Promise<MarkSyncedOutcome> => {
   try {
     // Route through the shared authedRequest seam (like createRecord/
     // fetchRecord): it attaches the bearer token and asserts success (throwing
@@ -378,14 +393,21 @@ export const markRecordSynced = async (
       }),
     });
 
-    return true;
+    return MARK_SYNCED;
   } catch (error) {
     logErrorMessage(
       `markRecordSynced["${uuid}"]`,
       error instanceof Error ? error.message : String(error),
     );
 
-    return false;
+    // A timeout gets its own outcome so the caller can abort the remaining
+    // marks on the first one; every other error just leaves this record
+    // pending and lets the rest of the batch proceed.
+    if (error instanceof ApiTimeoutError) {
+      return MARK_TIMED_OUT;
+    }
+
+    return MARK_FAILED;
   }
 };
 
