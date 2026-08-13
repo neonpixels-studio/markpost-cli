@@ -163,6 +163,7 @@ describe('settings get', () => {
     await runSettingsCommand(['get']);
 
     const output = loggedText();
+    expect(output).toContain('No saved settings on this account');
     expect(output).toContain('conflictStrategy: suffix');
     expect(output).toContain('autoDelete:       true');
   });
@@ -263,6 +264,19 @@ describe('settings set', () => {
     expect(updateSettings).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Unknown setting: `theme`'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('rejects an inherited object member name as an unknown setting', async () => {
+    const { updateSettings } = await import('@/libs/settings.js');
+    const { runSettingsCommand } = await import('@/commands/settings.js');
+
+    await runSettingsCommand(['set', 'toString=false']);
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown setting: `toString`'),
     );
     expect(process.exitCode).toBe(1);
   });

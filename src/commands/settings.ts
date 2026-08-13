@@ -78,6 +78,35 @@ const parseConflictStrategy = (raw: string): ParseResult<ConflictStrategy> => {
   };
 };
 
+const applyBooleanField = (
+  input: UpdateSettingsInput,
+  key: BooleanSettingKey,
+  rawValue: string,
+): string | null => {
+  const parsed = parseBoolean(rawValue);
+
+  if (!parsed.ok) {
+    return `${key}: ${parsed.error}`;
+  }
+
+  input[key] = parsed.value;
+  return null;
+};
+
+const applyConflictStrategyField = (
+  input: UpdateSettingsInput,
+  rawValue: string,
+): string | null => {
+  const parsed = parseConflictStrategy(rawValue);
+
+  if (!parsed.ok) {
+    return `${CONFLICT_STRATEGY_KEY}: ${parsed.error}`;
+  }
+
+  input.conflictStrategy = parsed.value;
+  return null;
+};
+
 // Validates one field against the contract and writes it into the accumulating
 // payload, returning an error message (never throwing) so a bad field fails the
 // whole `set` with a clear reason before any request is made. An unknown key is
@@ -91,31 +120,19 @@ const applyField = (
   // A repeated key would otherwise last-wins silently — the one hole in an
   // otherwise fail-loud parser, and the case most likely to come from a
   // scripted loop or an edited shell-history line where the user can't see
-  // which value actually won.
-  if (key in input) {
+  // which value actually won. `Object.hasOwn` (not `key in input`) so an
+  // inherited member name like `toString` isn't mistaken for a repeat and
+  // instead falls through to the "Unknown setting" branch below.
+  if (Object.hasOwn(input, key)) {
     return `${key}: given more than once.`;
   }
 
   if (isBooleanSettingKey(key)) {
-    const parsed = parseBoolean(rawValue);
-
-    if (!parsed.ok) {
-      return `${key}: ${parsed.error}`;
-    }
-
-    input[key] = parsed.value;
-    return null;
+    return applyBooleanField(input, key, rawValue);
   }
 
   if (key === CONFLICT_STRATEGY_KEY) {
-    const parsed = parseConflictStrategy(rawValue);
-
-    if (!parsed.ok) {
-      return `${key}: ${parsed.error}`;
-    }
-
-    input.conflictStrategy = parsed.value;
-    return null;
+    return applyConflictStrategyField(input, rawValue);
   }
 
   return `Unknown setting: \`${key}\``;
@@ -193,6 +210,16 @@ const getSettings = async (rest: string[]): Promise<void> => {
     console.error(chalk.redBright('Could not read settings from the server.'));
     process.exitCode = 1;
     return;
+  }
+
+  // A successful read with no saved row means the account has never customized
+  // its settings, so what prints below are markpost's defaults, not stored
+  // values. Say so rather than letting the user read a default `autoDelete:
+  // true` as a deliberate choice.
+  if (result.settings === null) {
+    console.log(
+      'No saved settings on this account — showing markpost defaults:',
+    );
   }
 
   printSettings(resolveSyncSettings(result));
