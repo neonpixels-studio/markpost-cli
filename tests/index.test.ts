@@ -4,13 +4,17 @@ import type { Spinner } from 'yocto-spinner';
 import { Record } from '@/types/records.types.js';
 import { UserSettings, ConflictStrategy } from '@/types/settings.types.js';
 import { SettingsReadResult } from '@/libs/settings.js';
+import { MARK_FAILED, MARK_SYNCED, MARK_TIMED_OUT } from '@/libs/records.js';
 
 vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
-vi.mock('@/libs/records.js', () => ({
+// Keep the real module's exports (notably the MARK_* outcome constants and
+// PENDING_STATUS) so the tests compare against the same literals production
+// code does; only the network-touching functions are stubbed.
+vi.mock('@/libs/records.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/libs/records.js')>()),
   fetchAllRecords: vi.fn(),
   deleteRecords: vi.fn(),
   markRecordSynced: vi.fn(),
-  PENDING_STATUS: 'pending',
 }));
 vi.mock('@/libs/markdown.js', () => ({
   writeMarkdown: vi.fn(),
@@ -888,7 +892,7 @@ describe('index', () => {
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(true);
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
 
     await import('@/index.js');
 
@@ -926,7 +930,7 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce('/mock/output/title-2.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(true);
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
 
     await import('@/index.js');
 
@@ -963,7 +967,7 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce(null);
-    vi.mocked(markRecordSynced).mockResolvedValue(true);
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
 
     await import('@/index.js');
 
@@ -1020,7 +1024,7 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(false);
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_FAILED);
 
     await import('@/index.js');
 
@@ -1057,8 +1061,8 @@ describe('index', () => {
     // First record succeeds, second fails — the count and the listed path must
     // reflect exactly the one failure, guarding against an off-by-one.
     vi.mocked(markRecordSynced)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+      .mockResolvedValueOnce(MARK_SYNCED)
+      .mockResolvedValueOnce(MARK_FAILED);
 
     await import('@/index.js');
 
@@ -1106,7 +1110,7 @@ describe('index', () => {
     // Only the 11th record (in the second batch, since concurrency is 10)
     // fails, exercising the slice/order arithmetic across batches.
     vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
-      Promise.resolve(uuid !== 'uuid-10'),
+      Promise.resolve(uuid === 'uuid-10' ? MARK_FAILED : MARK_SYNCED),
     );
 
     await import('@/index.js');
@@ -1120,6 +1124,264 @@ describe('index', () => {
     );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Marked 10 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('stops marking on the first timeout and reports the unattempted records as still pending', async () => {
+    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // One record in the first batch (concurrency 10) times out; the second
+    // batch of five must never be attempted — those records stay pending.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(uuid === 'uuid-3' ? MARK_TIMED_OUT : MARK_SYNCED),
+    );
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(10);
+    expect(markRecordSynced).not.toHaveBeenCalledWith(
+      'uuid-10',
+      expect.anything(),
+    );
+    // Timed-out record (uuid-3) plus the five never attempted = six pending.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('6 record(s) still pending'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-3 -> /mock/output/uuid-3.md'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-14 -> /mock/output/uuid-14.md'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 9 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not abort on a plain failure — a first-batch failure still marks every record', async () => {
+    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // uuid-3 fails in the first batch. A plain failure must NOT stop the run —
+    // every record is still attempted, and the report uses the failure wording,
+    // not the timeout wording. Guards against widening the abort to any failure.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(uuid === 'uuid-3' ? MARK_FAILED : MARK_SYNCED),
+    );
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(15);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 1 record(s) synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-3 -> /mock/output/uuid-3.md'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 14 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('reports only the timed-out record when the timeout lands in the final batch', async () => {
+    const records: Record[] = Array.from({ length: 10 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // The ten records fill exactly one batch, so uuid-9's timeout leaves nothing
+    // unattempted — only the timed-out record itself is pending.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(uuid === 'uuid-9' ? MARK_TIMED_OUT : MARK_SYNCED),
+    );
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(10);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('1 record(s) still pending'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 9 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('aborts on a timeout in a later batch, not just the first', async () => {
+    const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // uuid-12 sits in the second batch (concurrency 10); the third batch of
+    // five must never be attempted, proving the abort check runs per batch.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(uuid === 'uuid-12' ? MARK_TIMED_OUT : MARK_SYNCED),
+    );
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(20);
+    expect(markRecordSynced).not.toHaveBeenCalledWith(
+      'uuid-20',
+      expect.anything(),
+    );
+    // uuid-12 timed out plus the five never attempted (uuid-20..24) = six.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('6 record(s) still pending'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('counts a plain failure alongside a timeout in the same batch as pending', async () => {
+    const records: Record[] = Array.from({ length: 12 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // uuid-1 fails and uuid-4 times out — both in the first batch. The abort
+    // still fires, and both records (plus the two never attempted) are pending.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
+      if (uuid === 'uuid-4') {
+        return Promise.resolve(MARK_TIMED_OUT);
+      }
+
+      if (uuid === 'uuid-1') {
+        return Promise.resolve(MARK_FAILED);
+      }
+
+      return Promise.resolve(MARK_SYNCED);
+    });
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(10);
+    // uuid-1 failed, uuid-4 timed out, uuid-10 and uuid-11 never attempted = four.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('4 record(s) still pending'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-1 -> /mock/output/uuid-1.md'),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -1143,7 +1405,7 @@ describe('index', () => {
       partial: true,
     });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(true);
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
 
     await import('@/index.js');
 
@@ -1182,7 +1444,7 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/evil.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(false);
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_FAILED);
 
     await import('@/index.js');
 

@@ -4,6 +4,9 @@ import {
   deleteRecords,
   fetchAllRecords,
   markRecordSynced,
+  MARK_SYNCED,
+  MARK_TIMED_OUT,
+  MarkSyncedOutcome,
   PENDING_STATUS,
 } from '@/libs/records.js';
 import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
@@ -330,12 +333,25 @@ function reportWriteFailures(failedRecords: FailedRecord[]): void {
   process.exitCode = 1;
 }
 
-// PATCHes the written records synced in bounded-concurrency batches, returning
-// a success flag per record in the original order.
+// Outcome of a whole mark-synced run. `outcomes` holds one entry per *attempted*
+// record in the original order; on a timeout abort it's shorter than the input
+// because the remaining batches were never sent. `timedOut` records whether a
+// timeout stopped the run early so the caller can report the abort explicitly.
+interface MarkSyncedRun {
+  outcomes: MarkSyncedOutcome[];
+  timedOut: boolean;
+}
+
+// PATCHes the written records synced in bounded-concurrency batches, stopping on
+// the first timeout. A timeout means the server is hung, so firing the remaining
+// batches would burn the full request timeout on each one before reporting;
+// aborting leaves those records pending to retry next run, mirroring the push
+// command's batch-abort. Non-timeout failures don't abort — the next record may
+// still succeed.
 async function markRecordsInBatches(
   writtenRecords: WrittenRecord[],
-): Promise<boolean[]> {
-  const results: boolean[] = [];
+): Promise<MarkSyncedRun> {
+  const outcomes: MarkSyncedOutcome[] = [];
 
   for (
     let start = 0;
@@ -343,16 +359,32 @@ async function markRecordsInBatches(
     start += MARK_SYNCED_CONCURRENCY
   ) {
     const batch = writtenRecords.slice(start, start + MARK_SYNCED_CONCURRENCY);
-    const batchResults = await Promise.all(
+    const batchOutcomes = await Promise.all(
       batch.map(({ record, filePath }) =>
         markRecordSynced(record.uuid, filePath),
       ),
     );
 
-    results.push(...batchResults);
+    outcomes.push(...batchOutcomes);
+
+    if (batchOutcomes.includes(MARK_TIMED_OUT)) {
+      return { outcomes, timedOut: true };
+    }
   }
 
-  return results;
+  return { outcomes, timedOut: false };
+}
+
+// Headline for the mark-synced failure report. A timeout abort reads
+// differently from a scatter of per-record failures: it stopped the run early,
+// so the count includes records never attempted. Both leave the listed records
+// pending on the server.
+function markFailureHeadline(pendingCount: number, timedOut: boolean): string {
+  if (timedOut) {
+    return `Timed out marking records synced — stopped after the batch that first timed out; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+  }
+
+  return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
 }
 
 // Surfaces mark-synced failures loudly (never as success): an unmarked record
@@ -362,11 +394,10 @@ async function markRecordsInBatches(
 function reportMarkFailures(
   failures: WrittenRecord[],
   markedCount: number,
+  timedOut: boolean,
   spinner: Spinner,
 ): void {
-  spinner.error(
-    `Failed to mark ${failures.length} record(s) synced — written locally but still pending on the server; they may be re-written next run.`,
-  );
+  spinner.error(markFailureHeadline(failures.length, timedOut));
   failures.forEach(({ record, filePath }) => {
     // Sanitize the composed line: record.uuid comes from the same untrusted API
     // response as a title, and filePath embeds the user-configured output path —
@@ -399,13 +430,18 @@ async function markWrittenRecordsSynced(
 
   spinner.start('Marking records synced...');
 
-  const results = await markRecordsInBatches(writtenRecords);
-  const failures = writtenRecords.filter((_written, index) => !results[index]);
+  const { outcomes, timedOut } = await markRecordsInBatches(writtenRecords);
+  // A record is pending if its mark failed or it was never attempted (its
+  // outcome is undefined because a timeout aborted the run before its batch).
+  const pending = writtenRecords.filter(
+    (_written, index) => outcomes[index] !== MARK_SYNCED,
+  );
 
-  if (failures.length > 0) {
+  if (pending.length > 0) {
     reportMarkFailures(
-      failures,
-      writtenRecords.length - failures.length,
+      pending,
+      writtenRecords.length - pending.length,
+      timedOut,
       spinner,
     );
     return;
