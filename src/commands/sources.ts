@@ -1,3 +1,4 @@
+import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { input, select } from '@inquirer/prompts';
 import {
@@ -9,7 +10,7 @@ import {
 import { checkConfig } from '@/libs/config.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage } from '@/libs/usage.js';
-import { JSON_FLAG, printJson } from '@/libs/output.js';
+import { printJson } from '@/libs/output.js';
 import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
 
 // Mirror the endpoint constants markpost's web app uses in
@@ -51,24 +52,30 @@ const SOURCES_HANDLERS = new Map<
 ]);
 
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
-  const [subcommand, uuid] = args;
-  const handler = SOURCES_HANDLERS.get(subcommand);
-
-  // Validate before the config check so a bad subcommand fails on usage alone,
-  // without needing a configured account.
-  if (!handler) {
-    failWithSubcommandUsage(subcommand, USAGE);
-    return;
-  }
-
-  // Only `list` reads --json; the other handlers ignore it. It's parsed here as
-  // a plain presence check (not parseArgs) so update/delete keep taking a bare
-  // uuid positional exactly as before.
-  const json = args.includes(JSON_FLAG);
-
   try {
+    // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
+    // still prompts rather than trying to delete a source named "--json") and
+    // rejects an unknown/mistyped flag, matching how `get` and `records list`
+    // parse. Only `list` reads json; the other handlers ignore the argument.
+    const { values, positionals } = parseArgs({
+      args,
+      allowPositionals: true,
+      options: {
+        json: { type: 'boolean' },
+      },
+    });
+    const [subcommand, uuid] = positionals;
+    const handler = SOURCES_HANDLERS.get(subcommand);
+
+    // Validate before the config check so a bad subcommand fails on usage
+    // alone, without needing a configured account.
+    if (!handler) {
+      failWithSubcommandUsage(subcommand, USAGE);
+      return;
+    }
+
     await checkConfig();
-    await handler(uuid, json);
+    await handler(uuid, values.json ?? false);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
     // that's a user abort, not a command failure, so don't flag it non-zero.
@@ -134,8 +141,15 @@ const printSource = (source: Source): void => {
 // spread would carry a `providerSecret` if a malformed/hostile list response
 // ever attached one, and list must never surface that one-time secret (only
 // `create` does). This whitelist is what keeps the JSON path as safe as the
-// pretty printer, which likewise names each field it prints.
-const serializeSourceForJson = (source: Source): Record<string, unknown> => ({
+// pretty printer, which likewise names each field it prints. The record JSON
+// paths (`get`, `records list`) intentionally pass the whole record through
+// instead: a record carries no secret sibling field, and a faithful passthrough
+// keeps new server fields visible rather than silently dropping them. The
+// `Source & { endpoint: string }` return type makes a future Source field fail
+// the build here until it is deliberately included or excluded.
+const serializeSourceForJson = (
+  source: Source,
+): Source & { endpoint: string } => ({
   uuid: source.uuid,
   createdAt: source.createdAt,
   type: source.type,

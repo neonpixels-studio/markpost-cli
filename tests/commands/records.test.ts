@@ -186,10 +186,16 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['list', '--json']);
 
+      // Exactly one stdout write, so a future stray console.log before the
+      // payload breaks the test instead of hiding in earlier calls.
+      expect(console.log).toHaveBeenCalledTimes(1);
       const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
       const parsed = JSON.parse(output);
       expect(parsed).toHaveLength(2);
-      expect(parsed[0]).toMatchObject({ uuid: 'abc-123', title: 'First Record' });
+      expect(parsed[0]).toMatchObject({
+        uuid: 'abc-123',
+        title: 'First Record',
+      });
       expect(parsed[1]).toMatchObject({
         uuid: 'def-456',
         title: 'Second Record',
@@ -440,9 +446,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('never deletes the records it lists', async () => {
-      const { fetchAllRecords, deleteRecords } = await import(
-        '@/libs/records.js'
-      );
+      const { fetchAllRecords, deleteRecords } =
+        await import('@/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord, secondRecord],
@@ -520,9 +525,8 @@ describe('runRecordsCommand', () => {
   });
 
   it('surfaces a fetch error instead of throwing', async () => {
-    const { fetchAllRecords, deleteRecords } = await import(
-      '@/libs/records.js'
-    );
+    const { fetchAllRecords, deleteRecords } =
+      await import('@/libs/records.js');
     vi.mocked(fetchAllRecords).mockRejectedValue(new Error('Network error'));
     const { runRecordsCommand } = await import('@/commands/records.js');
 

@@ -183,6 +183,31 @@ describe('runGetCommand', () => {
     expect(JSON.parse(output).title).toBe(`A${control}B`);
   });
 
+  it('writes nothing to stdout and exits 1 when the record is missing, even with --json', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(null);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--json']);
+
+    // A `jq` consumer relies on stdout being empty when the fetch fails, not a
+    // `null` payload it would try to parse.
+    expect(console.log).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('exits 1 on an unknown flag before checking config or fetching', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--bogus']);
+
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(fetchRecord).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
   it('catches and logs an error when checkConfig throws', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     vi.mocked(checkConfig).mockRejectedValue(new Error('boom'));
