@@ -345,7 +345,10 @@ describe('runPushCommand', () => {
       missing: [],
       skipped: ['./vault/locked'],
     });
-    vi.mocked(readMarkdown).mockReturnValue({ title: 'Ok', content: 'Content' });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'Ok',
+      content: 'Content',
+    });
     vi.mocked(createRecord).mockResolvedValue(recordFor('Ok', 'uuid-ok'));
     const { runPushCommand } = await import('@/commands/push.js');
 

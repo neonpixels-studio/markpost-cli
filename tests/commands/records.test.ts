@@ -175,6 +175,90 @@ describe('runRecordsCommand', () => {
       expect(console.log).toHaveBeenCalledWith('A B');
     });
 
+    it('prints the records as a parseable JSON array with --json', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord, secondRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--json']);
+
+      // Exactly one stdout write, so a future stray console.log before the
+      // payload breaks the test instead of hiding in earlier calls.
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      const parsed = JSON.parse(output);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0]).toMatchObject({
+        uuid: 'abc-123',
+        title: 'First Record',
+      });
+      expect(parsed[1]).toMatchObject({
+        uuid: 'def-456',
+        title: 'Second Record',
+      });
+    });
+
+    it('still threads filters through when --json is passed', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--source', 'webhook', '--json']);
+
+      expect(fetchAllRecords).toHaveBeenCalledWith({
+        source: 'webhook',
+        status: undefined,
+        search: undefined,
+      });
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toHaveLength(1);
+    });
+
+    it('prints an empty JSON array (not "No records found.") for --json with no records', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--json']);
+
+      expect(console.log).not.toHaveBeenCalledWith('No records found.');
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toEqual([]);
+    });
+
+    // A partial read must keep stdout valid JSON (jq-safe): the warning goes to
+    // stderr only, and the command still exits non-zero.
+    it('writes clean JSON to stdout on a partial read, warning only on stderr', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord],
+        partial: true,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--json']);
+
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toHaveLength(1);
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('this list may be incomplete'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
     it('passes no filters through when no flags are given', async () => {
       const { fetchAllRecords } = await import('@/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
@@ -352,9 +436,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('never deletes the records it lists', async () => {
-      const { fetchAllRecords, deleteRecords } = await import(
-        '@/libs/records.js'
-      );
+      const { fetchAllRecords, deleteRecords } =
+        await import('@/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord, secondRecord],
@@ -432,9 +515,8 @@ describe('runRecordsCommand', () => {
   });
 
   it('surfaces a fetch error instead of throwing', async () => {
-    const { fetchAllRecords, deleteRecords } = await import(
-      '@/libs/records.js'
-    );
+    const { fetchAllRecords, deleteRecords } =
+      await import('@/libs/records.js');
     vi.mocked(fetchAllRecords).mockRejectedValue(new Error('Network error'));
     const { runRecordsCommand } = await import('@/commands/records.js');
 
