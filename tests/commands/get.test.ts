@@ -169,7 +169,7 @@ describe('runGetCommand', () => {
   // value round-trips losslessly, unlike the pretty path that blanks escapes.
   // Covers a C0 escape (0x1b, escaped by JSON.stringify) and a C1 escape
   // (0x9b/CSI, escaped by printJson since JSON.stringify leaves it raw).
-  it.each([0x1b, 0x9b])(
+  it.each([0x1b, 0x7f, 0x80, 0x9b, 0x9f])(
     'emits faithful, \\u-escaped values on the --json path for control 0x%x',
     async (codePoint) => {
       const control = String.fromCharCode(codePoint);

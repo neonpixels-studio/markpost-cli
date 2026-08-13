@@ -353,6 +353,19 @@ describe('runSourcesCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    it('rejects --json on update before prompting or calling the API', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', '--json']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
     it('exits 1 on a mistyped flag instead of silently printing human text', async () => {
       const { checkConfig } = await import('@/libs/config.js');
       const { fetchSources } = await import('@/libs/sources.js');

@@ -41,5 +41,15 @@ const escapeResidualControls = (json: string): string =>
 // pretty printers, the JSON path keeps the data faithful (a control byte
 // survives as its \u escape) instead of blanking it via the terminal sanitizer.
 export const printJson = (value: unknown): void => {
-  console.log(escapeResidualControls(JSON.stringify(value, null, 2)));
+  const json = JSON.stringify(value, null, 2);
+
+  // JSON.stringify returns undefined for a non-serializable top-level value
+  // (undefined, a function, a symbol). Today's callers guard against that, but
+  // the `unknown` signature invites it, so fail with a clear message rather
+  // than letting `escapeResidualControls(undefined)` throw an opaque TypeError.
+  if (json === undefined) {
+    throw new Error('Cannot print a non-serializable value as JSON.');
+  }
+
+  console.log(escapeResidualControls(json));
 };
