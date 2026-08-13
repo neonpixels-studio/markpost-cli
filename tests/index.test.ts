@@ -1090,6 +1090,57 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('does not abort on a plain failure — a first-batch failure still marks every record', async () => {
+    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // uuid-3 fails in the first batch. A plain failure must NOT stop the run —
+    // every record is still attempted, and the report uses the failure wording,
+    // not the timeout wording. Guards against widening the abort to any failure.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(uuid === 'uuid-3' ? MARK_FAILED : MARK_SYNCED),
+    );
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(15);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 1 record(s) synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-3 -> /mock/output/uuid-3.md'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 14 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it('aborts on a timeout in a later batch, not just the first', async () => {
     const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
       uuid: `uuid-${index}`,

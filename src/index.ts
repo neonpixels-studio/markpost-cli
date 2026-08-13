@@ -375,7 +375,7 @@ async function markRecordsInBatches(
 // pending on the server.
 function markFailureHeadline(pendingCount: number, timedOut: boolean): string {
   if (timedOut) {
-    return `Timed out marking records synced — stopped after the first timeout; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+    return `Timed out marking records synced — stopped after the batch that first timed out; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
   return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
