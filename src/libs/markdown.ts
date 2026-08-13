@@ -1,12 +1,14 @@
 import {
   writeFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   rmSync,
 } from 'node:fs';
 import {
   basename,
+  dirname,
   extname,
   isAbsolute,
   relative,
@@ -134,16 +136,24 @@ const writeToFirstAvailablePath = (
   );
 };
 
-// `overwrite` strategy: replace whatever is at `<slug>.md` with this record.
-// Remove any existing entry first, then exclusively create a fresh regular
-// file. `rmSync` acts on the link itself, so a symlink is unlinked (its
-// target outside the vault is left untouched) and a hardlink loses only this
-// name (the shared inode is never truncated) — that's what stops an
-// `overwrite` write from following a planted link out of the vault, since
-// `resolveWithinOutputDirectory` only guards the string path. Recreating with
-// the exclusive flag means that if something races a new entry into the gap,
-// the write fails (EEXIST) rather than following it. No collision loop — the
-// user has opted into the newest record winning a slug clash.
+// Replace whatever is at `targetPath` with a fresh regular file.
+// Remove any existing entry first, then exclusively create the file. `rmSync`
+// acts on the link itself, so a symlink is unlinked (its target outside the
+// vault is left untouched) and a hardlink loses only this name (the shared
+// inode is never truncated) — that's what stops the write from following a
+// planted link out of the vault, since `resolveWithinOutputDirectory` only
+// guards the string path. Recreating with the exclusive flag means that if
+// something races a new entry into the gap, the write fails (EEXIST) rather
+// than following it.
+const writeReplacingExisting = (targetPath: string, content: string): void => {
+  rmSync(targetPath, { force: true });
+  writeFileSync(targetPath, content, { flag: EXCLUSIVE_WRITE_FLAG });
+};
+
+// `overwrite` strategy: replace whatever is at `<slug>.md` with this record. No
+// collision loop — the user has opted into the newest record winning a slug
+// clash. See writeReplacingExisting for the unlink-then-exclusive-create
+// rationale that keeps the write from following a planted symlink.
 const writeOverwriting = (
   outputDirectory: string,
   slug: string,
@@ -151,8 +161,7 @@ const writeOverwriting = (
 ): string => {
   const candidatePath = resolveBasePath(outputDirectory, slug);
 
-  rmSync(candidatePath, { force: true });
-  writeFileSync(candidatePath, content, { flag: EXCLUSIVE_WRITE_FLAG });
+  writeReplacingExisting(candidatePath, content);
 
   return candidatePath;
 };
@@ -223,6 +232,87 @@ const resolveStrategyForSlug = (
   return conflictStrategy;
 };
 
+// Keep writtenPaths to one uuid per path: when a record lands on a path a
+// different record previously tracked (that record's file was moved out of the
+// vault and this record recreated the path), drop the stale entry. Without this,
+// a settled-but-not-forgotten stale entry could shadow the live owner and either
+// block its reuse (dropping a duplicate) or route a reuse onto another record's
+// file. Deleting the current key during Map.forEach is safe.
+const evictStalePathOwners = (
+  writtenPaths: Map<string, string>,
+  writtenPath: string,
+  recordUuid: string,
+): void => {
+  writtenPaths.forEach((entryPath, entryUuid) => {
+    if (entryPath === writtenPath && entryUuid !== recordUuid) {
+      writtenPaths.delete(entryUuid);
+    }
+  });
+};
+
+// A record whose server-side settle (mark-synced or delete) failed on a prior
+// pass is re-fetched as still-pending next pass. `writtenPaths` maps each such
+// uuid to the file already written for it this process, so the record reuses its
+// own file instead of the suffix strategy dropping a fresh `<slug>-2.md`,
+// `<slug>-3.md` duplicate every pass — the written-vs-settled split: the local
+// file is already written, only the server-side step still needs retrying.
+// Returns the reusable path, or null (the caller then falls through to a fresh
+// write) when any guard fails: the uuid is untrackable (empty) or was never
+// written; the tracked path is no longer a regular file (moved/deleted, or
+// replaced by a directory or symlink — reuse writes nothing for suffix/skip, so
+// settling the record against a non-file would strand it with no local content,
+// and lstat rejects a symlink rather than following it out of the vault); or the
+// file no longer lives in the current output directory (a mid-run
+// outputDirectory change must not send the record back to the old vault — same
+// reason seenSlugs is keyed by resolved path). evictStalePathOwners keeps
+// writtenPaths to one uuid per path, so a surviving entry is unambiguously this
+// record's file. Keyed by uuid, so a record whose title changed server-side
+// between passes keeps its original filename (its existing file is reused rather
+// than orphaned under a new slug). The check is existence + type, not identity:
+// if an external process deletes this record's file and drops a *different*
+// regular file at the same path between passes, it is reused as-is — an accepted
+// edge, since the fix (tracking inode/mtime per path) is disproportionate to a
+// rare same-path race. A stat error other than "missing" (EACCES, ENOTDIR) is
+// treated as "not reusable" rather than thrown, so a best-effort lookup can
+// never fail an otherwise-writable record.
+const resolveReusableWrittenPath = (
+  outputDirectory: string,
+  recordUuid: string,
+  writtenPaths: Map<string, string>,
+): string | null => {
+  if (!recordUuid) {
+    return null;
+  }
+
+  const existingPath = writtenPaths.get(recordUuid);
+
+  if (!existingPath) {
+    return null;
+  }
+
+  if (!isExistingRegularFile(existingPath)) {
+    return null;
+  }
+
+  if (resolve(dirname(existingPath)) !== resolve(outputDirectory)) {
+    return null;
+  }
+
+  return existingPath;
+};
+
+// True only when `filePath` is an existing regular file. lstat (not stat) so a
+// symlink reports false rather than resolving to its target. `throwIfNoEntry`
+// covers a missing entry; any other stat error (EACCES, ENOTDIR) is caught and
+// treated as "not reusable" so the best-effort reuse lookup can't fail a record.
+const isExistingRegularFile = (filePath: string): boolean => {
+  try {
+    return lstatSync(filePath, { throwIfNoEntry: false })?.isFile() ?? false;
+  } catch {
+    return false;
+  }
+};
+
 // Batch-wide precondition for writing: the output directory must be configured
 // and must exist. Both failures (unset config, an un-creatable/read-only path)
 // doom every record in a sync, not just one file. A caller looping over records
@@ -252,20 +342,55 @@ export const ensureOutputDirectory = (): string => {
 // path to the uuid that owns it; the caller threads it across a batch AND
 // across autoSync passes so `overwrite` can't lose two different same-slug
 // records while still letting a record re-overwrite its own file (see
-// resolveStrategyForSlug). `includeFrontmatter` is the user's `frontmatter`
-// setting; when off the file is written without a frontmatter block (see
-// buildRecordDocument).
+// resolveStrategyForSlug). `writtenPaths` maps each uuid to the file written
+// for it this process; the caller threads it across passes so a record whose
+// server settle failed reuses its file instead of accumulating suffixed
+// duplicates (see resolveReusableWrittenPath). `includeFrontmatter` is the
+// user's `frontmatter` setting; when off the file is written without a
+// frontmatter block (see buildRecordDocument).
 export const writeMarkdown = (
   record: Record,
   conflictStrategy: ConflictStrategy = DEFAULT_CONFLICT_STRATEGY,
   seenSlugs: Map<string, string> = new Map(),
   includeFrontmatter = true,
+  writtenPaths: Map<string, string> = new Map(),
 ): string | null => {
   const outputDirectory = ensureOutputDirectory();
 
   const slug = slugifyTitle(record.title, record.uuid);
   const basePath = resolveBasePath(outputDirectory, slug);
   const content = buildRecordDocument(record, includeFrontmatter);
+
+  // A re-fetched, still-unsettled record reuses its own file rather than letting
+  // any strategy drop a suffixed duplicate (see resolveReusableWrittenPath).
+  // Runs before strategy resolution so it applies to suffix, overwrite, and skip
+  // alike.
+  const reusablePath = resolveReusableWrittenPath(
+    outputDirectory,
+    record.uuid,
+    writtenPaths,
+  );
+
+  // `suffix` and `skip` both preserve existing files (suffix by writing a new
+  // suffixed file, skip by not writing at all), so on reuse they keep the file
+  // as-is: reusing the path lets the record settle server-side without dropping
+  // a duplicate and without clobbering a note edited in the vault between
+  // passes. The tradeoff is deliberate — a record whose content changed
+  // server-side between passes keeps its pass-one file under suffix/skip
+  // (preserving a local edit is preferred over re-fetching server content, in
+  // keeping with these strategies' "don't clobber" intent). Only `overwrite`
+  // (the user opted into the newest record replacing the file) refreshes the
+  // reused file with the record's latest content.
+  if (reusablePath && conflictStrategy !== 'overwrite') {
+    return reusablePath;
+  }
+
+  if (reusablePath) {
+    writeReplacingExisting(reusablePath, content);
+
+    return reusablePath;
+  }
+
   const effectiveStrategy = resolveStrategyForSlug(
     conflictStrategy,
     basePath,
@@ -285,6 +410,15 @@ export const writeMarkdown = (
   // the slug.
   if (writtenPath === basePath) {
     seenSlugs.set(basePath, record.uuid);
+  }
+
+  // Remember the file this uuid landed on so a later pass that re-fetches it
+  // (its server settle failed) reuses it. Skip a `skip` no-op (null) and an
+  // empty uuid, which can't be tracked; the orchestrator drops the entry once
+  // the record settles server-side.
+  if (writtenPath !== null && record.uuid) {
+    evictStalePathOwners(writtenPaths, writtenPath, record.uuid);
+    writtenPaths.set(record.uuid, writtenPath);
   }
 
   return writtenPath;
