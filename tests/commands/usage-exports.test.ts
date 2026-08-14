@@ -24,9 +24,12 @@ describe('command USAGE exports', () => {
     ['get', GET_USAGE],
     ['sources', SOURCES_USAGE],
     ['records', RECORDS_USAGE],
-  ])('%s exports a non-empty USAGE string starting with "Usage:"', (name, usage) => {
-    expect(typeof usage).toBe('string');
-    expect(usage.length).toBeGreaterThan(0);
-    expect(usage.startsWith(`Usage: markpost ${name}`)).toBe(true);
-  });
+  ])(
+    '%s exports a non-empty USAGE string starting with "Usage:"',
+    (name, usage) => {
+      expect(typeof usage).toBe('string');
+      expect(usage.length).toBeGreaterThan(0);
+      expect(usage.startsWith(`Usage: markpost ${name}`)).toBe(true);
+    },
+  );
 });

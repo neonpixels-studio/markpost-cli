@@ -85,6 +85,54 @@ describe('runGetCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // A systemic auth failure (expired token) now re-throws from fetchRecord and
+  // must surface its classified, actionable message with a non-zero exit —
+  // distinct from the generic "Failed to fetch record" a genuine 404 produces
+  // (issue #89).
+  it('surfaces a systemic auth failure with a classified message, not "not found"', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchRecord).mockRejectedValue(
+      new ApiRequestError('Invalid or missing API token', 401),
+    );
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Authentication failed (HTTP 401)'),
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Failed to fetch record'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // The systemic message is server-derived, so it must be stripped of terminal
+  // escapes before printing. Pins the sanitize wrap so removing it fails here.
+  it('strips terminal escapes from a server-derived systemic error message', async () => {
+    // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
+    const escape = String.fromCharCode(0x1b);
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchRecord).mockRejectedValue(
+      new ApiRequestError(`${escape}[2JInvalid token`, 401),
+    );
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedEscape = vi
+      .mocked(console.error)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && arg.includes(escape),
+      );
+    expect(printedEscape).toBe(false);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Authentication failed (HTTP 401)'),
+    );
+  });
+
   it('strips control characters from untrusted record fields before printing', async () => {
     // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
     const control = String.fromCharCode(0x1b);
@@ -130,6 +178,87 @@ describe('runGetCommand', () => {
     expect(console.log).toHaveBeenCalledWith(
       '# Heading\n\n- item one\n\titem two [2J',
     );
+  });
+
+  it('prints the record as a single parseable JSON object with --json', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--json']);
+
+    // One stdout write, and it is JSON — not the labeled "uuid:       " line.
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+    expect(output).not.toContain('uuid:       ');
+    expect(JSON.parse(output)).toMatchObject({
+      uuid: 'abc-123',
+      title: 'Test Title',
+      content: 'Test Content',
+      createdAt: '2024-01-01T00:00:00Z',
+    });
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  it('accepts --json before the uuid', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['--json', 'abc-123']);
+
+    expect(fetchRecord).toHaveBeenCalledWith('abc-123');
+    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+    expect(JSON.parse(output).uuid).toBe('abc-123');
+  });
+
+  // The JSON path stays faithful rather than terminal-sanitizing: no raw
+  // control byte reaches stdout (it is escaped to a printable \u form), but the
+  // value round-trips losslessly, unlike the pretty path that blanks escapes.
+  // Covers a C0 escape (0x1b, escaped by JSON.stringify) and a C1 escape
+  // (0x9b/CSI, escaped by printJson since JSON.stringify leaves it raw).
+  it.each([0x1b, 0x7f, 0x80, 0x9b, 0x9f])(
+    'emits faithful, \\u-escaped values on the --json path for control 0x%x',
+    async (codePoint) => {
+      const control = String.fromCharCode(codePoint);
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue({
+        ...mockRecord,
+        title: `A${control}B`,
+      });
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', '--json']);
+
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(output).not.toContain(control);
+      expect(JSON.parse(output).title).toBe(`A${control}B`);
+    },
+  );
+
+  it('writes nothing to stdout and exits 1 when the record is missing, even with --json', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(null);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--json']);
+
+    // A `jq` consumer relies on stdout being empty when the fetch fails, not a
+    // `null` payload it would try to parse.
+    expect(console.log).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('exits 1 on an unknown flag before checking config or fetching', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--bogus']);
+
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(fetchRecord).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it('catches and logs an error when checkConfig throws', async () => {

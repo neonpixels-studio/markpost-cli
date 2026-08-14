@@ -7,6 +7,9 @@ import {
   fetchPaginatedRecords,
   fetchRecord,
   markRecordSynced,
+  MARK_FAILED,
+  MARK_SYNCED,
+  MARK_TIMED_OUT,
 } from '@/libs/records.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
@@ -102,6 +105,54 @@ describe('fetchAllRecords', () => {
     });
 
     expect(await fetchAllRecords({ source: 'bogus' })).toEqual({ ok: false });
+  });
+
+  // A systemic auth (401) failure on the initial page must PROPAGATE (like a
+  // timeout) rather than collapse to `{ ok: false }` — so the sync surfaces the
+  // real, classified cause (expired token) instead of a generic failed-fetch
+  // message (issue #89). Distinct from a 400 filter rejection above, which
+  // stays `{ ok: false }`.
+  it('propagates a systemic auth (401) failure instead of returning { ok: false }', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+
+    await expect(fetchAllRecords()).rejects.toMatchObject({
+      statusCode: 401,
+      isSystemic: true,
+    });
+  });
+
+  // A systemic failure partway through pagination must fail loud — discard the
+  // pages already collected and propagate — never return page 1 as if complete
+  // (mirrors the mid-pagination timeout behavior).
+  it('propagates a systemic failure that strikes on a later page', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [{ attributes: mockRecord }],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: {
+              next: '/api/records?page[after]=abc-123&page[size]=1',
+              prev: null,
+            },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ data: { errors: [] } }),
+      });
+
+    await expect(fetchAllRecords()).rejects.toMatchObject({
+      statusCode: 500,
+      isSystemic: true,
+    });
   });
 
   // A legitimately empty account is a success, distinct from a failed fetch.
@@ -756,6 +807,53 @@ describe('fetchPaginatedRecords', () => {
       expect.stringContaining('Skipped 1 record(s) with no attributes'),
     );
   });
+
+  // Auth/5xx doom every page of the read, not just this one, so
+  // fetchPaginatedRecords re-throws them (as a systemic ApiRequestError, like
+  // createRecord) instead of collapsing to null — that distinction is what
+  // lets the sync fail-fast on an expired token rather than report "no
+  // records" and exit 0 (issue #89).
+  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+
+    await expect(fetchPaginatedRecords()).rejects.toMatchObject({
+      statusCode: 401,
+      isSystemic: true,
+    });
+  });
+
+  it('re-throws a systemic server (5xx) failure instead of returning null', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+
+    await expect(fetchPaginatedRecords()).rejects.toMatchObject({
+      statusCode: 503,
+      isSystemic: true,
+    });
+  });
+
+  // A per-request 4xx (a bad filter value the payload caused) is NOT systemic:
+  // it stays a null return so the caller reports it as a failed fetch without
+  // treating it as a batch-wide abort.
+  it('returns null for a non-systemic 4xx failure', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () =>
+        Promise.resolve({
+          errors: [{ title: 'Invalid filter[source]', detail: 'bad' }],
+        }),
+    });
+
+    expect(await fetchPaginatedRecords()).toBeNull();
+  });
 });
 
 describe('createRecord', () => {
@@ -918,6 +1016,37 @@ describe('fetchRecord', () => {
     expect(await fetchRecord('abc-123')).toBeNull();
   });
 
+  // A systemic auth (401) failure is not "record not found" — fetchRecord
+  // re-throws it (like createRecord) so `get` reports the real cause with a
+  // non-zero exit, distinct from the null a genuine 404 returns (issue #89).
+  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+
+    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+      statusCode: 401,
+      isSystemic: true,
+    });
+  });
+
+  // A genuine 404 (markpost's notFoundError) is NOT systemic: it stays a null
+  // return so `get` reports "Failed to fetch record", not an auth error.
+  it('returns null for a non-systemic 404 (record not found)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: () =>
+        Promise.resolve({
+          errors: [{ title: 'Not Found', detail: 'No record was found' }],
+        }),
+    });
+
+    expect(await fetchRecord('abc-123')).toBeNull();
+  });
+
   // Regression coverage for #29: see the equivalent note in the createRecord
   // describe block above.
   it('extracts attributes from a full JSON:API resource object (type/id/links included)', async () => {
@@ -975,6 +1104,36 @@ describe('deleteRecords', () => {
   it('returns null on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await deleteRecords(['abc-123'])).toBeNull();
+  });
+
+  // A systemic auth (401) failure will recur for the whole batch, so
+  // deleteRecords re-throws it (like createRecord) rather than swallowing to
+  // null — the sync then surfaces the real cause and leaves the records on the
+  // server (issue #89).
+  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+
+    await expect(deleteRecords(['abc-123'])).rejects.toMatchObject({
+      statusCode: 401,
+      isSystemic: true,
+    });
+  });
+
+  it('re-throws a systemic server (5xx) failure instead of returning null', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+
+    await expect(deleteRecords(['abc-123'])).rejects.toMatchObject({
+      statusCode: 500,
+      isSystemic: true,
+    });
   });
 });
 
@@ -1049,17 +1208,18 @@ describe('markRecordSynced', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  // Unlike the other record calls, a mark-synced timeout is non-fatal: the
-  // file is already written, so a stalled PATCH is logged and reported as
-  // `false` (leaving the record to re-sync next run) rather than re-thrown to
-  // abort the whole sync. The AbortSignal still bounds the wait so it can't
-  // hang forever.
-  it('returns false on a request timeout instead of re-throwing', async () => {
+  // Unlike the other record calls, a mark-synced timeout is non-fatal: the file
+  // is already written, so a stalled PATCH is logged and reported as its own
+  // `MARK_TIMED_OUT` outcome (leaving the record to re-sync next run) rather than
+  // re-thrown to abort the whole sync. The distinct outcome lets the batch runner
+  // stop on the first timeout instead of paying it on every remaining record. The
+  // AbortSignal still bounds the wait so it can't hang forever.
+  it('returns the timed-out outcome on a request timeout instead of re-throwing', async () => {
     global.fetch = vi
       .fn()
       .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      false,
+      MARK_TIMED_OUT,
     );
   });
 
@@ -1103,49 +1263,49 @@ describe('markRecordSynced', () => {
     ).toBe(false);
   });
 
-  it('returns true on success', async () => {
+  it('returns the synced outcome on success', async () => {
     mockFetch({ data: { attributes: mockRecord } });
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      true,
+      MARK_SYNCED,
     );
   });
 
   // A 2xx that carries no resource body must count as success, not a spurious
   // failure that warns the user of duplicates that never appear.
-  it('returns true for a 2xx response with a null data body', async () => {
+  it('returns the synced outcome for a 2xx response with a null data body', async () => {
     mockFetch({ data: null });
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      true,
+      MARK_SYNCED,
     );
   });
 
   // A 200 carrying an unparseable body (e.g. an HTML page from a proxy) must
   // fail rather than be reported as a silent success that leaves the record
   // pending and re-duplicated next run.
-  it('returns false for a 2xx response whose body is not valid JSON', async () => {
+  it('returns the failed outcome for a 2xx response whose body is not valid JSON', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.reject(new Error('Unexpected token < in JSON')),
     });
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      false,
+      MARK_FAILED,
     );
   });
 
-  it('returns false when the response contains errors', async () => {
+  it('returns the failed outcome when the response contains errors', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Not Found', detail: 'Record missing' }] } },
       false,
     );
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      false,
+      MARK_FAILED,
     );
   });
 
-  it('returns false on network failure', async () => {
+  it('returns the failed outcome on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      false,
+      MARK_FAILED,
     );
   });
 });

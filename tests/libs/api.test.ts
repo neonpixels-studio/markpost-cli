@@ -7,6 +7,7 @@ import {
   ApiTimeoutError,
   assertApiSuccess,
   authedRequest,
+  describeApiError,
   describeSystemicFailure,
   formatErrorMessages,
   getApiToken,
@@ -415,6 +416,20 @@ describe('ApiRequestError', () => {
       expect(new ApiRequestError('nope', statusCode).isSystemic).toBe(false);
     }
   });
+
+  // Permanence gates whether an autoSync daemon should shut down: auth failures
+  // (401/403) won't clear on retry, but a rate-limit/5xx is transient.
+  it('marks only auth failures (401/403) as permanent', () => {
+    for (const statusCode of [401, 403]) {
+      expect(new ApiRequestError('nope', statusCode).isPermanent).toBe(true);
+    }
+  });
+
+  it('marks a rate limit and 5xx as NOT permanent (transient)', () => {
+    for (const statusCode of [429, 500, 503]) {
+      expect(new ApiRequestError('nope', statusCode).isPermanent).toBe(false);
+    }
+  });
 });
 
 describe('isSystemicApiFailure', () => {
@@ -463,6 +478,34 @@ describe('describeSystemicFailure', () => {
     expect(describeSystemicFailure(error)).toBe(
       'Request failed (HTTP 409): Duplicate record',
     );
+  });
+});
+
+describe('describeApiError', () => {
+  // A systemic failure gets the classified, actionable description so a command
+  // can surface *why* it failed (e.g. an expired token) rather than a bare message.
+  it('classifies a systemic ApiRequestError with its status label', () => {
+    const error = new ApiRequestError('Invalid or missing API token', 401);
+    expect(describeApiError(error)).toBe(
+      'Authentication failed (HTTP 401): Invalid or missing API token',
+    );
+  });
+
+  // A non-systemic ApiRequestError (a per-request 4xx) falls back to its bare
+  // message — no systemic classification prefix, since it isn't batch-wide.
+  it('returns the bare message for a non-systemic ApiRequestError', () => {
+    const error = new ApiRequestError('Record not found', 404);
+    expect(describeApiError(error)).toBe('Record not found');
+  });
+
+  it('returns the message of a plain Error', () => {
+    expect(describeApiError(new Error('Network error'))).toBe('Network error');
+  });
+
+  // A thrown non-Error value (a bare string) still yields a printable message
+  // rather than "[object Object]" or a crash.
+  it('stringifies a thrown non-Error value', () => {
+    expect(describeApiError('boom')).toBe('boom');
   });
 });
 

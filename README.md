@@ -21,10 +21,11 @@ server-side records.
 |---|---|
 | `markpost sync` | Fetch all pending records, write each to a markdown file, and (when `autoDelete` is enabled) delete the written records from the server |
 | `markpost push <path...>` | Create records from one or more markdown files, directories, or glob patterns |
-| `markpost get <uuid>` | Fetch and display a single record |
-| `markpost sources <list\|create\|update\|delete> [uuid]` | Manage sources |
-| `markpost records list [--source <type>] [--status <status>] [--search <text>]` | List records without deleting them, optionally filtered by source, status, or search text |
+| `markpost get <uuid> [--json]` | Fetch and display a single record; pass `--json` for machine-readable output |
+| `markpost sources <list\|create\|update\|delete> [uuid]` | Manage sources; `sources list --json` prints machine-readable output |
+| `markpost records list [--source <type>] [--status <status>] [--search <text>] [--json]` | List records without deleting them, optionally filtered by source, status, or search text; pass `--json` for machine-readable output |
 | `markpost config <get\|set\|path> [key] [value]` | View or change the stored API token and output directory |
+| `markpost settings <get\|set> [key=value ...]` | View or change server-side sync settings (`autoSync`, `autoDelete`, `frontmatter`, `conflictStrategy`) |
 | `markpost help` | Show aggregated usage |
 
 The destructive fetch/write/delete sync runs only under the explicit
@@ -56,6 +57,20 @@ markpost account settings:
   `markpost push` created) are written as bare content either way.
 - **`conflictStrategy`** — how same-name files are handled (`suffix`,
   `overwrite`, or `skip`).
+
+These settings live on your markpost account. View or change them from the CLI
+with the `settings` command (each `set` field is a `key=value` pair; pass more
+than one to change several at once):
+
+```bash
+markpost settings get                                        # print current settings
+markpost settings set autoDelete=false                       # change one field
+markpost settings set autoSync=false conflictStrategy=overwrite  # change several
+```
+
+`set` validates every field name and value against markpost's contract before
+sending, so a typo'd key or off-contract value fails locally rather than
+silently doing nothing.
 
 ## Configuration
 

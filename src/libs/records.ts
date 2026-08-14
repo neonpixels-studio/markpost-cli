@@ -1,4 +1,5 @@
 import {
+  ApiTimeoutError,
   authedRequest,
   isSystemicApiFailure,
   logApiFailure,
@@ -23,6 +24,23 @@ import {
 // `pending` and, once a record is written, PATCHes it to `synced`.
 export const PENDING_STATUS = 'pending';
 const SYNCED_STATUS = 'synced';
+
+// Result of marking one record synced. `MARK_SYNCED` — the server accepted the
+// PATCH. `MARK_FAILED` — a non-timeout error; the record stays pending and the
+// rest of the batch still runs. `MARK_TIMED_OUT` — the PATCH hit the request
+// timeout, a signal the server is hung; the batch runner stops on the first one
+// rather than paying the full timeout on every remaining record.
+//
+// Values are prefixed (`mark-*`) so they never collide with the wire
+// `SYNCED_STATUS = 'synced'` above: these are internal outcome tags, not the
+// status string sent to the server, and an accidental cross-comparison should
+// not silently type-check as equal.
+export const MARK_SYNCED = 'mark-synced';
+export const MARK_FAILED = 'mark-failed';
+export const MARK_TIMED_OUT = 'mark-timed-out';
+
+export type MarkSyncedOutcome =
+  typeof MARK_SYNCED | typeof MARK_FAILED | typeof MARK_TIMED_OUT;
 
 // markpost paginates with a cursor: each response's `links.next` embeds the
 // `page[after]` cursor to request the following page, and is `null` once
@@ -104,6 +122,14 @@ export type RecordListFilters = {
 // can't tell apart from a complete one — the same fail-loud concern one page
 // in. The caller surfaces `partial` (warn + non-zero exit); the unfetched
 // pages stay on the server for a later run.
+//
+// `partial` covers only NON-systemic later-page failures (a transient network
+// blip, a malformed page). A systemic failure (auth/5xx) or a request timeout
+// on ANY page — including a later one — rejects instead: `fetchPaginatedRecords`
+// re-throws it and this function has no catch, so the whole read fails loud and
+// discards the pages already collected (a dead token or down server will only
+// keep failing). Those cases never reach the `{ ok: true, partial: true }`
+// shape; the caller's catch surfaces the classified cause.
 export type FetchAllRecordsResult =
   { ok: true; records: Record[]; partial: boolean } | { ok: false };
 
@@ -134,9 +160,11 @@ export const fetchAllRecords = async (
   // filtered listings: markpost rejects an invalid `filter[source]` with a
   // 400, and returning `[]` here would render that as "No records found.", a
   // silent failure. fetchPaginatedRecords has already logged the underlying
-  // cause; the command surfaces the failure and exits non-zero. A
-  // subsequent-page failure still returns the pages already collected (the
-  // error is logged) so partial progress isn't discarded.
+  // cause; the command surfaces the failure and exits non-zero. A NON-systemic
+  // subsequent-page failure (`null`) still returns the pages already collected
+  // and flags `partial` so progress isn't discarded; a systemic failure or a
+  // timeout on any page instead re-throws (see the type doc above), so the
+  // whole read fails loud rather than writing/deleting a partial set.
   if (!initial) {
     return { ok: false };
   }
@@ -185,9 +213,10 @@ export const fetchAllRecords = async (
     );
 
     if (!subsequent) {
-      // A later page failed (`fetchPaginatedRecords` already logged why). Stop,
-      // but mark the read incomplete so the caller doesn't present a truncated
-      // set as the whole.
+      // A later page failed NON-systemically (`fetchPaginatedRecords` already
+      // logged why). Stop, but mark the read incomplete so the caller doesn't
+      // present a truncated set as the whole. A systemic failure or timeout on
+      // this page wouldn't reach here — it re-throws out of this loop instead.
       partial = true;
       break;
     }
@@ -279,6 +308,15 @@ export const fetchPaginatedRecords = async (
 
     return { records, meta, links };
   } catch (error) {
+    // Auth (401/403), rate-limit (429), and 5xx failures doom every page of
+    // the read, not just this one, so surface them to the caller to fail-fast
+    // (mirroring createRecord) instead of collapsing them to null — which
+    // fetchAllRecords can't tell apart from a genuinely empty result and would
+    // report as a silent "No new records" success (issue #89).
+    if (isSystemicApiFailure(error)) {
+      throw error;
+    }
+
     logApiFailure(`fetchPaginatedRecords`, error);
 
     return null;
@@ -333,26 +371,28 @@ export const createRecord = async (
 //
 // Goes through `authedRequest` so the PATCH inherits the same request timeout
 // as every other API call (a stalled connection can't hang the sync forever).
-// Unlike the fetch helpers above, a failure here is logged and reported as
-// `false` rather than re-thrown — including a timeout: this is non-critical
-// post-write bookkeeping (the file is already on disk), so a failed mark
-// simply leaves the record `pending` to re-sync next run, which is far less
-// disruptive than aborting the whole sync after files have landed. The
-// timeout's job here is purely to bound the wait, not to fail loud.
+// Unlike the fetch helpers above, a failure here is logged rather than
+// re-thrown: this is non-critical post-write bookkeeping (the file is already
+// on disk), so a failed mark simply leaves the record `pending` to re-sync
+// next run, which is far less disruptive than aborting the whole sync after
+// files have landed.
 //
-// Returns a plain success boolean rather than the updated record: the caller
-// only needs to know whether the server accepted the change. Reading it back
-// as a resource would mis-report a legitimate 2xx that carries no `data`
-// (markpost's PATCH always returns the record, but a `data: null` shape still
-// counts as success here) as a failure, wrongly warning the user of
-// duplicates. `filePath` is sent deliberately — markpost stores it on the
-// record so its UI can show where a synced note landed; it's the user's own
-// local path going to their own account, not a third-party leak.
+// Returns a three-way outcome rather than a bare boolean so the caller can
+// tell a per-record failure (`MARK_FAILED`, keep going — the next record may
+// succeed) apart from a timeout (`MARK_TIMED_OUT`). A timeout signals a hung
+// server, so the caller stops the remaining batches instead of burning the
+// full request timeout on every one; the record still stays `pending` either
+// way. Reading the body back as a resource would mis-report a legitimate 2xx
+// that carries no `data` (markpost's PATCH always returns the record, but a
+// `data: null` shape still counts as success here) as a failure, wrongly
+// warning the user of duplicates. `filePath` is sent deliberately — markpost
+// stores it on the record so its UI can show where a synced note landed; it's
+// the user's own local path going to their own account, not a third-party leak.
 export const markRecordSynced = async (
   uuid: string,
   filePath: string,
   syncedAt: string = new Date().toISOString(),
-): Promise<boolean> => {
+): Promise<MarkSyncedOutcome> => {
   try {
     // Route through the shared authedRequest seam (like createRecord/
     // fetchRecord): it attaches the bearer token and asserts success (throwing
@@ -378,14 +418,21 @@ export const markRecordSynced = async (
       }),
     });
 
-    return true;
+    return MARK_SYNCED;
   } catch (error) {
     logErrorMessage(
       `markRecordSynced["${uuid}"]`,
       error instanceof Error ? error.message : String(error),
     );
 
-    return false;
+    // A timeout gets its own outcome so the caller can abort the remaining
+    // marks on the first one; every other error just leaves this record
+    // pending and lets the rest of the batch proceed.
+    if (error instanceof ApiTimeoutError) {
+      return MARK_TIMED_OUT;
+    }
+
+    return MARK_FAILED;
   }
 };
 
@@ -397,6 +444,14 @@ export const fetchRecord = async (uuid: string): Promise<Record | null> => {
 
     return unwrapResourceAttributes(body);
   } catch (error) {
+    // A systemic auth/5xx failure is not "record not found" — re-throw it
+    // (mirroring createRecord) so `get` reports the real cause with a non-zero
+    // exit, instead of the generic "Failed to fetch record" a null return
+    // produces. A genuine 404 stays non-systemic and still returns null.
+    if (isSystemicApiFailure(error)) {
+      throw error;
+    }
+
     logApiFailure(`fetchRecord["${uuid}"]`, error);
 
     return null;
@@ -424,6 +479,14 @@ export const deleteRecords = async (
 
     return body.meta ?? null;
   } catch (error) {
+    // A systemic auth/5xx failure will recur for the whole batch, so re-throw
+    // it (mirroring createRecord) to surface the real cause rather than the
+    // generic delete-failure message a null return produces. The sync's
+    // inline catch prints it and still leaves the records on the server.
+    if (isSystemicApiFailure(error)) {
+      throw error;
+    }
+
     logApiFailure(`deleteRecords["${uuids.join(', ')}"]`, error);
 
     return null;

@@ -1,3 +1,4 @@
+import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { input, select } from '@inquirer/prompts';
 import {
@@ -8,7 +9,8 @@ import {
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage } from '@/libs/usage.js';
+import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
+import { printJson } from '@/libs/output.js';
 import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
 
 // Mirror the endpoint constants markpost's web app uses in
@@ -19,7 +21,7 @@ const EMAIL_DOMAIN = 'in.markpost.io';
 
 export const USAGE = `Usage: markpost sources <list|create|update|delete> [uuid]
 
-  list           List all sources
+  list           List all sources (pass --json for machine-readable output)
   create         Create a new source (prompts for details)
   update [uuid]  Update a source's route folder; prompts to pick one if uuid is omitted
   delete [uuid]  Delete a source; prompts to pick one if uuid is omitted`;
@@ -39,30 +41,57 @@ export const buildEndpointUrl = (
 // never pass the guard without a handler (which would otherwise risk falling
 // through to the destructive delete). A Map (not an object) keeps a subcommand
 // named "toString" from resolving to a prototype member.
+// Only `list` renders JSON; the other subcommands are interactive or emit a
+// one-off result, so --json means nothing to them.
+const LIST_SUBCOMMAND = 'list';
+
 const SOURCES_HANDLERS = new Map<
   string,
-  (uuid: string | undefined) => Promise<void>
+  (uuid: string | undefined, json: boolean) => Promise<void>
 >([
-  ['list', () => listSources()],
+  [LIST_SUBCOMMAND, (_uuid, json) => listSources(json)],
   ['create', () => createSourceCommand()],
   ['update', (uuid) => updateSourceCommand(uuid)],
   ['delete', (uuid) => deleteSourceCommand(uuid)],
 ]);
 
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
-  const [subcommand, uuid] = args;
-  const handler = SOURCES_HANDLERS.get(subcommand);
-
-  // Validate before the config check so a bad subcommand fails on usage alone,
-  // without needing a configured account.
-  if (!handler) {
-    failWithSubcommandUsage(subcommand, USAGE);
-    return;
-  }
-
   try {
+    // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
+    // still prompts rather than trying to delete a source named "--json") and
+    // rejects an unknown/mistyped flag. Only `list` reads json.
+    const { values, positionals } = parseArgs({
+      args,
+      allowPositionals: true,
+      options: {
+        json: { type: 'boolean' },
+      },
+    });
+    const [subcommand, uuid] = positionals;
+    const handler = SOURCES_HANDLERS.get(subcommand);
+    const json = values.json ?? false;
+
+    // Validate before the config check so a bad subcommand fails on usage
+    // alone, without needing a configured account.
+    if (!handler) {
+      failWithSubcommandUsage(subcommand, USAGE);
+      return;
+    }
+
+    // Reject --json where it does nothing rather than silently ignoring it:
+    // `sources create --json | jq` would otherwise "succeed" with human text on
+    // stdout, and the one-time signing secret it was trying to capture would be
+    // lost (see createSourceCommand's unrecoverable-secret warning).
+    if (json && subcommand !== LIST_SUBCOMMAND) {
+      failWithUsage(
+        `--json is only supported by \`sources ${LIST_SUBCOMMAND}\`.`,
+        USAGE,
+      );
+      return;
+    }
+
     await checkConfig();
-    await handler(uuid);
+    await handler(uuid, json);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
     // that's a user abort, not a command failure, so don't flag it non-zero.
@@ -122,8 +151,43 @@ const printSource = (source: Source): void => {
   );
 };
 
-const listSources = async (): Promise<void> => {
+// The JSON view of a source: the Source contract fields plus the computed
+// `endpoint` so consumers get the same ingest URL the pretty output shows
+// without re-deriving it. Fields are enumerated (not spread) on purpose — a
+// spread would carry a `providerSecret` if a malformed/hostile list response
+// ever attached one, and list must never surface that one-time secret (only
+// `create` does). This whitelist is what keeps the JSON path as safe as the
+// pretty printer, which likewise names each field it prints. The record JSON
+// paths (`get`, `records list`) intentionally pass the whole record through
+// instead: a record carries no secret sibling field, and a faithful passthrough
+// keeps new server fields visible rather than silently dropping them. The
+// `Required<Source> & { endpoint: string }` return type makes a future Source
+// field — required or optional — fail the build here until it is deliberately
+// included or excluded.
+const serializeSourceForJson = (
+  source: Source,
+): Required<Source> & { endpoint: string } => ({
+  uuid: source.uuid,
+  createdAt: source.createdAt,
+  type: source.type,
+  name: source.name,
+  provider: source.provider,
+  endpointSlug: source.endpointSlug,
+  endpoint: buildEndpointUrl(source.type, source.endpointSlug),
+  routeFolder: source.routeFolder,
+  lastHitAt: source.lastHitAt,
+  recordCount: source.recordCount,
+});
+
+const listSources = async (json: boolean): Promise<void> => {
   const sources = await fetchSources();
+
+  // JSON mode prints the array (empty included, as `[]`) with no "No sources
+  // found." line so the stdout stays valid JSON for `jq`.
+  if (json) {
+    printJson(sources.map(serializeSourceForJson));
+    return;
+  }
 
   if (sources.length === 0) {
     console.log('No sources found.');

@@ -4,8 +4,12 @@ import {
   deleteRecords,
   fetchAllRecords,
   markRecordSynced,
+  MARK_SYNCED,
+  MARK_TIMED_OUT,
+  MarkSyncedOutcome,
   PENDING_STATUS,
 } from '@/libs/records.js';
+import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
 import { ensureOutputDirectory, writeMarkdown } from '@/libs/markdown.js';
 import { fetchSettings, SettingsReadResult } from '@/libs/settings.js';
 import { runPushCommand, USAGE as PUSH_USAGE } from '@/commands/push.js';
@@ -19,6 +23,10 @@ import {
   USAGE as RECORDS_USAGE,
 } from '@/commands/records.js';
 import { runConfigCommand, USAGE as CONFIG_USAGE } from '@/commands/config.js';
+import {
+  runSettingsCommand,
+  USAGE as SETTINGS_USAGE,
+} from '@/commands/settings.js';
 import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
@@ -101,6 +109,7 @@ const COMMANDS = new Map<string, Command>([
   ['sources', { run: runSourcesCommand, usage: SOURCES_USAGE }],
   ['records', { run: runRecordsCommand, usage: RECORDS_USAGE }],
   ['config', { run: runConfigCommand, usage: CONFIG_USAGE }],
+  ['settings', { run: runSettingsCommand, usage: SETTINGS_USAGE }],
 ]);
 
 // The sync is the one destructive command, so it rejects unexpected arguments
@@ -339,12 +348,25 @@ function reportWriteFailures(failedRecords: FailedRecord[]): void {
   process.exitCode = 1;
 }
 
-// PATCHes the written records synced in bounded-concurrency batches, returning
-// a success flag per record in the original order.
+// Outcome of a whole mark-synced run. `outcomes` holds one entry per *attempted*
+// record in the original order; on a timeout abort it's shorter than the input
+// because the remaining batches were never sent. `timedOut` records whether a
+// timeout stopped the run early so the caller can report the abort explicitly.
+interface MarkSyncedRun {
+  outcomes: MarkSyncedOutcome[];
+  timedOut: boolean;
+}
+
+// PATCHes the written records synced in bounded-concurrency batches, stopping on
+// the first timeout. A timeout means the server is hung, so firing the remaining
+// batches would burn the full request timeout on each one before reporting;
+// aborting leaves those records pending to retry next run, mirroring the push
+// command's batch-abort. Non-timeout failures don't abort — the next record may
+// still succeed.
 async function markRecordsInBatches(
   writtenRecords: WrittenRecord[],
-): Promise<boolean[]> {
-  const results: boolean[] = [];
+): Promise<MarkSyncedRun> {
+  const outcomes: MarkSyncedOutcome[] = [];
 
   for (
     let start = 0;
@@ -352,16 +374,32 @@ async function markRecordsInBatches(
     start += MARK_SYNCED_CONCURRENCY
   ) {
     const batch = writtenRecords.slice(start, start + MARK_SYNCED_CONCURRENCY);
-    const batchResults = await Promise.all(
+    const batchOutcomes = await Promise.all(
       batch.map(({ record, filePath }) =>
         markRecordSynced(record.uuid, filePath),
       ),
     );
 
-    results.push(...batchResults);
+    outcomes.push(...batchOutcomes);
+
+    if (batchOutcomes.includes(MARK_TIMED_OUT)) {
+      return { outcomes, timedOut: true };
+    }
   }
 
-  return results;
+  return { outcomes, timedOut: false };
+}
+
+// Headline for the mark-synced failure report. A timeout abort reads
+// differently from a scatter of per-record failures: it stopped the run early,
+// so the count includes records never attempted. Both leave the listed records
+// pending on the server.
+function markFailureHeadline(pendingCount: number, timedOut: boolean): string {
+  if (timedOut) {
+    return `Timed out marking records synced — stopped after the batch that first timed out; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+  }
+
+  return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
 }
 
 // Surfaces mark-synced failures loudly (never as success): an unmarked record
@@ -371,11 +409,10 @@ async function markRecordsInBatches(
 function reportMarkFailures(
   failures: WrittenRecord[],
   markedCount: number,
+  timedOut: boolean,
   spinner: Spinner,
 ): void {
-  spinner.error(
-    `Failed to mark ${failures.length} record(s) synced — written locally but still pending on the server; they may be re-written next run.`,
-  );
+  spinner.error(markFailureHeadline(failures.length, timedOut));
   failures.forEach(({ record, filePath }) => {
     // Sanitize the composed line: record.uuid comes from the same untrusted API
     // response as a title, and filePath embeds the user-configured output path —
@@ -423,19 +460,29 @@ async function markWrittenRecordsSynced(
 
   spinner.start('Marking records synced...');
 
-  const results = await markRecordsInBatches(writtenRecords);
-  const settled = writtenRecords.filter((_written, index) => results[index]);
-  const failures = writtenRecords.filter((_written, index) => !results[index]);
+  const { outcomes, timedOut } = await markRecordsInBatches(writtenRecords);
+  // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
+  // pending if its mark failed or was never attempted (its outcome is undefined
+  // because a timeout aborted the run before its batch). Evict settled records
+  // from the written-path map so a long-running autoSync daemon doesn't leak
+  // memory — the "settled" half of the written-vs-settled split.
+  const settled = writtenRecords.filter(
+    (_written, index) => outcomes[index] === MARK_SYNCED,
+  );
+  const pending = writtenRecords.filter(
+    (_written, index) => outcomes[index] !== MARK_SYNCED,
+  );
 
   forgetSettledRecords(
     writtenPaths,
     settled.map(({ record }) => record.uuid),
   );
 
-  if (failures.length > 0) {
+  if (pending.length > 0) {
     reportMarkFailures(
-      failures,
-      writtenRecords.length - failures.length,
+      pending,
+      writtenRecords.length - pending.length,
+      timedOut,
       spinner,
     );
     return;
@@ -467,6 +514,12 @@ function reportIncompleteSync(partial: boolean): void {
 // the scheduler can decide to repeat the sync (see runSyncWithAutoSchedule).
 async function runDefaultSync(): Promise<boolean> {
   const spinner = yoctoSpinner({ spinner: cliSpinners.dots });
+
+  // Hoisted to function scope so the outer catch can honor it: a transient
+  // systemic failure (rate-limit/5xx) should let an autoSync daemon retry next
+  // pass rather than shut it down. Defaults off so an early crash (before
+  // settings are read) never spins a daemon that just keeps crashing.
+  let autoSync = false;
 
   try {
     await checkConfig();
@@ -507,7 +560,7 @@ async function runDefaultSync(): Promise<boolean> {
     // we don't spin up a self-scheduling daemon (mirrors the conservative
     // autoDelete above). Frontmatter defaults to on — the safe,
     // non-destructive default, matching how conflictStrategy falls back.
-    const autoSync = settingsResult.ok
+    autoSync = settingsResult.ok
       ? normalizeAutoSync(settings?.autoSync)
       : false;
     const includeFrontmatter = settingsResult.ok
@@ -642,19 +695,30 @@ async function runDefaultSync(): Promise<boolean> {
     }
 
     spinner.start('Deleting records...');
-    // deleteRecords swallows its own errors to null but re-throws a timeout.
-    // Log the timeout's reason (deleteRecords never got to log it, since the
-    // rethrow happens before its logger) and route it to the same null branch
-    // below, so the user gets both the "why" and the specific "remain on the
-    // server" consequence with a non-zero exit — not the generic outer
-    // catch's "Something went wrong!".
+    // deleteRecords swallows its own per-request errors to null but re-throws a
+    // timeout and any systemic auth/5xx failure. Describe the reason
+    // (deleteRecords never got to log a re-thrown error, since the rethrow
+    // happens before its logger — and `describeApiError` classifies a systemic
+    // failure) and route it to the same null branch below, so the user gets
+    // both the "why" and the specific "remain on the server" consequence with a
+    // non-zero exit — not the generic outer catch's "Something went wrong!".
+    // A PERMANENT delete failure (dead token, forbidden account) will recur on
+    // every pass, so it must also stop the autoSync self-scheduling below —
+    // otherwise the daemon wakes every few minutes, re-fetches the same pending
+    // records, and re-writes them as `-2`/`-3` duplicates against a server it
+    // already knows it can't delete from. A transient failure (rate-limit/5xx,
+    // timeout) is worth another pass, so it keeps autoSync alive. Captured here
+    // so the failure branch can tell the two apart.
+    let deletePermanentlyFailed = false;
     const deleteMeta = await deleteRecords(
       writtenRecords.map(({ record }) => record.uuid),
     ).catch((error: unknown) => {
+      deletePermanentlyFailed =
+        isSystemicApiFailure(error) && error.isPermanent;
       // Sanitize before printing, same threat as the outer catch: a
-      // server- or API-derived message (here a timeout) can embed an escape.
+      // server- or API-derived message can embed an escape.
       console.error(
-        chalk.redBright(sanitizeForTerminal(extractErrorMessage(error))),
+        chalk.redBright(sanitizeForTerminal(describeApiError(error))),
       );
 
       return null;
@@ -667,7 +731,9 @@ async function runDefaultSync(): Promise<boolean> {
         'Failed to delete records from the server — they were written locally but remain on the server.',
       );
       process.exitCode = 1;
-      return autoSync;
+      // Don't keep rescheduling into a known-permanent failure; a transient one
+      // still retries next pass.
+      return deletePermanentlyFailed ? false : autoSync;
     }
 
     // Settle only on a confirmed full delete. deleteRecords returns a bare
@@ -689,14 +755,35 @@ async function runDefaultSync(): Promise<boolean> {
     reportIncompleteSync(recordsResult.partial);
     return autoSync;
   } catch (error) {
+    process.exitCode = 1;
+
+    // A systemic API failure (expired/invalid token, rate limit, 5xx) doomed
+    // the whole read. Route the classified, actionable detail (e.g. "run
+    // `markpost config`") through console.error so it prints unconditionally —
+    // `spinner.error` no-ops when no spinner is active — and a cron log always
+    // says *why* the sync died; the spinner headline is just the interactive
+    // cue. Sanitize — the message is server-derived and can embed an escape.
+    if (isSystemicApiFailure(error)) {
+      spinner.error('Sync failed.');
+      // `describeApiError` yields the classified `describeSystemicFailure`
+      // text inside this guard, so we don't call the latter directly.
+      console.error(
+        chalk.redBright(sanitizeForTerminal(describeApiError(error))),
+      );
+      // A permanent failure (dead token, forbidden account) won't clear on
+      // retry — stop the autoSync daemon. A transient one (rate-limit/5xx) is
+      // worth another pass, so keep autoSync alive to retry ("retry shortly").
+      return error.isPermanent ? false : autoSync;
+    }
+
     spinner.error('Something went wrong!');
-    // Systemic errors surface here (unset output dir, a failed fetch/delete).
+    // Other errors surface here (unset output dir, a non-systemic failure).
     // Sanitize before printing: a server- or API-derived message can embed an
     // escape sequence, same threat the per-record failure path guards against.
+    // `describeApiError` returns the bare message for these non-systemic cases.
     console.error(
-      chalk.redBright(sanitizeForTerminal(extractErrorMessage(error))),
+      chalk.redBright(sanitizeForTerminal(describeApiError(error))),
     );
-    process.exitCode = 1;
     // Don't self-schedule after an unexpected failure — a crashing run
     // shouldn't spin a daemon that just keeps crashing.
     return false;

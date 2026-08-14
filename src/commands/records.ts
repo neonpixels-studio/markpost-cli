@@ -1,9 +1,11 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchAllRecords, RecordListFilters } from '@/libs/records.js';
+import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage } from '@/libs/usage.js';
+import { printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
 export const USAGE = `Usage: markpost records list [options]
@@ -13,7 +15,8 @@ export const USAGE = `Usage: markpost records list [options]
 Options:
   --source <type>    Filter by source type (markpost reports the valid types if the value is rejected)
   --status <status>  Filter by record status (synced, pending, or error)
-  --search <text>    Filter by text in the title or content`;
+  --search <text>    Filter by text in the title or content
+  --json             Print the records as JSON instead of formatted text`;
 
 export const runRecordsCommand = async (args: string[]): Promise<void> => {
   const [subcommand] = args;
@@ -30,11 +33,17 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
     // token/output directory when unset: a bad flag must fail on usage alone,
     // not after dragging the user through (or blocking a non-TTY run on) the
     // config prompts. Mirrors the subcommand validation above.
-    const filters = parseListFilters(args);
+    const { filters, json } = parseListArgs(args);
     await checkConfig();
-    await listRecords(filters);
+    await listRecords(filters, json);
   } catch (error) {
-    console.error(chalk.redBright(error));
+    // A systemic auth/5xx failure now re-throws from fetchAllRecords (issue
+    // #89): surface its classified, actionable message with a non-zero exit,
+    // distinct from the generic "Failed to fetch records" a non-systemic
+    // failure produces. Sanitize — the message can be server-derived.
+    console.error(
+      chalk.redBright(sanitizeForTerminal(describeApiError(error))),
+    );
     process.exitCode = 1;
   }
 };
@@ -43,7 +52,9 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
 // throws on an unknown flag or a missing value, which the command's outer
 // catch surfaces to the user. The `list` subcommand itself lands in
 // `positionals` and is skipped here.
-const parseListFilters = (args: string[]): RecordListFilters => {
+const parseListArgs = (
+  args: string[],
+): { filters: RecordListFilters; json: boolean } => {
   // `multiple: true` collects repeats into an array so a flag passed twice
   // (`--source webhook --source email`) can be rejected rather than silently
   // last-winning, matching how stray positionals and empty values fail below.
@@ -54,6 +65,7 @@ const parseListFilters = (args: string[]): RecordListFilters => {
       source: { type: 'string', multiple: true },
       status: { type: 'string', multiple: true },
       search: { type: 'string', multiple: true },
+      json: { type: 'boolean' },
     },
   });
 
@@ -68,9 +80,12 @@ const parseListFilters = (args: string[]): RecordListFilters => {
   }
 
   return {
-    source: normalizeFilter('source', values.source),
-    status: normalizeFilter('status', values.status),
-    search: normalizeFilter('search', values.search),
+    filters: {
+      source: normalizeFilter('source', values.source),
+      status: normalizeFilter('status', values.status),
+      search: normalizeFilter('search', values.search),
+    },
+    json: values.json ?? false,
   };
 };
 
@@ -114,7 +129,10 @@ const printRecord = (record: Record): void => {
 // Read-only preview of the records on the server (optionally filtered).
 // Deliberately never touches deleteRecords: this is the safe alternative to
 // running the no-arg sync just to see what's there.
-const listRecords = async (filters: RecordListFilters): Promise<void> => {
+const listRecords = async (
+  filters: RecordListFilters,
+  json: boolean,
+): Promise<void> => {
   const result = await fetchAllRecords(filters);
 
   // A failed fetch must not masquerade as "No records found." — throw so the
@@ -128,7 +146,9 @@ const listRecords = async (filters: RecordListFilters): Promise<void> => {
 
   // A partial read (a later page failed mid-pagination) must not present a
   // truncated list as the full set. Warn and exit non-zero so the preview
-  // stays honest — `fetchPaginatedRecords` already logged the cause.
+  // stays honest — `fetchPaginatedRecords` already logged the cause. The
+  // warning goes to stderr, so the JSON path below still writes clean JSON to
+  // stdout while the caller (and `--json`) still sees the non-zero exit.
   if (partial) {
     console.error(
       chalk.yellow(
@@ -136,6 +156,13 @@ const listRecords = async (filters: RecordListFilters): Promise<void> => {
       ),
     );
     process.exitCode = 1;
+  }
+
+  // JSON mode prints the array (empty included, as `[]`) and nothing else —
+  // no "No records found." line, so the stdout stays valid JSON for `jq`.
+  if (json) {
+    printJson(records);
+    return;
   }
 
   if (records.length === 0) {

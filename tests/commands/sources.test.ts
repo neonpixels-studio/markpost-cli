@@ -63,10 +63,7 @@ const githubSource: CreatedSource = {
 // one searchable string, so a leak assertion can't be dodged by the secret
 // landing in a second argument, a later call, or the other stream.
 const loggedText = (): string =>
-  [
-    ...vi.mocked(console.log).mock.calls,
-    ...vi.mocked(console.error).mock.calls,
-  ]
+  [...vi.mocked(console.log).mock.calls, ...vi.mocked(console.error).mock.calls]
     .flat()
     .map((value) => String(value))
     .join('\n');
@@ -81,7 +78,9 @@ describe('buildEndpointUrl', () => {
 
   it('builds an email-in address for email source types', async () => {
     const { buildEndpointUrl } = await import('@/commands/sources.js');
-    expect(buildEndpointUrl('email', 'clip-ab12')).toBe('clip-ab12@in.markpost.io');
+    expect(buildEndpointUrl('email', 'clip-ab12')).toBe(
+      'clip-ab12@in.markpost.io',
+    );
   });
 });
 
@@ -193,7 +192,9 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['list']);
 
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('https://ingest.markpost.io/v1/hooks/wh_abc12345'),
+        expect.stringContaining(
+          'https://ingest.markpost.io/v1/hooks/wh_abc12345',
+        ),
       );
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('clip-ab12@in.markpost.io'),
@@ -268,6 +269,113 @@ describe('runSourcesCommand', () => {
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('3 [2J'),
       );
+    });
+
+    it('prints the sources as a parseable JSON array with computed endpoints when --json is passed', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource, emailSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      // Exactly one stdout write, so a future stray console.log before the
+      // payload breaks the test instead of hiding in earlier calls.
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      const parsed = JSON.parse(output);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0]).toMatchObject({
+        uuid: 'abc-123',
+        name: 'Webhook Source',
+        endpoint: 'https://ingest.markpost.io/v1/hooks/wh_abc12345',
+      });
+      expect(parsed[1]).toMatchObject({
+        uuid: 'def-456',
+        endpoint: 'clip-ab12@in.markpost.io',
+      });
+    });
+
+    it('prints an empty JSON array (not "No sources found.") for --json with no sources', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      expect(console.log).not.toHaveBeenCalledWith('No sources found.');
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toEqual([]);
+    });
+
+    // The JSON path enumerates the Source contract fields rather than spreading
+    // the object, so a one-time providerSecret riding on a malformed list
+    // response can never surface — same invariant the pretty path holds.
+    it('never leaks a providerSecret carried on a listed source in --json mode', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      expect(loggedText()).not.toContain('whsec_one_time_plaintext');
+    });
+
+    // --json is parsed as a flag (never the uuid slot) and rejected on the
+    // subcommands that don't render JSON, so `sources delete --json` neither
+    // fires a DELETE for a source named "--json" nor silently ignores the flag.
+    it('rejects --json on delete rather than treating it as a uuid or ignoring it', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', '--json']);
+
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--json is only supported by `sources list`.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A script doing `sources create --json | jq` must fail loudly, not exit 0
+    // with human text — losing the one-time signing secret it meant to capture.
+    it('rejects --json on create before prompting or calling the API', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { createSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create', '--json']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(createSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --json on update before prompting or calling the API', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', '--json']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('exits 1 on a mistyped flag instead of silently printing human text', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--jsonn']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     });
 
     it('renders "never hit" for an empty lastHitAt', async () => {
@@ -486,9 +594,7 @@ describe('runSourcesCommand', () => {
 
       expect(select).toHaveBeenCalledWith(
         expect.objectContaining({
-          choices: [
-            expect.objectContaining({ name: 'Evil Source (webhook)' }),
-          ],
+          choices: [expect.objectContaining({ name: 'Evil Source (webhook)' })],
         }),
       );
     });
@@ -516,7 +622,9 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['update', 'abc-123']);
 
       expect(updateSource).not.toHaveBeenCalled();
-      expect(console.error).toHaveBeenCalledWith('Route folder cannot be empty.');
+      expect(console.error).toHaveBeenCalledWith(
+        'Route folder cannot be empty.',
+      );
     });
 
     it('does not call updateSource when the prefilled value is accepted unchanged', async () => {
