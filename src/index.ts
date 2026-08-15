@@ -63,6 +63,17 @@ const MARK_SYNCED_CONCURRENCY = 10;
 // invocations starts empty each time and does not get this cross-run guard.
 const processSeenSlugs = new Map<string, string>();
 
+// Written-vs-settled bookkeeping (uuid -> the file written for it this process),
+// shared across autoSync passes like processSeenSlugs. A record whose
+// server-side settle (mark-synced/delete) fails stays pending and is re-fetched
+// next pass; carrying its written path forward lets writeMarkdown overwrite that
+// file instead of the suffix strategy dropping a fresh `<slug>-2.md`,
+// `<slug>-3.md` duplicate every pass. The orchestrator drops an entry once the
+// record settles (see forgetSettledRecords). Lifetime is the CLI process, so a
+// cron-style loop of separate single-pass invocations starts empty each time —
+// the same limitation processSeenSlugs carries.
+const processWrittenPaths = new Map<string, string>();
+
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
 const SYNC_COMMAND = 'sync';
@@ -222,6 +233,7 @@ function writeRecordSafely(
   conflictStrategy: ConflictStrategy,
   seenSlugs: Map<string, string>,
   includeFrontmatter: boolean,
+  writtenPaths: Map<string, string>,
 ): WriteOutcome {
   try {
     const filePath = writeMarkdown(
@@ -229,6 +241,7 @@ function writeRecordSafely(
       conflictStrategy,
       seenSlugs,
       includeFrontmatter,
+      writtenPaths,
     );
 
     if (filePath === null) {
@@ -252,6 +265,7 @@ function writeRecords(
   conflictStrategy: ConflictStrategy,
   includeFrontmatter: boolean,
   seenSlugs: Map<string, string>,
+  writtenPaths: Map<string, string>,
 ): WriteRecordsResult {
   // `seenSlugs` (the module-scope `processSeenSlugs`) is threaded in so this
   // stays a function of its inputs. A sequential loop preserves order and shares
@@ -266,6 +280,7 @@ function writeRecords(
       conflictStrategy,
       seenSlugs,
       includeFrontmatter,
+      writtenPaths,
     );
 
     if (outcome.status === 'written') {
@@ -417,12 +432,27 @@ function reportMarkFailures(
   process.exitCode = 1;
 }
 
+// Settled bookkeeping: a record whose server-side step (mark-synced or delete)
+// succeeded will never be re-fetched as pending, so drop it from the written-
+// path map. This is the "settled" half of the written-vs-settled split —
+// keeping the entry would only leak memory across a long-running autoSync
+// daemon, and a settled record no longer needs its file reused. Takes the map
+// as an argument (like writeRecords threads processSeenSlugs) so it stays a
+// function of its inputs.
+function forgetSettledRecords(
+  writtenPaths: Map<string, string>,
+  uuids: string[],
+): void {
+  uuids.forEach((uuid) => writtenPaths.delete(uuid));
+}
+
 // Marks every written record synced on the server after a write, so the next
 // run's pending-only fetch skips them — the autoDelete-off path's
 // non-destructive equivalent of the delete step.
 async function markWrittenRecordsSynced(
   writtenRecords: WrittenRecord[],
   spinner: Spinner,
+  writtenPaths: Map<string, string>,
 ): Promise<void> {
   if (writtenRecords.length === 0) {
     return;
@@ -431,10 +461,21 @@ async function markWrittenRecordsSynced(
   spinner.start('Marking records synced...');
 
   const { outcomes, timedOut } = await markRecordsInBatches(writtenRecords);
-  // A record is pending if its mark failed or it was never attempted (its
-  // outcome is undefined because a timeout aborted the run before its batch).
+  // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
+  // pending if its mark failed or was never attempted (its outcome is undefined
+  // because a timeout aborted the run before its batch). Evict settled records
+  // from the written-path map so a long-running autoSync daemon doesn't leak
+  // memory — the "settled" half of the written-vs-settled split.
+  const settled = writtenRecords.filter(
+    (_written, index) => outcomes[index] === MARK_SYNCED,
+  );
   const pending = writtenRecords.filter(
     (_written, index) => outcomes[index] !== MARK_SYNCED,
+  );
+
+  forgetSettledRecords(
+    writtenPaths,
+    settled.map(({ record }) => record.uuid),
   );
 
   if (pending.length > 0) {
@@ -592,6 +633,7 @@ async function runDefaultSync(): Promise<boolean> {
       conflictStrategy,
       includeFrontmatter,
       processSeenSlugs,
+      processWrittenPaths,
     );
     reportWriteOutcome(spinner, writtenRecords.length, failedRecords.length);
     writtenRecords.forEach(({ filePath }) => {
@@ -624,7 +666,7 @@ async function runDefaultSync(): Promise<boolean> {
     if (!settingsResult.ok) {
       console.log(
         chalk.yellow(
-          '  Settings unreadable — records left pending; they will be re-written as new files each run until settings are readable.',
+          '  Settings unreadable — records left pending; their files are reused while this process runs and re-created on a fresh run, until settings are readable.',
         ),
       );
       reportIncompleteSync(recordsResult.partial);
@@ -635,7 +677,11 @@ async function runDefaultSync(): Promise<boolean> {
     // next run's pending-only fetch skips them instead of re-writing duplicate
     // files.
     if (!autoDelete) {
-      await markWrittenRecordsSynced(writtenRecords, spinner);
+      await markWrittenRecordsSynced(
+        writtenRecords,
+        spinner,
+        processWrittenPaths,
+      );
       reportIncompleteSync(recordsResult.partial);
       return autoSync;
     }
@@ -688,6 +734,20 @@ async function runDefaultSync(): Promise<boolean> {
       // Don't keep rescheduling into a known-permanent failure; a transient one
       // still retries next pass.
       return deletePermanentlyFailed ? false : autoSync;
+    }
+
+    // Settle only on a confirmed full delete. deleteRecords returns a bare
+    // count, not per-uuid results, so a short count (`deleted < written`) can't
+    // tell which uuids survived; retaining every entry keeps the reuse guard for
+    // any record still pending, at the harmless cost of a stale entry for the
+    // ones that were deleted. A record not deleted stays pending and, without
+    // its tracked path, would drop a fresh `<slug>-2.md` duplicate next pass —
+    // the exact bug this split prevents.
+    if (deleteMeta.deleted === writtenRecords.length) {
+      forgetSettledRecords(
+        processWrittenPaths,
+        writtenRecords.map(({ record }) => record.uuid),
+      );
     }
 
     spinner.success(`Deleted ${deleteMeta.deleted} records!`);

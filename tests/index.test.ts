@@ -405,7 +405,7 @@ describe('index', () => {
 
     expect(mockSpinner.start).toHaveBeenCalledWith('Fetching records...');
     expect(fetchAllRecords).toHaveBeenCalled();
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map));
     expect(mockSpinner.success).toHaveBeenCalledWith('Fetched 1 records!');
     expect(mockSpinner.start).toHaveBeenCalledWith('Writing records...');
     expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
@@ -434,8 +434,8 @@ describe('index', () => {
     await import('@/index.js');
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord2, 'suffix', expect.any(Map), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map));
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord2, 'suffix', expect.any(Map), true, expect.any(Map));
     // The whole reason seenSlugs is threaded is that every record in a batch
     // shares one Set — assert the exact same instance reaches both calls, so
     // a regression to a per-record Set (which would disable the overwrite
@@ -691,6 +691,7 @@ describe('index', () => {
       'suffix',
       expect.any(Map),
       true,
+      expect.any(Map),
     );
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
     // The run ends on the truncation warning, not the green delete-success line.
@@ -777,7 +778,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map));
     expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Could not read settings'),
@@ -813,7 +814,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'overwrite', expect.any(Map), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'overwrite', expect.any(Map), true, expect.any(Map));
   });
 
   it('normalizes an unknown conflict strategy from settings to suffix', async () => {
@@ -832,7 +833,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true);
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map));
   });
 
   it('passes includeFrontmatter=false to writeMarkdown when the frontmatter setting is off', async () => {
@@ -860,6 +861,7 @@ describe('index', () => {
       'suffix',
       expect.any(Map),
       false,
+      expect.any(Map),
     );
   });
 
@@ -1977,11 +1979,183 @@ describe('index', () => {
       'suffix',
       expect.any(Map),
       true,
+      expect.any(Map),
     );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Could not read settings'),
     );
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
+  });
+
+  // Snapshots the writtenPaths map each writeMarkdown call receives (before it
+  // writes), then records the path for the record — the same shape as the real
+  // writeMarkdown's own tracking — so a later pass can observe what the shared
+  // map carried forward. `writtenPaths` is optional in the signature, so guard.
+  const captureWrittenPaths = (snapshots: Array<Map<string, string>>) => (
+    record: Record,
+    _conflictStrategy?: ConflictStrategy,
+    _seenSlugs?: Map<string, string>,
+    _includeFrontmatter?: boolean,
+    writtenPaths?: Map<string, string>,
+  ): string | null => {
+    const filePath = `/mock/output/${record.uuid}.md`;
+    snapshots.push(new Map(writtenPaths));
+    writtenPaths?.set(record.uuid, filePath);
+    return filePath;
+  };
+
+  it('passes the same writtenPaths map instance to every autoSync pass', async () => {
+    const passTwoRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: true, records: [mockRecord], partial: false })
+      .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
+    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    expect(writeMarkdown).toHaveBeenCalledTimes(2);
+    const [firstCall, secondCall] = vi.mocked(writeMarkdown).mock.calls;
+    // A per-pass map would be a fresh object and this identity check fails,
+    // disabling the cross-pass reuse that stops duplicate accumulation.
+    expect(firstCall[4]).toBeInstanceOf(Map);
+    expect(secondCall[4]).toBe(firstCall[4]);
+    // writtenPaths (uuid-keyed reuse) and seenSlugs (path-keyed ownership) must
+    // be distinct instances — passing one map for both collapses both guards.
+    expect(firstCall[4]).not.toBe(firstCall[2]);
+  });
+
+  it('forgets a record from the written-path map once it settles (deleted) so a later pass no longer carries it', async () => {
+    const passTwoRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const snapshots: Array<Map<string, string>> = [];
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: true, records: [mockRecord], partial: false })
+      .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
+    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Pass one wrote abc-123, then its delete succeeded, so the map handed to
+    // pass two no longer carries it — the "settled" half of the split.
+    expect(snapshots[1].has('abc-123')).toBe(false);
+  });
+
+  it('keeps an unsettled record in the written-path map so a later pass reuses its file', async () => {
+    const { fetchAllRecords, markRecordSynced } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const snapshots: Array<Map<string, string>> = [];
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: false }));
+    // The mark-synced step fails both passes, so the record stays pending and is
+    // re-fetched — exactly the case that used to drop a suffixed duplicate.
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_FAILED);
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Pass one wrote abc-123 and its mark-synced failed (unsettled), so pass two
+    // still sees its path in the shared map and reuses the file.
+    expect(snapshots[1].get('abc-123')).toBe('/mock/output/abc-123.md');
+    // The reused record must still flow through to the settle step each pass —
+    // reuse that dropped it from writtenRecords would never converge.
+    expect(markRecordSynced).toHaveBeenCalledTimes(2);
+    expect(markRecordSynced).toHaveBeenNthCalledWith(1, 'abc-123', '/mock/output/abc-123.md');
+    expect(markRecordSynced).toHaveBeenNthCalledWith(2, 'abc-123', '/mock/output/abc-123.md');
+  });
+
+  it('forgets only the mark-synced record that succeeded, keeping the failed one for reuse', async () => {
+    const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+    const { fetchAllRecords, markRecordSynced } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const snapshots: Array<Map<string, string>> = [];
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: false }));
+    // Both records are fetched again next pass; only def-456's mark fails, so it
+    // must stay in the map while abc-123 is forgotten — pins the index alignment
+    // between the settled and failed filters.
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, secondRecord], partial: false });
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(uuid === 'abc-123' ? MARK_SYNCED : MARK_FAILED),
+    );
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Snapshots 0/1 are pass one (both records fresh, map empty). Snapshots 2/3
+    // are pass two: abc-123 settled (forgotten), def-456 unsettled (retained).
+    expect(snapshots[2].has('abc-123')).toBe(false);
+    expect(snapshots[2].get('def-456')).toBe('/mock/output/def-456.md');
+  });
+
+  it('retains all written paths when a delete settles fewer records than were written', async () => {
+    const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const snapshots: Array<Map<string, string>> = [];
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, secondRecord], partial: false });
+    // Two records written but the server reports only one deleted — a bare count
+    // can't say which survived, so no path may be forgotten or a still-pending
+    // record would drop a suffixed duplicate next pass.
+    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Pass two (snapshot index 2) still carries both uuids.
+    expect(snapshots[2].has('abc-123')).toBe(true);
+    expect(snapshots[2].has('def-456')).toBe(true);
   });
 });
