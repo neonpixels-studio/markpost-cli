@@ -280,9 +280,10 @@ const evictStalePathOwners = (
 // own file instead of the suffix strategy dropping a fresh `<slug>-2.md`,
 // `<slug>-3.md` duplicate every pass — the written-vs-settled split: the local
 // file is already written, only the server-side step still needs retrying.
-// Returns the reusable path, or null (the caller then falls through to a fresh
-// write) when any guard fails: the uuid is untrackable (empty) or was never
-// written; the tracked path is no longer a regular file (moved/deleted, or
+// Returns the reusable state (path + content hash), or null (the caller then
+// falls through to a fresh write) when any guard fails: the uuid is untrackable
+// (empty) or was never written; the tracked path is no longer a regular file
+// (moved/deleted, or
 // replaced by a directory or symlink — reuse writes nothing for suffix/skip, so
 // settling the record against a non-file would strand it with no local content,
 // and lstat rejects a symlink rather than following it out of the vault); or the
@@ -299,30 +300,30 @@ const evictStalePathOwners = (
 // rare same-path race. A stat error other than "missing" (EACCES, ENOTDIR) is
 // treated as "not reusable" rather than thrown, so a best-effort lookup can
 // never fail an otherwise-writable record.
-const resolveReusableWrittenPath = (
+const resolveReusableWrittenState = (
   outputDirectory: string,
   recordUuid: string,
   writtenState: Map<string, WrittenRecordState>,
-): string | null => {
+): WrittenRecordState | null => {
   if (!recordUuid) {
     return null;
   }
 
-  const existingPath = writtenState.get(recordUuid)?.path;
+  const existingState = writtenState.get(recordUuid);
 
-  if (!existingPath) {
+  if (!existingState) {
     return null;
   }
 
-  if (!isExistingRegularFile(existingPath)) {
+  if (!isExistingRegularFile(existingState.path)) {
     return null;
   }
 
-  if (resolve(dirname(existingPath)) !== resolve(outputDirectory)) {
+  if (resolve(dirname(existingState.path)) !== resolve(outputDirectory)) {
     return null;
   }
 
-  return existingPath;
+  return existingState;
 };
 
 // True only when `filePath` is an existing regular file. lstat (not stat) so a
@@ -343,7 +344,11 @@ const isExistingRegularFile = (filePath: string): boolean => {
 // leaves it alone rather than clobbering something it can't inspect.
 const readFileIfReadable = (filePath: string): string | null => {
   try {
-    return readFileSync(filePath, 'utf-8');
+    const content = readFileSync(filePath, 'utf-8');
+    // `utf-8` always yields a string in production, but guard so a non-string
+    // (a test stub, an odd override) is treated as unreadable rather than
+    // reaching hashContent and throwing on a non-string input.
+    return typeof content === 'string' ? content : null;
   } catch {
     return null;
   }
@@ -373,26 +378,21 @@ const localFileMatchesBaseline = (
 // (untouched). Keeping the pass-one file in that case would silently strand the
 // new server version, so we refresh. A genuine local edit still wins: if the
 // on-disk bytes no longer match the baseline, the user changed it and we leave
-// it. No baseline (a record we never tracked a hash for) is treated as "don't
-// refresh" so this can only ever add a rewrite the old code would have skipped,
-// never suppress one it made.
+// it. Takes the resolved state (path + baseline hash from the same map entry),
+// so this can only ever add a rewrite the old code would have skipped, never
+// suppress one it made.
 const serverChangedWhileLocalUntouched = (
-  reusablePath: string,
+  reusableState: WrittenRecordState,
   renderedContent: string,
-  recordUuid: string,
-  writtenState: Map<string, WrittenRecordState>,
 ): boolean => {
-  const baselineHash = writtenState.get(recordUuid)?.contentHash;
-
-  if (baselineHash === undefined) {
+  if (hashContent(renderedContent) === reusableState.contentHash) {
     return false;
   }
 
-  if (hashContent(renderedContent) === baselineHash) {
-    return false;
-  }
-
-  return localFileMatchesBaseline(reusablePath, baselineHash);
+  return localFileMatchesBaseline(
+    reusableState.path,
+    reusableState.contentHash,
+  );
 };
 
 // Whether a reused file should be rewritten with the freshly fetched content.
@@ -400,22 +400,15 @@ const serverChangedWhileLocalUntouched = (
 // the slug. suffix/skip refresh only in the narrow server-changed-and-untouched
 // case above; otherwise they preserve the existing file.
 const shouldRewriteReusedFile = (
-  reusablePath: string,
+  reusableState: WrittenRecordState,
   renderedContent: string,
   conflictStrategy: ConflictStrategy,
-  recordUuid: string,
-  writtenState: Map<string, WrittenRecordState>,
 ): boolean => {
   if (conflictStrategy === 'overwrite') {
     return true;
   }
 
-  return serverChangedWhileLocalUntouched(
-    reusablePath,
-    renderedContent,
-    recordUuid,
-    writtenState,
-  );
+  return serverChangedWhileLocalUntouched(reusableState, renderedContent);
 };
 
 // Record the file and content hash this uuid now occupies, so a later reuse pass
@@ -437,30 +430,29 @@ const rememberWrittenState = (
 // stored hash too, so the next pass compares against what is actually on disk
 // now. Reuse only runs for a non-empty, tracked uuid, so recordUuid is safe to
 // store. Returns the reused path either way — the record must settle server-side
-// rather than loop pending.
+// rather than loop pending. Note a refresh is the one place suffix/skip reach
+// writeReplacingExisting (an unlink-then-exclusive-create), so a failed recreate
+// leaves the file briefly gone; that's the same window overwrite already accepts,
+// and the record recovers next pass (reuse finds no file and writes fresh).
+// Reuse is keyed by uuid, so a server-side title change refreshes the content
+// (new heading/frontmatter) into the pass-one filename rather than renaming the
+// file to the new slug — consistent with the existing "keep the original
+// filename" reuse design (see resolveReusableWrittenState).
 const reuseWrittenFile = (
-  reusablePath: string,
+  reusableState: WrittenRecordState,
   content: string,
   conflictStrategy: ConflictStrategy,
   recordUuid: string,
   writtenState: Map<string, WrittenRecordState>,
 ): string => {
-  if (
-    !shouldRewriteReusedFile(
-      reusablePath,
-      content,
-      conflictStrategy,
-      recordUuid,
-      writtenState,
-    )
-  ) {
-    return reusablePath;
+  if (!shouldRewriteReusedFile(reusableState, content, conflictStrategy)) {
+    return reusableState.path;
   }
 
-  writeReplacingExisting(reusablePath, content);
-  rememberWrittenState(writtenState, recordUuid, reusablePath, content);
+  writeReplacingExisting(reusableState.path, content);
+  rememberWrittenState(writtenState, recordUuid, reusableState.path, content);
 
-  return reusablePath;
+  return reusableState.path;
 };
 
 // Batch-wide precondition for writing: the output directory must be configured
@@ -497,7 +489,7 @@ export const ensureOutputDirectory = (): string => {
 // across passes so a record whose server settle failed reuses its file instead
 // of accumulating suffixed duplicates, and so a suffix/skip reuse can re-fetch a
 // server-side content change without clobbering a vault edit (see
-// resolveReusableWrittenPath and reuseWrittenFile). `includeFrontmatter` is the
+// resolveReusableWrittenState and reuseWrittenFile). `includeFrontmatter` is the
 // user's `frontmatter` setting; when off the file is written without a
 // frontmatter block (see buildRecordDocument).
 export const writeMarkdown = (
@@ -514,21 +506,21 @@ export const writeMarkdown = (
   const content = buildRecordDocument(record, includeFrontmatter);
 
   // A re-fetched, still-unsettled record reuses its own file rather than letting
-  // any strategy drop a suffixed duplicate (see resolveReusableWrittenPath).
+  // any strategy drop a suffixed duplicate (see resolveReusableWrittenState).
   // Runs before strategy resolution so it applies to suffix, overwrite, and skip
   // alike. reuseWrittenFile keeps the file as-is under suffix/skip (so a vault
   // edit between passes survives) except when the server content changed while
   // the local file stayed untouched — the case where keeping pass-one content
   // would strand the new version (issue #102); overwrite always refreshes.
-  const reusablePath = resolveReusableWrittenPath(
+  const reusableState = resolveReusableWrittenState(
     outputDirectory,
     record.uuid,
     writtenState,
   );
 
-  if (reusablePath) {
+  if (reusableState) {
     return reuseWrittenFile(
-      reusablePath,
+      reusableState,
       content,
       conflictStrategy,
       record.uuid,
