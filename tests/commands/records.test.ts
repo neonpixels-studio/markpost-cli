@@ -54,7 +54,7 @@ describe('runRecordsCommand', () => {
 
     await runRecordsCommand(['list']);
 
-    expect(checkConfig).toHaveBeenCalled();
+    expect(checkConfig).toHaveBeenCalledWith(false);
   });
 
   it('never dispatches to list when checkConfig fails', async () => {
@@ -176,6 +176,7 @@ describe('runRecordsCommand', () => {
     });
 
     it('prints the records as a parseable JSON array with --json', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
       const { fetchAllRecords } = await import('@/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
@@ -186,6 +187,9 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['list', '--json']);
 
+      // --json must reach checkConfig so it fails loud instead of prompting on
+      // stdout on an unconfigured machine.
+      expect(checkConfig).toHaveBeenCalledWith(true);
       // Exactly one stdout write, so a future stray console.log before the
       // payload breaks the test instead of hiding in earlier calls.
       expect(console.log).toHaveBeenCalledTimes(1);

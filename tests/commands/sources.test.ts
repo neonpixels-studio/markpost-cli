@@ -105,7 +105,7 @@ describe('runSourcesCommand', () => {
 
     await runSourcesCommand(['list']);
 
-    expect(checkConfig).toHaveBeenCalled();
+    expect(checkConfig).toHaveBeenCalledWith(false);
   });
 
   it('errors to stderr and exits 1 when no subcommand is given', async () => {
@@ -272,12 +272,16 @@ describe('runSourcesCommand', () => {
     });
 
     it('prints the sources as a parseable JSON array with computed endpoints when --json is passed', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
       const { fetchSources } = await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource, emailSource]);
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
       await runSourcesCommand(['list', '--json']);
 
+      // --json must reach checkConfig so it fails loud instead of prompting on
+      // stdout on an unconfigured machine.
+      expect(checkConfig).toHaveBeenCalledWith(true);
       // Exactly one stdout write, so a future stray console.log before the
       // payload breaks the test instead of hiding in earlier calls.
       expect(console.log).toHaveBeenCalledTimes(1);

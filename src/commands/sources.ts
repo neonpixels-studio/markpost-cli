@@ -90,7 +90,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    await checkConfig();
+    await checkConfig(json);
     await handler(uuid, json);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;

@@ -49,47 +49,78 @@ export const getConfigPath = (): string => {
   return config.path;
 };
 
-const checkApiToken = async () => {
-  if (config.get('apiToken')) {
+// One configurable value's identity: its store key, the env var that can set
+// it non-interactively, and the label shown when prompting. Kept as data so a
+// single resolver (below) handles both fields instead of duplicating the
+// check-env-then-prompt flow per key.
+type ConfigField = {
+  key: ConfigKey;
+  envVar: string;
+  promptMessage: string;
+};
+
+const API_TOKEN_FIELD: ConfigField = {
+  key: 'apiToken',
+  envVar: 'API_TOKEN',
+  promptMessage: 'Sync API Token',
+};
+
+const OUTPUT_DIRECTORY_FIELD: ConfigField = {
+  key: 'outputDirectory',
+  envVar: 'OUTPUT_DIRECTORY',
+  promptMessage: 'Output Directory',
+};
+
+// In --json mode an interactive prompt would render to the terminal and a
+// piped consumer can't answer it anyway. So fail loud: write a structured
+// diagnostic to stderr (not stdout — stdout is the data channel `--json | jq`
+// reads, and a valid-JSON error there would be silently parsed as data),
+// leaving stdout empty, then exit non-zero.
+const failConfigRequiredAsJson = (field: ConfigField): void => {
+  console.error(
+    JSON.stringify({
+      error: 'config_required',
+      missing: field.key,
+      message: `${field.key} is not configured. In --json mode the CLI will not prompt; set the ${field.envVar} environment variable or run \`markpost config\` before retrying.`,
+    }),
+  );
+  process.exit(1);
+};
+
+const ensureConfigValue = async (
+  field: ConfigField,
+  json: boolean,
+): Promise<void> => {
+  if (getConfigValue(field.key)) {
     return;
   }
 
-  if (process.env.API_TOKEN) {
-    config.set('apiToken', process.env.API_TOKEN);
+  const fromEnv = process.env[field.envVar];
+
+  if (fromEnv) {
+    setConfigValue(field.key, fromEnv);
     return;
   }
 
-  const apiToken = await input({ message: 'Sync API Token' });
+  if (json) {
+    // Explicit return so the short-circuit doesn't rely on process.exit being
+    // terminating — without it, a non-terminating exit would fall through to
+    // the interactive prompt this branch exists to avoid.
+    failConfigRequiredAsJson(field);
+    return;
+  }
 
-  if (!apiToken) {
-    console.error(chalk.redBright('Sync API Token is required!'));
+  const value = await input({ message: field.promptMessage });
+
+  if (!value) {
+    console.error(chalk.redBright(`${field.promptMessage} is required!`));
     process.exit();
   }
 
-  config.set('apiToken', apiToken);
+  setConfigValue(field.key, value);
 };
 
-const checkOutputDirectory = async () => {
-  if (config.get('outputDirectory')) {
-    return;
-  }
-
-  if (process.env.OUTPUT_DIRECTORY) {
-    config.set('outputDirectory', process.env.OUTPUT_DIRECTORY);
-    return;
-  }
-
-  const outputDirectory = await input({ message: 'Output Directory' });
-
-  if (!outputDirectory) {
-    console.error(chalk.redBright('Output Directory is required!'));
-    process.exit();
-  }
-
-  config.set('outputDirectory', outputDirectory);
-};
-
-export const checkConfig = async () => {
-  await checkApiToken();
-  await checkOutputDirectory();
+export const checkConfig = async (json = false): Promise<void> => {
+  await ensureConfigValue(API_TOKEN_FIELD, json);
+  await ensureConfigValue(OUTPUT_DIRECTORY_FIELD, json);
 };

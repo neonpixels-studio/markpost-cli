@@ -25,7 +25,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    await checkConfig();
+    await checkConfig(json);
 
     const record = await fetchRecord(uuid);
 
