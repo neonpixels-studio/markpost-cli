@@ -10,7 +10,11 @@ import {
   PENDING_STATUS,
 } from '@/libs/records.js';
 import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
-import { ensureOutputDirectory, writeMarkdown } from '@/libs/markdown.js';
+import {
+  ensureOutputDirectory,
+  writeMarkdown,
+  WrittenRecordState,
+} from '@/libs/markdown.js';
 import { fetchSettings, SettingsReadResult } from '@/libs/settings.js';
 import { runPushCommand, USAGE as PUSH_USAGE } from '@/commands/push.js';
 import { runGetCommand, USAGE as GET_USAGE } from '@/commands/get.js';
@@ -63,16 +67,18 @@ const MARK_SYNCED_CONCURRENCY = 10;
 // invocations starts empty each time and does not get this cross-run guard.
 const processSeenSlugs = new Map<string, string>();
 
-// Written-vs-settled bookkeeping (uuid -> the file written for it this process),
-// shared across autoSync passes like processSeenSlugs. A record whose
-// server-side settle (mark-synced/delete) fails stays pending and is re-fetched
-// next pass; carrying its written path forward lets writeMarkdown overwrite that
-// file instead of the suffix strategy dropping a fresh `<slug>-2.md`,
-// `<slug>-3.md` duplicate every pass. The orchestrator drops an entry once the
-// record settles (see forgetSettledRecords). Lifetime is the CLI process, so a
-// cron-style loop of separate single-pass invocations starts empty each time —
-// the same limitation processSeenSlugs carries.
-const processWrittenPaths = new Map<string, string>();
+// Written-vs-settled bookkeeping (uuid -> the file written for it this process
+// plus a hash of its content), shared across autoSync passes like
+// processSeenSlugs. A record whose server-side settle (mark-synced/delete) fails
+// stays pending and is re-fetched next pass; carrying its written state forward
+// lets writeMarkdown reuse that file instead of the suffix strategy dropping a
+// fresh `<slug>-2.md`, `<slug>-3.md` duplicate every pass, and lets a suffix/skip
+// reuse re-fetch a server-side content change without clobbering a vault edit.
+// The orchestrator drops an entry once the record settles (see
+// forgetSettledRecords). Lifetime is the CLI process, so a cron-style loop of
+// separate single-pass invocations starts empty each time — the same limitation
+// processSeenSlugs carries.
+const processWrittenState = new Map<string, WrittenRecordState>();
 
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
@@ -233,7 +239,7 @@ function writeRecordSafely(
   conflictStrategy: ConflictStrategy,
   seenSlugs: Map<string, string>,
   includeFrontmatter: boolean,
-  writtenPaths: Map<string, string>,
+  writtenState: Map<string, WrittenRecordState>,
 ): WriteOutcome {
   try {
     const filePath = writeMarkdown(
@@ -241,7 +247,7 @@ function writeRecordSafely(
       conflictStrategy,
       seenSlugs,
       includeFrontmatter,
-      writtenPaths,
+      writtenState,
     );
 
     if (filePath === null) {
@@ -265,7 +271,7 @@ function writeRecords(
   conflictStrategy: ConflictStrategy,
   includeFrontmatter: boolean,
   seenSlugs: Map<string, string>,
-  writtenPaths: Map<string, string>,
+  writtenState: Map<string, WrittenRecordState>,
 ): WriteRecordsResult {
   // `seenSlugs` (the module-scope `processSeenSlugs`) is threaded in so this
   // stays a function of its inputs. A sequential loop preserves order and shares
@@ -280,7 +286,7 @@ function writeRecords(
       conflictStrategy,
       seenSlugs,
       includeFrontmatter,
-      writtenPaths,
+      writtenState,
     );
 
     if (outcome.status === 'written') {
@@ -440,10 +446,10 @@ function reportMarkFailures(
 // as an argument (like writeRecords threads processSeenSlugs) so it stays a
 // function of its inputs.
 function forgetSettledRecords(
-  writtenPaths: Map<string, string>,
+  writtenState: Map<string, WrittenRecordState>,
   uuids: string[],
 ): void {
-  uuids.forEach((uuid) => writtenPaths.delete(uuid));
+  uuids.forEach((uuid) => writtenState.delete(uuid));
 }
 
 // Marks every written record synced on the server after a write, so the next
@@ -452,7 +458,7 @@ function forgetSettledRecords(
 async function markWrittenRecordsSynced(
   writtenRecords: WrittenRecord[],
   spinner: Spinner,
-  writtenPaths: Map<string, string>,
+  writtenState: Map<string, WrittenRecordState>,
 ): Promise<void> {
   if (writtenRecords.length === 0) {
     return;
@@ -474,7 +480,7 @@ async function markWrittenRecordsSynced(
   );
 
   forgetSettledRecords(
-    writtenPaths,
+    writtenState,
     settled.map(({ record }) => record.uuid),
   );
 
@@ -633,7 +639,7 @@ async function runDefaultSync(): Promise<boolean> {
       conflictStrategy,
       includeFrontmatter,
       processSeenSlugs,
-      processWrittenPaths,
+      processWrittenState,
     );
     reportWriteOutcome(spinner, writtenRecords.length, failedRecords.length);
     writtenRecords.forEach(({ filePath }) => {
@@ -680,7 +686,7 @@ async function runDefaultSync(): Promise<boolean> {
       await markWrittenRecordsSynced(
         writtenRecords,
         spinner,
-        processWrittenPaths,
+        processWrittenState,
       );
       reportIncompleteSync(recordsResult.partial);
       return autoSync;
@@ -745,7 +751,7 @@ async function runDefaultSync(): Promise<boolean> {
     // the exact bug this split prevents.
     if (deleteMeta.deleted === writtenRecords.length) {
       forgetSettledRecords(
-        processWrittenPaths,
+        processWrittenState,
         writtenRecords.map(({ record }) => record.uuid),
       );
     }

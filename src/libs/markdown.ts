@@ -15,6 +15,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
+import { createHash } from 'node:crypto';
 import slugify from '@sindresorhus/slugify';
 import { config } from '@/libs/config.js';
 import {
@@ -40,6 +41,29 @@ const UNTITLED_SLUG = 'untitled';
 // the target path already exists.
 const EXCLUSIVE_WRITE_FLAG = 'wx';
 const FILE_ALREADY_EXISTS_ERROR_CODE = 'EEXIST';
+// Any collision-resistant digest works here — the hash is only compared against
+// another hash of the CLI's own output, never used as a security boundary.
+const CONTENT_HASH_ALGORITHM = 'sha256';
+
+// The per-uuid bookkeeping writeMarkdown carries across autoSync passes: the
+// file a record landed on, plus a hash of the exact document written there.
+// Path and hash are written, forgotten, and evicted as a unit, so they live in
+// one record rather than two parallel maps that could drift out of sync. The
+// hash is the baseline for the reuse-refresh check (see reuseWrittenFile): on a
+// later pass it tells "the server content changed" (the freshly rendered
+// document no longer hashes to this) apart from "the user edited the file in the
+// vault" (the on-disk bytes no longer hash to this).
+export type WrittenRecordState = {
+  path: string;
+  contentHash: string;
+};
+
+// Hash of the exact bytes writeMarkdown put on disk, used only to compare one
+// piece of the CLI's own output against another (baseline vs. re-render, or
+// baseline vs. on-disk). Not a security check.
+const hashContent = (content: string): string => {
+  return createHash(CONTENT_HASH_ALGORITHM).update(content).digest('hex');
+};
 
 const getOutputDirectory = () => {
   return (
@@ -232,26 +256,26 @@ const resolveStrategyForSlug = (
   return conflictStrategy;
 };
 
-// Keep writtenPaths to one uuid per path: when a record lands on a path a
+// Keep writtenState to one uuid per path: when a record lands on a path a
 // different record previously tracked (that record's file was moved out of the
 // vault and this record recreated the path), drop the stale entry. Without this,
 // a settled-but-not-forgotten stale entry could shadow the live owner and either
 // block its reuse (dropping a duplicate) or route a reuse onto another record's
 // file. Deleting the current key during Map.forEach is safe.
 const evictStalePathOwners = (
-  writtenPaths: Map<string, string>,
+  writtenState: Map<string, WrittenRecordState>,
   writtenPath: string,
   recordUuid: string,
 ): void => {
-  writtenPaths.forEach((entryPath, entryUuid) => {
-    if (entryPath === writtenPath && entryUuid !== recordUuid) {
-      writtenPaths.delete(entryUuid);
+  writtenState.forEach((entry, entryUuid) => {
+    if (entry.path === writtenPath && entryUuid !== recordUuid) {
+      writtenState.delete(entryUuid);
     }
   });
 };
 
 // A record whose server-side settle (mark-synced or delete) failed on a prior
-// pass is re-fetched as still-pending next pass. `writtenPaths` maps each such
+// pass is re-fetched as still-pending next pass. `writtenState` maps each such
 // uuid to the file already written for it this process, so the record reuses its
 // own file instead of the suffix strategy dropping a fresh `<slug>-2.md`,
 // `<slug>-3.md` duplicate every pass — the written-vs-settled split: the local
@@ -265,7 +289,7 @@ const evictStalePathOwners = (
 // file no longer lives in the current output directory (a mid-run
 // outputDirectory change must not send the record back to the old vault — same
 // reason seenSlugs is keyed by resolved path). evictStalePathOwners keeps
-// writtenPaths to one uuid per path, so a surviving entry is unambiguously this
+// writtenState to one uuid per path, so a surviving entry is unambiguously this
 // record's file. Keyed by uuid, so a record whose title changed server-side
 // between passes keeps its original filename (its existing file is reused rather
 // than orphaned under a new slug). The check is existence + type, not identity:
@@ -278,13 +302,13 @@ const evictStalePathOwners = (
 const resolveReusableWrittenPath = (
   outputDirectory: string,
   recordUuid: string,
-  writtenPaths: Map<string, string>,
+  writtenState: Map<string, WrittenRecordState>,
 ): string | null => {
   if (!recordUuid) {
     return null;
   }
 
-  const existingPath = writtenPaths.get(recordUuid);
+  const existingPath = writtenState.get(recordUuid)?.path;
 
   if (!existingPath) {
     return null;
@@ -311,6 +335,132 @@ const isExistingRegularFile = (filePath: string): boolean => {
   } catch {
     return false;
   }
+};
+
+// Best-effort read of a file's bytes; null when it can't be read (missing,
+// EACCES, a directory). Used only by the reuse-refresh check, where an
+// unreadable file means "can't confirm it's our untouched output", so the caller
+// leaves it alone rather than clobbering something it can't inspect.
+const readFileIfReadable = (filePath: string): string | null => {
+  try {
+    return readFileSync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+};
+
+// True when the file on disk is byte-identical to what we last wrote there (its
+// hash matches the stored baseline). An unreadable file returns false so a reuse
+// never rewrites over content it can't confirm is its own.
+const localFileMatchesBaseline = (
+  filePath: string,
+  baselineHash: string,
+): boolean => {
+  const onDiskContent = readFileIfReadable(filePath);
+
+  if (onDiskContent === null) {
+    return false;
+  }
+
+  return hashContent(onDiskContent) === baselineHash;
+};
+
+// Under suffix/skip, a reused file is normally kept as-is so a vault edit made
+// between passes survives (that "don't clobber" intent is the whole point of
+// these strategies). The one exception (issue #102): the server content changed
+// since we wrote the file — the freshly rendered document no longer matches the
+// baseline we stored — AND the local file is still exactly what we wrote
+// (untouched). Keeping the pass-one file in that case would silently strand the
+// new server version, so we refresh. A genuine local edit still wins: if the
+// on-disk bytes no longer match the baseline, the user changed it and we leave
+// it. No baseline (a record we never tracked a hash for) is treated as "don't
+// refresh" so this can only ever add a rewrite the old code would have skipped,
+// never suppress one it made.
+const serverChangedWhileLocalUntouched = (
+  reusablePath: string,
+  renderedContent: string,
+  recordUuid: string,
+  writtenState: Map<string, WrittenRecordState>,
+): boolean => {
+  const baselineHash = writtenState.get(recordUuid)?.contentHash;
+
+  if (baselineHash === undefined) {
+    return false;
+  }
+
+  if (hashContent(renderedContent) === baselineHash) {
+    return false;
+  }
+
+  return localFileMatchesBaseline(reusablePath, baselineHash);
+};
+
+// Whether a reused file should be rewritten with the freshly fetched content.
+// `overwrite` always refreshes — the user opted into the newest record winning
+// the slug. suffix/skip refresh only in the narrow server-changed-and-untouched
+// case above; otherwise they preserve the existing file.
+const shouldRewriteReusedFile = (
+  reusablePath: string,
+  renderedContent: string,
+  conflictStrategy: ConflictStrategy,
+  recordUuid: string,
+  writtenState: Map<string, WrittenRecordState>,
+): boolean => {
+  if (conflictStrategy === 'overwrite') {
+    return true;
+  }
+
+  return serverChangedWhileLocalUntouched(
+    reusablePath,
+    renderedContent,
+    recordUuid,
+    writtenState,
+  );
+};
+
+// Record the file and content hash this uuid now occupies, so a later reuse pass
+// can both find the file and tell a server-side change apart from a vault edit.
+const rememberWrittenState = (
+  writtenState: Map<string, WrittenRecordState>,
+  recordUuid: string,
+  writtenPath: string,
+  content: string,
+): void => {
+  writtenState.set(recordUuid, {
+    path: writtenPath,
+    contentHash: hashContent(content),
+  });
+};
+
+// Settle a re-fetched, still-unsettled record onto the file it already occupies.
+// Rewrites only when shouldRewriteReusedFile says so; a rewrite refreshes the
+// stored hash too, so the next pass compares against what is actually on disk
+// now. Reuse only runs for a non-empty, tracked uuid, so recordUuid is safe to
+// store. Returns the reused path either way — the record must settle server-side
+// rather than loop pending.
+const reuseWrittenFile = (
+  reusablePath: string,
+  content: string,
+  conflictStrategy: ConflictStrategy,
+  recordUuid: string,
+  writtenState: Map<string, WrittenRecordState>,
+): string => {
+  if (
+    !shouldRewriteReusedFile(
+      reusablePath,
+      content,
+      conflictStrategy,
+      recordUuid,
+      writtenState,
+    )
+  ) {
+    return reusablePath;
+  }
+
+  writeReplacingExisting(reusablePath, content);
+  rememberWrittenState(writtenState, recordUuid, reusablePath, content);
+
+  return reusablePath;
 };
 
 // Batch-wide precondition for writing: the output directory must be configured
@@ -342,10 +492,12 @@ export const ensureOutputDirectory = (): string => {
 // path to the uuid that owns it; the caller threads it across a batch AND
 // across autoSync passes so `overwrite` can't lose two different same-slug
 // records while still letting a record re-overwrite its own file (see
-// resolveStrategyForSlug). `writtenPaths` maps each uuid to the file written
-// for it this process; the caller threads it across passes so a record whose
-// server settle failed reuses its file instead of accumulating suffixed
-// duplicates (see resolveReusableWrittenPath). `includeFrontmatter` is the
+// resolveStrategyForSlug). `writtenState` maps each uuid to the file written
+// for it this process and a hash of that file's content; the caller threads it
+// across passes so a record whose server settle failed reuses its file instead
+// of accumulating suffixed duplicates, and so a suffix/skip reuse can re-fetch a
+// server-side content change without clobbering a vault edit (see
+// resolveReusableWrittenPath and reuseWrittenFile). `includeFrontmatter` is the
 // user's `frontmatter` setting; when off the file is written without a
 // frontmatter block (see buildRecordDocument).
 export const writeMarkdown = (
@@ -353,7 +505,7 @@ export const writeMarkdown = (
   conflictStrategy: ConflictStrategy = DEFAULT_CONFLICT_STRATEGY,
   seenSlugs: Map<string, string> = new Map(),
   includeFrontmatter = true,
-  writtenPaths: Map<string, string> = new Map(),
+  writtenState: Map<string, WrittenRecordState> = new Map(),
 ): string | null => {
   const outputDirectory = ensureOutputDirectory();
 
@@ -364,31 +516,24 @@ export const writeMarkdown = (
   // A re-fetched, still-unsettled record reuses its own file rather than letting
   // any strategy drop a suffixed duplicate (see resolveReusableWrittenPath).
   // Runs before strategy resolution so it applies to suffix, overwrite, and skip
-  // alike.
+  // alike. reuseWrittenFile keeps the file as-is under suffix/skip (so a vault
+  // edit between passes survives) except when the server content changed while
+  // the local file stayed untouched — the case where keeping pass-one content
+  // would strand the new version (issue #102); overwrite always refreshes.
   const reusablePath = resolveReusableWrittenPath(
     outputDirectory,
     record.uuid,
-    writtenPaths,
+    writtenState,
   );
 
-  // `suffix` and `skip` both preserve existing files (suffix by writing a new
-  // suffixed file, skip by not writing at all), so on reuse they keep the file
-  // as-is: reusing the path lets the record settle server-side without dropping
-  // a duplicate and without clobbering a note edited in the vault between
-  // passes. The tradeoff is deliberate — a record whose content changed
-  // server-side between passes keeps its pass-one file under suffix/skip
-  // (preserving a local edit is preferred over re-fetching server content, in
-  // keeping with these strategies' "don't clobber" intent). Only `overwrite`
-  // (the user opted into the newest record replacing the file) refreshes the
-  // reused file with the record's latest content.
-  if (reusablePath && conflictStrategy !== 'overwrite') {
-    return reusablePath;
-  }
-
   if (reusablePath) {
-    writeReplacingExisting(reusablePath, content);
-
-    return reusablePath;
+    return reuseWrittenFile(
+      reusablePath,
+      content,
+      conflictStrategy,
+      record.uuid,
+      writtenState,
+    );
   }
 
   const effectiveStrategy = resolveStrategyForSlug(
@@ -412,13 +557,14 @@ export const writeMarkdown = (
     seenSlugs.set(basePath, record.uuid);
   }
 
-  // Remember the file this uuid landed on so a later pass that re-fetches it
-  // (its server settle failed) reuses it. Skip a `skip` no-op (null) and an
-  // empty uuid, which can't be tracked; the orchestrator drops the entry once
-  // the record settles server-side.
+  // Remember the file (and the content written there) for this uuid so a later
+  // pass that re-fetches it (its server settle failed) reuses the file and can
+  // tell a server-side content change apart from a vault edit. Skip a `skip`
+  // no-op (null) and an empty uuid, which can't be tracked; the orchestrator
+  // drops the entry once the record settles server-side.
   if (writtenPath !== null && record.uuid) {
-    evictStalePathOwners(writtenPaths, writtenPath, record.uuid);
-    writtenPaths.set(record.uuid, writtenPath);
+    evictStalePathOwners(writtenState, writtenPath, record.uuid);
+    rememberWrittenState(writtenState, record.uuid, writtenPath, content);
   }
 
   return writtenPath;
