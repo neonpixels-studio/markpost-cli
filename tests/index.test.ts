@@ -5,6 +5,7 @@ import { Record } from '@/types/records.types.js';
 import { UserSettings, ConflictStrategy } from '@/types/settings.types.js';
 import { SettingsReadResult } from '@/libs/settings.js';
 import { MARK_FAILED, MARK_SYNCED, MARK_TIMED_OUT } from '@/libs/records.js';
+import type { WrittenRecordState } from '@/libs/markdown.js';
 
 vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
 // Keep the real module's exports (notably the MARK_* outcome constants and
@@ -1992,16 +1993,18 @@ describe('index', () => {
   // writes), then records the path for the record — the same shape as the real
   // writeMarkdown's own tracking — so a later pass can observe what the shared
   // map carried forward. `writtenPaths` is optional in the signature, so guard.
-  const captureWrittenPaths = (snapshots: Array<Map<string, string>>) => (
+  const captureWrittenPaths = (
+    snapshots: Array<Map<string, WrittenRecordState>>,
+  ) => (
     record: Record,
     _conflictStrategy?: ConflictStrategy,
     _seenSlugs?: Map<string, string>,
     _includeFrontmatter?: boolean,
-    writtenPaths?: Map<string, string>,
+    writtenState?: Map<string, WrittenRecordState>,
   ): string | null => {
     const filePath = `/mock/output/${record.uuid}.md`;
-    snapshots.push(new Map(writtenPaths));
-    writtenPaths?.set(record.uuid, filePath);
+    snapshots.push(new Map(writtenState));
+    writtenState?.set(record.uuid, { path: filePath, contentHash: 'hash' });
     return filePath;
   };
 
@@ -2046,7 +2049,7 @@ describe('index', () => {
     const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
     const { default: yoctoSpinner } = await import('yocto-spinner');
 
-    const snapshots: Array<Map<string, string>> = [];
+    const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
     vi.mocked(fetchAllRecords)
@@ -2073,7 +2076,7 @@ describe('index', () => {
     const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
     const { default: yoctoSpinner } = await import('yocto-spinner');
 
-    const snapshots: Array<Map<string, string>> = [];
+    const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: false }));
     // The mark-synced step fails both passes, so the record stays pending and is
@@ -2090,7 +2093,7 @@ describe('index', () => {
 
     // Pass one wrote abc-123 and its mark-synced failed (unsettled), so pass two
     // still sees its path in the shared map and reuses the file.
-    expect(snapshots[1].get('abc-123')).toBe('/mock/output/abc-123.md');
+    expect(snapshots[1].get('abc-123')?.path).toBe('/mock/output/abc-123.md');
     // The reused record must still flow through to the settle step each pass —
     // reuse that dropped it from writtenRecords would never converge.
     expect(markRecordSynced).toHaveBeenCalledTimes(2);
@@ -2106,7 +2109,7 @@ describe('index', () => {
     const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
     const { default: yoctoSpinner } = await import('yocto-spinner');
 
-    const snapshots: Array<Map<string, string>> = [];
+    const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: false }));
     // Both records are fetched again next pass; only def-456's mark fails, so it
@@ -2127,7 +2130,7 @@ describe('index', () => {
     // Snapshots 0/1 are pass one (both records fresh, map empty). Snapshots 2/3
     // are pass two: abc-123 settled (forgotten), def-456 unsettled (retained).
     expect(snapshots[2].has('abc-123')).toBe(false);
-    expect(snapshots[2].get('def-456')).toBe('/mock/output/def-456.md');
+    expect(snapshots[2].get('def-456')?.path).toBe('/mock/output/def-456.md');
   });
 
   it('retains all written paths when a delete settles fewer records than were written', async () => {
@@ -2138,7 +2141,7 @@ describe('index', () => {
     const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
     const { default: yoctoSpinner } = await import('yocto-spinner');
 
-    const snapshots: Array<Map<string, string>> = [];
+    const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, secondRecord], partial: false });
