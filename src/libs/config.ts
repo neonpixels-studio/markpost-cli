@@ -63,7 +63,7 @@ const checkApiToken = async () => {
 
   if (!apiToken) {
     console.error(chalk.redBright('Sync API Token is required!'));
-    process.exit();
+    process.exit(1);
   }
 
   config.set('apiToken', apiToken);
@@ -83,7 +83,7 @@ const checkOutputDirectory = async () => {
 
   if (!outputDirectory) {
     console.error(chalk.redBright('Output Directory is required!'));
-    process.exit();
+    process.exit(1);
   }
 
   config.set('outputDirectory', outputDirectory);

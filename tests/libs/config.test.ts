@@ -143,7 +143,7 @@ describe('checkConfig', () => {
       vi.mocked(input).mockResolvedValue('');
       await checkConfig();
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Sync API Token is required!'));
-      expect(exitSpy).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 
@@ -185,7 +185,7 @@ describe('checkConfig', () => {
       vi.mocked(input).mockResolvedValue('');
       await checkConfig();
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Output Directory is required!'));
-      expect(exitSpy).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 });
