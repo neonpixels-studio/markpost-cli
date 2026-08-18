@@ -204,6 +204,17 @@ describe('checkConfig', () => {
       expect(mockSet).toHaveBeenCalledWith('apiToken', 'env-token');
       expect(mockSet).toHaveBeenCalledWith('outputDirectory', '/env/dir');
     });
+
+    it('returns silently when both values are already stored', async () => {
+      mockGet.mockReturnValue('stored-value');
+
+      await checkConfig(true);
+
+      expect(input).not.toHaveBeenCalled();
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('apiToken', () => {

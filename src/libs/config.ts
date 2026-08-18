@@ -81,7 +81,7 @@ const failConfigRequiredAsJson = (field: ConfigField): void => {
     JSON.stringify({
       error: 'config_required',
       missing: field.key,
-      message: `${field.key} is not configured. In --json mode the CLI will not prompt; set the ${field.envVar} environment variable or run \`markpost config\` before retrying.`,
+      message: `${field.key} is not configured. In --json mode the CLI will not prompt; set the ${field.envVar} environment variable or run \`markpost config set ${field.key} <value>\` before retrying.`,
     }),
   );
   process.exit(1);
