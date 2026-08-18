@@ -114,7 +114,11 @@ const ensureConfigValue = async (
 
   if (!value) {
     console.error(chalk.redBright(`${field.promptMessage} is required!`));
+    // Explicit return so the write below stays unreachable even if process.exit
+    // is stubbed/patched (as it is in tests) and doesn't terminate — matching
+    // the --json branch's invariant, without which an empty answer persists ''.
     process.exit(1);
+    return;
   }
 
   setConfigValue(field.key, value);

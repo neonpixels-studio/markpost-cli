@@ -232,6 +232,9 @@ describe('checkConfig', () => {
       await checkConfig();
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Sync API Token is required!'));
       expect(exitSpy).toHaveBeenCalledWith(1);
+      // The early return after exit must keep an empty answer out of the store,
+      // even when process.exit is stubbed non-terminating (as it is here).
+      expect(mockSet).not.toHaveBeenCalledWith('apiToken', '');
     });
   });
 
@@ -274,6 +277,9 @@ describe('checkConfig', () => {
       await checkConfig();
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Output Directory is required!'));
       expect(exitSpy).toHaveBeenCalledWith(1);
+      // The early return after exit must keep an empty answer out of the store,
+      // even when process.exit is stubbed non-terminating (as it is here).
+      expect(mockSet).not.toHaveBeenCalledWith('outputDirectory', '');
     });
   });
 });
