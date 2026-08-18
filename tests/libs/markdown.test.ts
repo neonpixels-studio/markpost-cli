@@ -17,6 +17,7 @@ import {
   readMarkdown,
   writeMarkdown,
 } from '@/libs/markdown.js';
+import type { WrittenRecordState } from '@/libs/markdown.js';
 import { Record } from '@/types/records.types.js';
 
 const EXCLUSIVE_WRITE_OPTIONS = { flag: 'wx' };
@@ -72,7 +73,7 @@ vi.mock('node:fs', () => ({
 
 // lstatSync(path, { throwIfNoEntry: false }) returns undefined for a missing
 // entry, a Stats-like object otherwise. These stand-ins expose just isFile(),
-// the only method resolveReusableWrittenPath calls.
+// the only method resolveReusableWrittenState calls.
 const regularFileStats = { isFile: () => true } as unknown as ReturnType<
   typeof lstatSync
 >;
@@ -128,6 +129,10 @@ describe('writeMarkdown', () => {
     // Reset to the "missing entry" default (undefined) so a per-test lstat
     // implementation can't leak into later tests via clearAllMocks.
     vi.mocked(lstatSync).mockReset();
+    // Reset readFileSync too: the reuse-refresh tests below stub it to model the
+    // file's on-disk bytes, and clearAllMocks alone would leave that return
+    // value in place for later tests.
+    vi.mocked(readFileSync).mockReset();
     vi.mocked(slugify).mockImplementation(actualSlugify);
     vi.mocked(config.get).mockReturnValue(undefined);
   });
@@ -655,17 +660,17 @@ describe('writeMarkdown', () => {
   describe('written-vs-settled reuse', () => {
     it('reuses the same file across passes for a re-fetched unsettled record instead of dropping suffixed duplicates', () => {
       // The autoSync daemon re-fetches a record whose server settle failed as
-      // still-pending next pass. Sharing writtenPaths across passes must reuse
+      // still-pending next pass. Sharing writtenState across passes must reuse
       // its own file, never accumulate test-title-2.md, -3.md, ...
       mockWriteFileSyncRejectingExistingPaths();
       const basePath = resolve(outputDirectory, 'test-title.md');
       // Shared like the real processSeenSlugs/processWrittenPaths across passes.
       const seenSlugs = new Map<string, string>();
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
 
-      const firstPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenPaths);
-      const secondPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenPaths);
-      const thirdPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenPaths);
+      const firstPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
+      const secondPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
+      const thirdPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
 
       expect(firstPath).toBe(basePath);
       expect(secondPath).toBe(basePath);
@@ -690,11 +695,11 @@ describe('writeMarkdown', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const basePath = resolve(outputDirectory, 'test-title.md');
       const seenSlugs = new Map<string, string>();
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
 
-      writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenPaths);
+      writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
       vi.mocked(writeFileSync).mockClear();
-      const secondPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenPaths);
+      const secondPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
 
       expect(secondPath).toBe(basePath);
       expect(writeFileSync).not.toHaveBeenCalled();
@@ -706,13 +711,13 @@ describe('writeMarkdown', () => {
       // record against it or following a symlink out of the vault.
       mockWriteFileSyncRejectingExistingPaths();
       const basePath = resolve(outputDirectory, 'test-title.md');
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
 
-      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenPaths);
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
       vi.mocked(lstatSync).mockImplementation((path) =>
         path === basePath ? nonFileStats : undefined,
       );
-      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenPaths);
+      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
 
       // basePath is still taken on disk, so the record lands on a real suffixed
       // file instead of being silently settled against the non-file.
@@ -726,14 +731,14 @@ describe('writeMarkdown', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const basePath = resolve(outputDirectory, 'test-title.md');
       const seenSlugs = new Map<string, string>();
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
       const recordA: Record = { ...mockRecord, uuid: 'a', title: 'Test Title' };
       const recordB: Record = { ...mockRecord, uuid: 'b', title: 'Test Title', content: 'B content' };
 
-      writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenPaths); // test-title.md
+      writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenState); // test-title.md
       rmSync(basePath, { force: true }); // user moves A's file out of the vault
-      const bPath = writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenPaths);
-      const aRetryPath = writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenPaths);
+      const bPath = writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenState);
+      const aRetryPath = writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenState);
 
       expect(bPath).toBe(basePath);
       // B's write evicts A's stale entry for the base path, so A no longer reuses
@@ -750,16 +755,16 @@ describe('writeMarkdown', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const suffixedPath = resolve(outputDirectory, 'test-title-2.md');
       const seenSlugs = new Map<string, string>();
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
       const recordA: Record = { ...mockRecord, uuid: 'a', title: 'Test Title' };
       const recordB: Record = { ...mockRecord, uuid: 'b', title: 'Test Title' };
       const recordC: Record = { ...mockRecord, uuid: 'c', title: 'Test Title', content: 'C content' };
 
-      writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenPaths); // test-title.md
-      writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenPaths); // test-title-2.md
+      writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenState); // test-title.md
+      writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenState); // test-title-2.md
       rmSync(suffixedPath, { force: true }); // user deletes B's file from the vault
-      const cPath = writeMarkdown(recordC, 'suffix', seenSlugs, true, writtenPaths);
-      const bRetryPath = writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenPaths);
+      const cPath = writeMarkdown(recordC, 'suffix', seenSlugs, true, writtenState);
+      const bRetryPath = writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenState);
 
       expect(cPath).toBe(suffixedPath);
       // B takes the next free suffix rather than reusing C's file.
@@ -771,13 +776,13 @@ describe('writeMarkdown', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const oldBasePath = resolve(outputDirectory, 'test-title.md');
       const newBasePath = resolve(newDirectory, 'test-title.md');
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
       // The old file is still a regular file on the simulated disk, so a naive
       // uuid-only reuse would target it; the directory guard must reject it.
 
-      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenPaths);
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
       process.env.OUTPUT_DIRECTORY = newDirectory; // user changes the setting
-      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenPaths);
+      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
 
       // The stale old-directory entry is ignored; the record lands in the new
       // vault rather than being rewritten into the old one.
@@ -790,29 +795,35 @@ describe('writeMarkdown', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const basePath = resolve(outputDirectory, 'test-title.md');
       const seenSlugs = new Map<string, string>();
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
 
-      writeMarkdown(mockRecord, 'overwrite', seenSlugs, true, writtenPaths);
+      writeMarkdown(mockRecord, 'overwrite', seenSlugs, true, writtenState);
+      const passOneHash = writtenState.get(mockRecord.uuid)?.contentHash;
       const updatedRecord: Record = { ...mockRecord, content: 'Updated body' };
-      writeMarkdown(updatedRecord, 'overwrite', seenSlugs, true, writtenPaths);
+      writeMarkdown(updatedRecord, 'overwrite', seenSlugs, true, writtenState);
 
       expect(writeFileSync).toHaveBeenLastCalledWith(
         basePath,
         'Updated body',
         EXCLUSIVE_WRITE_OPTIONS,
       );
+      // The overwrite reuse also refreshes the stored hash, so a later pass
+      // compares against the content it just wrote, not the original.
+      expect(writtenState.get(mockRecord.uuid)?.contentHash).not.toBe(
+        passOneHash,
+      );
     });
 
     it('writes a fresh file when the tracked file was moved or deleted between passes', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const basePath = resolve(outputDirectory, 'test-title.md');
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
 
-      const firstPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenPaths);
+      const firstPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
       // The user moves the file out of the vault: existsSync stays false (the
       // beforeEach default) and the disk model no longer holds the base path.
       rmSync(basePath, { force: true });
-      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenPaths);
+      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
 
       // The stale tracked entry is ignored, so the record recreates its file at
       // the now-free base path rather than being pushed to a suffix.
@@ -821,37 +832,37 @@ describe('writeMarkdown', () => {
     });
 
     it('records the written path per uuid so the orchestrator can carry it across passes', () => {
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
 
-      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenPaths);
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
 
-      expect(writtenPaths.get(mockRecord.uuid)).toBe(
+      expect(writtenState.get(mockRecord.uuid)?.path).toBe(
         resolve(outputDirectory, 'test-title.md'),
       );
     });
 
     it('never tracks or reuses a record with an empty uuid', () => {
       vi.mocked(existsSync).mockReturnValue(true);
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
       const noUuidRecord: Record = { ...mockRecord, uuid: '' };
 
-      writeMarkdown(noUuidRecord, 'suffix', new Map(), true, writtenPaths);
+      writeMarkdown(noUuidRecord, 'suffix', new Map(), true, writtenState);
 
-      expect(writtenPaths.size).toBe(0);
+      expect(writtenState.size).toBe(0);
     });
 
     it('reuses a skip-strategy file without rewriting it, so a vault edit between passes survives', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const basePath = resolve(outputDirectory, 'test-title.md');
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
 
       // Pass one writes the file (absent), tracking it.
-      const firstPath = writeMarkdown(mockRecord, 'skip', new Map(), true, writtenPaths);
+      const firstPath = writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState);
       vi.mocked(writeFileSync).mockClear();
       // Pass two: the record is still unsettled and re-fetched. Under `skip` the
       // reused file must not be rewritten (the user may have edited it), but the
       // path still returns so the record can settle rather than loop pending.
-      const secondPath = writeMarkdown(mockRecord, 'skip', new Map(), true, writtenPaths);
+      const secondPath = writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState);
 
       expect(firstPath).toBe(basePath);
       expect(secondPath).toBe(basePath);
@@ -862,10 +873,310 @@ describe('writeMarkdown', () => {
       mockWriteFileSyncRejectingExistingPaths([
         resolve(outputDirectory, 'test-title.md'),
       ]);
-      const writtenPaths = new Map<string, string>();
+      const writtenState = new Map<string, WrittenRecordState>();
 
-      expect(writeMarkdown(mockRecord, 'skip', new Map(), true, writtenPaths)).toBeNull();
-      expect(writtenPaths.has(mockRecord.uuid)).toBe(false);
+      expect(writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState)).toBeNull();
+      expect(writtenState.has(mockRecord.uuid)).toBe(false);
+    });
+
+    it('re-fetches a suffix-strategy file when the server content changed and the local file is untouched', () => {
+      // Issue #102: a record edited server-side between passes must not be
+      // settled against pass-one content — the reused file is rewritten with the
+      // new version instead of silently stranding it.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      // Pass one writes the original content, storing its hash as the baseline.
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      // The file on disk is still exactly what pass one wrote (untouched).
+      vi.mocked(readFileSync).mockReturnValue(mockRecord.content);
+      vi.mocked(writeFileSync).mockClear();
+
+      // Pass two: the same record re-fetched, but its content changed on the server.
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      const secondPath = writeMarkdown(
+        updatedRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(secondPath).toBe(basePath);
+      expect(writeFileSync).toHaveBeenLastCalledWith(
+        basePath,
+        'Server-updated body',
+        EXCLUSIVE_WRITE_OPTIONS,
+      );
+    });
+
+    it('re-fetches a skip-strategy file when the server content changed and the local file is untouched', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState);
+      vi.mocked(readFileSync).mockReturnValue(mockRecord.content);
+      vi.mocked(writeFileSync).mockClear();
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      const secondPath = writeMarkdown(
+        updatedRecord,
+        'skip',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(secondPath).toBe(basePath);
+      expect(writeFileSync).toHaveBeenLastCalledWith(
+        basePath,
+        'Server-updated body',
+        EXCLUSIVE_WRITE_OPTIONS,
+      );
+    });
+
+    it('refreshes the stored content hash on a re-fetch so a later pass compares against the new baseline', () => {
+      // After a reuse rewrite the baseline must track what is now on disk;
+      // a stale pass-one baseline would suppress the next genuine server change.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      const passOneHash = writtenState.get(mockRecord.uuid)?.contentHash;
+
+      // Pass two rewrites with the new server content; the disk was untouched.
+      vi.mocked(readFileSync).mockReturnValue(mockRecord.content);
+      const passTwoRecord: Record = { ...mockRecord, content: 'Server body two' };
+      writeMarkdown(passTwoRecord, 'suffix', new Map(), true, writtenState);
+
+      // The baseline now reflects what pass two wrote, not the original content.
+      expect(writtenState.get(mockRecord.uuid)?.contentHash).not.toBe(
+        passOneHash,
+      );
+
+      // Pass three: a third server change, with the disk still holding pass two's
+      // content (untouched since). The rewrite must fire against the refreshed
+      // baseline — a stale pass-one baseline would leave the disk not matching it
+      // and wrongly suppress the write.
+      vi.mocked(readFileSync).mockReturnValue('Server body two');
+      vi.mocked(writeFileSync).mockClear();
+      const passThreeRecord: Record = {
+        ...mockRecord,
+        content: 'Server body three',
+      };
+      writeMarkdown(passThreeRecord, 'suffix', new Map(), true, writtenState);
+
+      expect(writeFileSync).toHaveBeenLastCalledWith(
+        basePath,
+        'Server body three',
+        EXCLUSIVE_WRITE_OPTIONS,
+      );
+    });
+
+    it('detects a body-only server change on a frontmatter record, hashing the assembled document', () => {
+      // Real synced records carry frontmatter, so the on-disk bytes are the full
+      // assembled document (block + heading + body), not the raw content. The
+      // baseline must hash those same bytes; an implementation that hashed
+      // record.content instead would miss a body-only change here.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'deploy.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+      const syncedRecord: Record = {
+        ...mockRecord,
+        title: 'Deploy',
+        content: 'Original body.',
+        frontmatter: {
+          title: 'Deploy',
+          source: 'webhook/github',
+          created: '2026-06-14T09:41:02Z',
+          tags: ['ci'],
+        },
+      };
+
+      writeMarkdown(syncedRecord, 'suffix', new Map(), true, writtenState);
+      // The disk holds exactly the assembled document pass one wrote (untouched).
+      const [, assembledDocument] = vi.mocked(writeFileSync).mock.calls[0];
+      vi.mocked(readFileSync).mockReturnValue(assembledDocument as string);
+      vi.mocked(writeFileSync).mockClear();
+
+      const updatedRecord: Record = { ...syncedRecord, content: 'Updated body.' };
+      writeMarkdown(updatedRecord, 'suffix', new Map(), true, writtenState);
+
+      const [writtenPath, rewrittenDocument] =
+        vi.mocked(writeFileSync).mock.lastCall ?? [];
+      expect(writtenPath).toBe(basePath);
+      expect(rewrittenDocument).toContain('Updated body.');
+      expect(rewrittenDocument).toContain('title: Deploy');
+    });
+
+    it('preserves a suffix-strategy file the user edited in the vault even when the server content also changed', () => {
+      // A genuine local edit still wins over a server change: the "don't clobber"
+      // intent of suffix/skip is preserved.
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      // The user edited the file, so its bytes no longer match the baseline.
+      vi.mocked(readFileSync).mockReturnValue('Edited in the vault');
+      vi.mocked(writeFileSync).mockClear();
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      writeMarkdown(updatedRecord, 'suffix', new Map(), true, writtenState);
+
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('does not rewrite a reused suffix file when the server content is unchanged', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      vi.mocked(readFileSync).mockReturnValue(mockRecord.content);
+      vi.mocked(writeFileSync).mockClear();
+
+      // Same record, same content — nothing changed on the server.
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('leaves a reused suffix file untouched when the server changed but the on-disk file cannot be read', () => {
+      // An unreadable file can't be confirmed as our own untouched output, so the
+      // reuse leaves it alone rather than clobbering it.
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      vi.mocked(readFileSync).mockImplementation(() => {
+        throw new Error('EACCES');
+      });
+      vi.mocked(writeFileSync).mockClear();
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      writeMarkdown(updatedRecord, 'suffix', new Map(), true, writtenState);
+
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('propagates a failed refresh write, then recreates the file fresh next pass', () => {
+      // A refresh unlinks then exclusively recreates; if the recreate throws the
+      // file is briefly gone, but the record recovers next pass by writing fresh.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      vi.mocked(readFileSync).mockReturnValue(mockRecord.content);
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      // The refresh's recreate throws, and rmSync has already removed the file.
+      const writeError = new Error('EACCES');
+      vi.mocked(writeFileSync).mockImplementationOnce(() => {
+        throw writeError;
+      });
+      expect(() =>
+        writeMarkdown(updatedRecord, 'suffix', new Map(), true, writtenState),
+      ).toThrow(writeError);
+
+      // Next pass: the tracked path is now missing (rmSync removed it and the
+      // recreate failed), so reuse is rejected and the record writes fresh at the
+      // base path rather than reusing a deleted file.
+      vi.mocked(lstatSync).mockReturnValue(undefined);
+      const recoveredPath = writeMarkdown(
+        updatedRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(recoveredPath).toBe(basePath);
+    });
+
+    it('refreshes content into the pass-one filename when only the title changed server-side', () => {
+      // Reuse is keyed by uuid, so a title change rewrites the new content
+      // (heading + frontmatter) into the original file rather than renaming it to
+      // the new slug — the existing "keep the original filename" reuse design.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'deploy.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+      const syncedRecord: Record = {
+        ...mockRecord,
+        title: 'Deploy',
+        content: 'Shared body.',
+        frontmatter: {
+          title: 'Deploy',
+          source: 'webhook/github',
+          created: '2026-06-14T09:41:02Z',
+          tags: ['ci'],
+        },
+      };
+
+      writeMarkdown(syncedRecord, 'suffix', new Map(), true, writtenState);
+      const [, assembledDocument] = vi.mocked(writeFileSync).mock.calls[0];
+      vi.mocked(readFileSync).mockReturnValue(assembledDocument as string);
+      vi.mocked(writeFileSync).mockClear();
+
+      // Only the title changed server-side; the body is identical.
+      const retitledRecord: Record = {
+        ...syncedRecord,
+        title: 'Rollback',
+        frontmatter: { ...syncedRecord.frontmatter!, title: 'Rollback' },
+      };
+      const secondPath = writeMarkdown(
+        retitledRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      const [writtenPath, rewrittenDocument] =
+        vi.mocked(writeFileSync).mock.lastCall ?? [];
+      // The file keeps its pass-one name but now carries the new title.
+      expect(secondPath).toBe(basePath);
+      expect(writtenPath).toBe(basePath);
+      expect(rewrittenDocument).toContain('title: Rollback');
+      expect(rewrittenDocument).toContain('# Rollback');
+    });
+
+    it('treats a non-string readFileSync result as unreadable and does not refresh', () => {
+      // readFileSync(path, 'utf-8') always yields a string in production, but a
+      // non-string must be treated as unreadable rather than reaching hashContent.
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      vi.mocked(readFileSync).mockReturnValue(
+        undefined as unknown as string,
+      );
+      vi.mocked(writeFileSync).mockClear();
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      writeMarkdown(updatedRecord, 'suffix', new Map(), true, writtenState);
+
+      expect(writeFileSync).not.toHaveBeenCalled();
     });
   });
 });

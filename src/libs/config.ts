@@ -114,7 +114,7 @@ const ensureConfigValue = async (
 
   if (!value) {
     console.error(chalk.redBright(`${field.promptMessage} is required!`));
-    process.exit();
+    process.exit(1);
   }
 
   setConfigValue(field.key, value);
