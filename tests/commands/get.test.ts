@@ -63,7 +63,7 @@ describe('runGetCommand', () => {
 
     await runGetCommand(['abc-123']);
 
-    expect(checkConfig).toHaveBeenCalled();
+    expect(checkConfig).toHaveBeenCalledWith(false);
     expect(fetchRecord).toHaveBeenCalledWith('abc-123');
     expect(console.log).toHaveBeenCalledWith('Test Title');
     expect(console.log).toHaveBeenCalledWith(
@@ -181,12 +181,16 @@ describe('runGetCommand', () => {
   });
 
   it('prints the record as a single parseable JSON object with --json', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
     const { runGetCommand } = await import('@/commands/get.js');
 
     await runGetCommand(['abc-123', '--json']);
 
+    // --json must reach checkConfig so it fails loud instead of prompting on
+    // stdout on an unconfigured machine.
+    expect(checkConfig).toHaveBeenCalledWith(true);
     // One stdout write, and it is JSON — not the labeled "uuid:       " line.
     expect(console.log).toHaveBeenCalledTimes(1);
     const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
