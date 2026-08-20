@@ -19,7 +19,7 @@ server-side records.
 
 | Command | Description |
 |---|---|
-| `markpost sync` | Fetch all pending records, write each to a markdown file, and (when `autoDelete` is enabled) delete the written records from the server |
+| `markpost sync [--dry-run]` | Fetch all pending records, write each to a markdown file, and (when `autoDelete` is enabled) delete the written records from the server. `--dry-run` reports the exact write/delete plan without writing or mutating anything |
 | `markpost push <path...>` | Create records from one or more markdown files, directories, or glob patterns |
 | `markpost get <uuid> [--json]` | Fetch and display a single record; pass `--json` for machine-readable output |
 | `markpost sources <list\|create\|update\|delete> [uuid]` | Manage sources; `sources list --json` prints machine-readable output |
@@ -57,6 +57,14 @@ markpost account settings:
   `markpost push` created) are written as bare content either way.
 - **`conflictStrategy`** — how same-name files are handled (`suffix`,
   `overwrite`, or `skip`).
+
+Run `markpost sync --dry-run` to preview a sync before committing to it: it
+fetches your pending records and reports the exact plan — which files would be
+written (and whether each is a fresh write, an overwrite, or a skip under your
+`conflictStrategy`) and which records would be deleted or marked synced on the
+server — without writing any file, creating the output directory, deleting, or
+marking anything. A dry run previews once and never self-schedules, even with
+`autoSync` on.
 
 These settings live on your markpost account. View or change them from the CLI
 with the `settings` command (each `set` field is a `key=value` pair; pass more

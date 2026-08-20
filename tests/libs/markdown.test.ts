@@ -12,6 +12,7 @@ import slugify from '@sindresorhus/slugify';
 
 import { config } from '@/libs/config.js';
 import {
+  buildWritePreview,
   ensureOutputDirectory,
   MAX_COLLISION_SUFFIX,
   readMarkdown,
@@ -1263,5 +1264,119 @@ describe('readMarkdown', () => {
     const result = readMarkdown('./notes/deploy.md');
 
     expect(result.content).toBe('Commit shipped.');
+  });
+});
+
+describe('buildWritePreview', () => {
+  const secondRecord: Record = { uuid: 'def-456', title: 'Test Title', content: 'Second body', createdAt: '2024-01-02T00:00:00Z' };
+
+  beforeEach(() => {
+    process.env.OUTPUT_DIRECTORY = outputDirectory;
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(writeFileSync).mockReset();
+    vi.mocked(rmSync).mockReset();
+    vi.mocked(mkdirSync).mockReset();
+    vi.mocked(slugify).mockImplementation(actualSlugify);
+    vi.mocked(config.get).mockReturnValue(undefined);
+  });
+
+  afterEach(() => {
+    delete process.env.OUTPUT_DIRECTORY;
+    vi.clearAllMocks();
+  });
+
+  it('throws when the output directory is not set', () => {
+    delete process.env.OUTPUT_DIRECTORY;
+    expect(() => buildWritePreview([mockRecord])).toThrow(
+      'Output directory is not set!',
+    );
+  });
+
+  // The whole point of a dry run: planning the write must touch nothing on disk.
+  it('writes, removes, and creates nothing on disk', () => {
+    buildWritePreview([mockRecord, secondRecord], 'suffix');
+
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(rmSync).not.toHaveBeenCalled();
+    expect(mkdirSync).not.toHaveBeenCalled();
+  });
+
+  it('reports a fresh write at the base path when nothing exists', () => {
+    const [preview] = buildWritePreview([mockRecord], 'suffix');
+
+    expect(preview).toEqual({
+      record: mockRecord,
+      path: resolve(outputDirectory, 'test-title.md'),
+      action: 'write',
+    });
+  });
+
+  // Two records slugging to the same base must preview distinct suffixed
+  // targets, exactly as the suffix strategy would land them.
+  it('suffixes a within-batch collision without touching disk', () => {
+    const previews = buildWritePreview([mockRecord, secondRecord], 'suffix');
+
+    expect(previews.map((preview) => preview.path)).toEqual([
+      resolve(outputDirectory, 'test-title.md'),
+      resolve(outputDirectory, 'test-title-2.md'),
+    ]);
+    expect(previews.every((preview) => preview.action === 'write')).toBe(true);
+  });
+
+  it('walks past existing files on disk for the suffix strategy', () => {
+    const basePath = resolve(outputDirectory, 'test-title.md');
+    vi.mocked(existsSync).mockImplementation((path) => path === basePath);
+
+    const [preview] = buildWritePreview([mockRecord], 'suffix');
+
+    expect(preview.path).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    expect(preview.action).toBe('write');
+  });
+
+  it('reports an overwrite when the base file already exists', () => {
+    const basePath = resolve(outputDirectory, 'test-title.md');
+    vi.mocked(existsSync).mockImplementation((path) => path === basePath);
+
+    const [preview] = buildWritePreview([mockRecord], 'overwrite');
+
+    expect(preview).toEqual({
+      record: mockRecord,
+      path: basePath,
+      action: 'overwrite',
+    });
+  });
+
+  // A second same-slug record can't overwrite the file the first one already
+  // claims this batch, so it downgrades to suffix — mirroring
+  // resolveStrategyForSlug in the real writer.
+  it('downgrades a same-slug overwrite collision to a suffixed write', () => {
+    const previews = buildWritePreview([mockRecord, secondRecord], 'overwrite');
+
+    expect(previews[0].path).toBe(resolve(outputDirectory, 'test-title.md'));
+    expect(previews[1]).toEqual({
+      record: secondRecord,
+      path: resolve(outputDirectory, 'test-title-2.md'),
+      action: 'write',
+    });
+  });
+
+  it('reports a skip when the skip strategy finds an existing file', () => {
+    const basePath = resolve(outputDirectory, 'test-title.md');
+    vi.mocked(existsSync).mockImplementation((path) => path === basePath);
+
+    const [preview] = buildWritePreview([mockRecord], 'skip');
+
+    expect(preview).toEqual({
+      record: mockRecord,
+      path: basePath,
+      action: 'skip',
+    });
+  });
+
+  it('reports a fresh write for the skip strategy when nothing exists', () => {
+    const [preview] = buildWritePreview([mockRecord], 'skip');
+
+    expect(preview.action).toBe('write');
+    expect(preview.path).toBe(resolve(outputDirectory, 'test-title.md'));
   });
 });

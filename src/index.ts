@@ -11,8 +11,10 @@ import {
 } from '@/libs/records.js';
 import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
 import {
+  buildWritePreview,
   ensureOutputDirectory,
   writeMarkdown,
+  WritePreview,
   WrittenRecordState,
 } from '@/libs/markdown.js';
 import { fetchSettings, SettingsReadResult } from '@/libs/settings.js';
@@ -84,13 +86,21 @@ const [commandName, ...commandArgs] = process.argv.slice(2);
 
 const SYNC_COMMAND = 'sync';
 
+// The one flag `sync` accepts: preview the exact write/delete plan without
+// touching disk or the server. Named so the parse check and usage text share
+// the single literal.
+const DRY_RUN_FLAG = '--dry-run';
+
 // The fetch/write/delete sync is destructive (it can delete server records),
 // so it must be requested explicitly by name — never triggered by a bare,
 // accidental `markpost`. Its usage lives here because the sync lives here.
-const SYNC_USAGE = `Usage: markpost sync
+const SYNC_USAGE = `Usage: markpost sync [--dry-run]
 
   Fetch all pending records, write each to a markdown file, and (when
-  autoDelete is enabled) delete the written records from the server`;
+  autoDelete is enabled) delete the written records from the server
+
+  --dry-run  Report which files would be written and which records would be
+             deleted (or marked synced) without writing or mutating anything`;
 
 // Tokens in the command position that print top-level help instead of running
 // a command. `help` is only a command word — as a sub-argument it could be a
@@ -123,16 +133,23 @@ const COMMANDS = new Map<string, Command>([
 // writing, and deleting server records. `--help`/`-h` are intercepted before
 // this runs (see dispatch), so anything reaching here is a genuine mistake.
 async function runSyncCommand(args: string[]): Promise<void> {
-  if (args.length > 0) {
-    console.error(chalk.redBright(`Unexpected arguments: ${args.join(' ')}`));
+  const dryRun = args.includes(DRY_RUN_FLAG);
+  const unexpectedArgs = args.filter((arg) => arg !== DRY_RUN_FLAG);
+
+  if (unexpectedArgs.length > 0) {
+    console.error(
+      chalk.redBright(`Unexpected arguments: ${unexpectedArgs.join(' ')}`),
+    );
     console.error(SYNC_USAGE);
     process.exitCode = 1;
     return;
   }
 
   // The scheduler self-repeats the sync when a run reports `autoSync` on; a
-  // single, non-repeating run returns after one pass.
-  await runSyncWithAutoSchedule(runDefaultSync);
+  // single, non-repeating run returns after one pass. A dry run always reports
+  // back `false` (see runDefaultSync), so it previews once and never
+  // self-schedules — a preview loop would be noise, not a sync.
+  await runSyncWithAutoSchedule(() => runDefaultSync(dryRun));
 }
 
 // Aggregate each command's own USAGE string rather than maintaining a second,
@@ -513,12 +530,127 @@ function reportIncompleteSync(partial: boolean): void {
   );
 }
 
+// The records a dry run would actually persist. A `skip` leaves the existing
+// file untouched and the record on the server, so it never reaches the delete
+// or mark-synced step — mirroring the real sync, which excludes skipped records
+// from both.
+function previewedWrites(previews: WritePreview[]): WritePreview[] {
+  return previews.filter((preview) => preview.action !== 'skip');
+}
+
+// Prints the local write plan: each record that would be written (with its
+// target path and whether it's a fresh write or an overwrite), then a separate
+// yellow line for records the `skip` strategy would leave on disk and on the
+// server — matching the real sync's write/skip reporting. Paths are sanitized
+// like the real write output: the resolved path embeds the user-configured
+// output directory and a title-derived slug, either of which could carry an
+// escape.
+function printWritePreview(previews: WritePreview[]): void {
+  const writes = previewedWrites(previews);
+  const skips = previews.filter((preview) => preview.action === 'skip');
+
+  console.log(chalk.dim(`Would write ${writes.length} record(s):`));
+  writes.forEach((preview) => {
+    console.log(
+      chalk.dim(
+        sanitizeForTerminal(`  -> ${preview.path} (${preview.action})`),
+      ),
+    );
+  });
+
+  if (skips.length === 0) {
+    return;
+  }
+
+  console.log(
+    chalk.yellow(
+      `Would skip ${skips.length} record(s): a file already exists at their path — left on the server.`,
+    ),
+  );
+  skips.forEach((preview) => {
+    console.log(chalk.yellow(sanitizeForTerminal(`  -> ${preview.path}`)));
+  });
+}
+
+// Lists the records a server-side step would touch. Sanitized because both the
+// uuid and title come from the untrusted API response.
+function printPreviewedServerRecords(writes: WritePreview[]): void {
+  writes.forEach(({ record }) => {
+    console.log(
+      chalk.dim(sanitizeForTerminal(`  ! ${record.uuid} (${record.title})`)),
+    );
+  });
+}
+
+// Prints the server-side plan for a dry run. Unreadable settings force the real
+// sync to mutate nothing (autoDelete off and no mark-synced), so the preview
+// says exactly that. Otherwise autoDelete decides between a delete preview and
+// the mark-synced preview — the same branch the real sync takes.
+function printServerPreview(
+  previews: WritePreview[],
+  autoDelete: boolean,
+  settingsOk: boolean,
+): void {
+  if (!settingsOk) {
+    console.log(
+      chalk.yellow(
+        'Settings unreadable — would write records but mutate nothing on the server this run.',
+      ),
+    );
+    return;
+  }
+
+  const writes = previewedWrites(previews);
+
+  if (writes.length === 0) {
+    return;
+  }
+
+  if (autoDelete) {
+    console.log(
+      chalk.dim(`Would delete ${writes.length} record(s) from the server:`),
+    );
+    printPreviewedServerRecords(writes);
+    return;
+  }
+
+  console.log(
+    chalk.dim(`Would mark ${writes.length} record(s) synced on the server:`),
+  );
+  printPreviewedServerRecords(writes);
+}
+
+// The whole dry run: announce it, build the read-only write plan (honoring the
+// user's conflict strategy), then print the local and server-side plans. No
+// spinner phase — nothing runs, so this is plain informational output.
+// buildWritePreview may throw (e.g. output directory unset); the caller's outer
+// catch surfaces it, same as the real write path.
+function reportDryRunPlan(
+  records: Record[],
+  conflictStrategy: ConflictStrategy,
+  autoDelete: boolean,
+  settingsOk: boolean,
+): void {
+  console.log(
+    chalk.yellow(
+      `Dry run — previewing ${records.length} record(s); nothing will be written or deleted.`,
+    ),
+  );
+
+  const previews = buildWritePreview(records, conflictStrategy);
+  printWritePreview(previews);
+  printServerPreview(previews, autoDelete, settingsOk);
+}
+
 // Default behavior when no subcommand is given: read the user's markpost
 // settings, fetch all records, write each to a markdown file honoring the
 // conflict strategy, then (only if autoDelete is on) delete the records that
 // were actually written from the server. Returns whether `autoSync` is on so
 // the scheduler can decide to repeat the sync (see runSyncWithAutoSchedule).
-async function runDefaultSync(): Promise<boolean> {
+// `dryRun` short-circuits every mutation: it fetches and reports the exact
+// write/delete plan, then returns `false` so the run never writes, deletes,
+// marks synced, or self-schedules.
+async function runDefaultSync(dryRun = false): Promise<boolean> {
   const spinner = yoctoSpinner({ spinner: cliSpinners.dots });
 
   // Hoisted to function scope so the outer catch can honor it: a transient
@@ -622,6 +754,23 @@ async function runDefaultSync(): Promise<boolean> {
       return autoSync;
     } else {
       spinner.success(`Fetched ${allRecords.length} records!`);
+    }
+
+    // Dry run: report the exact write/delete plan and stop before any mutation
+    // — no directory creation, no file writes, no server delete or mark-synced.
+    // Placed after the fetch and settings read so the preview reflects the real
+    // record set and the user's conflict strategy / autoDelete preference.
+    // Returns `false` unconditionally so a dry run previews once and never
+    // self-schedules.
+    if (dryRun) {
+      reportDryRunPlan(
+        allRecords,
+        conflictStrategy,
+        autoDelete,
+        settingsResult.ok,
+      );
+      reportIncompleteSync(recordsResult.partial);
+      return false;
     }
 
     // Write Records
