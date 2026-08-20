@@ -746,4 +746,39 @@ describe('runSourcesCommand', () => {
     expect(console.error).toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
+
+  // The unified --json failure contract: rejecting --json on a non-list
+  // subcommand and a thrown fetch failure on `list --json` both surface as one
+  // parseable { error, message } shape on stderr.
+  describe('--json failure contract', () => {
+    it('emits a usage-coded JSON error when --json is rejected on delete', async () => {
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed).toEqual({
+        error: 'usage',
+        message: '--json is only supported by `sources list`.',
+      });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('emits a fetch_failed JSON error on stderr for a thrown fetch failure', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockRejectedValue(new Error('boom'));
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('fetch_failed');
+      expect(parsed.message).toContain('boom');
+      expect(process.exitCode).toBe(1);
+    });
+  });
 });

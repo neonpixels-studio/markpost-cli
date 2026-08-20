@@ -8,9 +8,10 @@ import {
   updateSource,
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
+import { failWithMessage } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
-import { printJson } from '@/libs/output.js';
+import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
 
 // Mirror the endpoint constants markpost's web app uses in
@@ -56,11 +57,15 @@ const SOURCES_HANDLERS = new Map<
 ]);
 
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
+  // Read `--json` straight from argv so every failure below is rendered in
+  // whichever contract the caller asked for, even one thrown before parsing.
+  const json = hasJsonFlag(args);
+
   try {
     // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
     // still prompts rather than trying to delete a source named "--json") and
     // rejects an unknown/mistyped flag. Only `list` reads json.
-    const { values, positionals } = parseArgs({
+    const { positionals } = parseArgs({
       args,
       allowPositionals: true,
       options: {
@@ -69,12 +74,11 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     });
     const [subcommand, uuid] = positionals;
     const handler = SOURCES_HANDLERS.get(subcommand);
-    const json = values.json ?? false;
 
     // Validate before the config check so a bad subcommand fails on usage
     // alone, without needing a configured account.
     if (!handler) {
-      failWithSubcommandUsage(subcommand, USAGE);
+      failWithSubcommandUsage(subcommand, USAGE, json);
       return;
     }
 
@@ -86,6 +90,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       failWithUsage(
         `--json is only supported by \`sources ${LIST_SUBCOMMAND}\`.`,
         USAGE,
+        json,
       );
       return;
     }
@@ -99,8 +104,9 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    console.error(chalk.redBright(error));
-    process.exitCode = 1;
+    // Sanitize — an error surfaced from a sources API call can be
+    // server-derived and carry a terminal escape.
+    failWithMessage(sanitizeForTerminal(String(error)), json);
   }
 };
 

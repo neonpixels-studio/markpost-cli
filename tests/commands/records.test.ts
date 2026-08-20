@@ -552,4 +552,41 @@ describe('runRecordsCommand', () => {
     );
     expect(process.exitCode).toBe(1);
   });
+
+  // The unified --json failure contract: a bad subcommand and a thrown fetch
+  // failure both surface as one parseable { error, message } shape on stderr.
+  describe('--json failure contract', () => {
+    it('emits a usage-coded JSON error for an unknown subcommand', async () => {
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['bogus', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed).toEqual({
+        error: 'usage',
+        message: 'Unknown subcommand: bogus',
+      });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('emits a fetch_failed JSON error on stderr for a thrown fetch failure', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(fetchAllRecords).mockRejectedValue(
+        new ApiRequestError('Invalid or missing API token', 401),
+      );
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('fetch_failed');
+      expect(parsed.message).toContain('Authentication failed (HTTP 401)');
+      expect(process.exitCode).toBe(1);
+    });
+  });
 });

@@ -3,12 +3,13 @@ import chalk from 'chalk';
 import { fetchRecord } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
+import { failWithMessage } from '@/libs/errors.js';
 import {
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
 } from '@/libs/terminal.js';
 import { failWithUsage } from '@/libs/usage.js';
-import { printJson } from '@/libs/output.js';
+import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
 export const USAGE = `Usage: markpost get <uuid> [--json]
@@ -17,11 +18,16 @@ export const USAGE = `Usage: markpost get <uuid> [--json]
   --json  Print the record as JSON instead of formatted text`;
 
 export const runGetCommand = async (args: string[]): Promise<void> => {
+  // Read `--json` straight from argv so every failure below — including an
+  // unknown flag that makes `parseGetArgs` throw before it can report the
+  // flag — is rendered in whichever contract the caller asked for.
+  const json = hasJsonFlag(args);
+
   try {
-    const { uuid, json } = parseGetArgs(args);
+    const { uuid } = parseGetArgs(args);
 
     if (!uuid) {
-      failWithUsage('No uuid given.', USAGE);
+      failWithUsage('No uuid given.', USAGE, json);
       return;
     }
 
@@ -30,8 +36,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
     const record = await fetchRecord(uuid);
 
     if (!record) {
-      console.error(chalk.redBright(`Failed to fetch record "${uuid}".`));
-      process.exitCode = 1;
+      failWithMessage(`Failed to fetch record "${uuid}".`, json);
       return;
     }
 
@@ -46,20 +51,18 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
     // surface its classified, actionable message with a non-zero exit rather
     // than the generic "Failed to fetch record" a not-found (null) produces.
     // Sanitize — the message can be server-derived.
-    console.error(
-      chalk.redBright(sanitizeForTerminal(describeApiError(error))),
-    );
-    process.exitCode = 1;
+    failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
   }
 };
 
 // `parseArgs` accepts the uuid and `--json` in either order and throws on an
 // unknown flag (the command's outer catch surfaces it). The uuid is the first
 // positional; any extra positional is ignored, matching the prior behavior.
-const parseGetArgs = (
-  args: string[],
-): { uuid: string | undefined; json: boolean } => {
-  const { values, positionals } = parseArgs({
+const parseGetArgs = (args: string[]): { uuid: string | undefined } => {
+  // `--json` is still declared so `parseArgs` accepts it rather than rejecting
+  // it as unknown; its value is read from argv by `hasJsonFlag` in the caller,
+  // which also survives an unrelated bad flag that makes this throw.
+  const { positionals } = parseArgs({
     args,
     allowPositionals: true,
     options: {
@@ -67,7 +70,7 @@ const parseGetArgs = (
     },
   });
 
-  return { uuid: positionals[0], json: values.json ?? false };
+  return { uuid: positionals[0] };
 };
 
 // Every field here comes from the untrusted API response, so each is stripped
