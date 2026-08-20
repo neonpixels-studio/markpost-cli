@@ -1038,6 +1038,132 @@ describe('writeMarkdown', () => {
       expect(writeFileSync).not.toHaveBeenCalled();
     });
 
+    it('records a dropped server change when a suffix reuse keeps a locally edited file over a changed server revision', () => {
+      // The vault edit wins, so the changed server revision is dropped — the uuid
+      // is collected so the caller can warn and defer the server-side delete
+      // (issue #110).
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+      const droppedServerChanges = new Set<string>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      vi.mocked(readFileSync).mockReturnValue('Edited in the vault');
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      writeMarkdown(
+        updatedRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+        droppedServerChanges,
+      );
+
+      expect(droppedServerChanges.has(mockRecord.uuid)).toBe(true);
+    });
+
+    it('records a dropped server change under the skip strategy too', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+      const droppedServerChanges = new Set<string>();
+
+      writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState);
+      vi.mocked(readFileSync).mockReturnValue('Edited in the vault');
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      writeMarkdown(
+        updatedRecord,
+        'skip',
+        new Map(),
+        true,
+        writtenState,
+        droppedServerChanges,
+      );
+
+      expect(droppedServerChanges.has(mockRecord.uuid)).toBe(true);
+    });
+
+    it('does not record a dropped server change when the server content is unchanged', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+      const droppedServerChanges = new Set<string>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      // The user edited the file, but the server content did not change — a local
+      // edit alone is not a dropped server revision.
+      vi.mocked(readFileSync).mockReturnValue('Edited in the vault');
+
+      writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+        droppedServerChanges,
+      );
+
+      expect(droppedServerChanges.size).toBe(0);
+    });
+
+    it('does not record a dropped server change when the local file is untouched (the reuse refreshes instead)', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+      const droppedServerChanges = new Set<string>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      // The disk still holds exactly what pass one wrote, so the reuse refreshes
+      // it with the new server content rather than dropping anything.
+      const [, assembledDocument] = vi.mocked(writeFileSync).mock.calls[0];
+      vi.mocked(readFileSync).mockReturnValue(assembledDocument as string);
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      writeMarkdown(
+        updatedRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+        droppedServerChanges,
+      );
+
+      expect(droppedServerChanges.size).toBe(0);
+    });
+
+    it('does not record a dropped server change under the overwrite strategy', () => {
+      // overwrite always refreshes to the newest server content, so nothing is
+      // ever dropped for it to warn about.
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+      const droppedServerChanges = new Set<string>();
+
+      writeMarkdown(mockRecord, 'overwrite', new Map(), true, writtenState);
+      vi.mocked(readFileSync).mockReturnValue('Edited in the vault');
+
+      const updatedRecord: Record = {
+        ...mockRecord,
+        content: 'Server-updated body',
+      };
+      writeMarkdown(
+        updatedRecord,
+        'overwrite',
+        new Map(),
+        true,
+        writtenState,
+        droppedServerChanges,
+      );
+
+      expect(droppedServerChanges.size).toBe(0);
+    });
+
     it('does not rewrite a reused suffix file when the server content is unchanged', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const writtenState = new Map<string, WrittenRecordState>();

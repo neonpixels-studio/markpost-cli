@@ -406,7 +406,7 @@ describe('index', () => {
 
     expect(mockSpinner.start).toHaveBeenCalledWith('Fetching records...');
     expect(fetchAllRecords).toHaveBeenCalled();
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map));
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map), expect.any(Set));
     expect(mockSpinner.success).toHaveBeenCalledWith('Fetched 1 records!');
     expect(mockSpinner.start).toHaveBeenCalledWith('Writing records...');
     expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
@@ -435,8 +435,8 @@ describe('index', () => {
     await import('@/index.js');
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map));
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord2, 'suffix', expect.any(Map), true, expect.any(Map));
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map), expect.any(Set));
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord2, 'suffix', expect.any(Map), true, expect.any(Map), expect.any(Set));
     // The whole reason seenSlugs is threaded is that every record in a batch
     // shares one Set — assert the exact same instance reaches both calls, so
     // a regression to a per-record Set (which would disable the overwrite
@@ -450,6 +450,94 @@ describe('index', () => {
       expect.stringContaining('/mock/output/title-2.md'),
     );
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
+  });
+
+  it('warns about and excludes a dropped-server-change record from the delete', async () => {
+    const droppedRecord: Record = {
+      uuid: 'dropped-1',
+      title: 'Dropped',
+      content: 'x',
+      createdAt: '2024-01-03T00:00:00Z',
+    };
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord, droppedRecord],
+      partial: false,
+    });
+    // The second record's changed server revision is dropped for a local vault
+    // edit; writeMarkdown signals that by adding the uuid to the collector Set.
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record, _strategy, _seen, _frontmatter, _state, dropped) => {
+        if (record.uuid === droppedRecord.uuid) {
+          dropped?.add(record.uuid);
+        }
+
+        return `/mock/output/${record.uuid}.md`;
+      },
+    );
+    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+
+    await import('@/index.js');
+
+    // Only the clean record is deleted; the dropped one is held back so its
+    // server revision survives.
+    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Deferred 1 record(s)'),
+    );
+  });
+
+  it('warns about and excludes a dropped-server-change record from the mark-synced step', async () => {
+    const droppedRecord: Record = {
+      uuid: 'dropped-1',
+      title: 'Dropped',
+      content: 'x',
+      createdAt: '2024-01-03T00:00:00Z',
+    };
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: false }));
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord, droppedRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record, _strategy, _seen, _frontmatter, _state, dropped) => {
+        if (record.uuid === droppedRecord.uuid) {
+          dropped?.add(record.uuid);
+        }
+
+        return `/mock/output/${record.uuid}.md`;
+      },
+    );
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
+
+    await import('@/index.js');
+
+    // Only the clean record is marked synced; the dropped one stays pending so a
+    // later run can re-surface the unreconciled server revision.
+    expect(markRecordSynced).toHaveBeenCalledTimes(1);
+    expect(markRecordSynced).toHaveBeenCalledWith(
+      'abc-123',
+      '/mock/output/abc-123.md',
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Deferred 1 record(s)'),
+    );
   });
 
   it('passes the same seenSlugs map instance to every autoSync pass', async () => {
@@ -693,6 +781,7 @@ describe('index', () => {
       expect.any(Map),
       true,
       expect.any(Map),
+      expect.any(Set),
     );
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
     // The run ends on the truncation warning, not the green delete-success line.
@@ -779,7 +868,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map));
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map), expect.any(Set));
     expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Could not read settings'),
@@ -815,7 +904,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'overwrite', expect.any(Map), true, expect.any(Map));
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'overwrite', expect.any(Map), true, expect.any(Map), expect.any(Set));
   });
 
   it('normalizes an unknown conflict strategy from settings to suffix', async () => {
@@ -834,7 +923,7 @@ describe('index', () => {
 
     await import('@/index.js');
 
-    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map));
+    expect(writeMarkdown).toHaveBeenCalledWith(mockRecord, 'suffix', expect.any(Map), true, expect.any(Map), expect.any(Set));
   });
 
   it('passes includeFrontmatter=false to writeMarkdown when the frontmatter setting is off', async () => {
@@ -863,6 +952,7 @@ describe('index', () => {
       expect.any(Map),
       false,
       expect.any(Map),
+      expect.any(Set),
     );
   });
 
@@ -1981,6 +2071,7 @@ describe('index', () => {
       expect.any(Map),
       true,
       expect.any(Map),
+      expect.any(Set),
     );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Could not read settings'),

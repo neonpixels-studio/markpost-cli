@@ -221,6 +221,11 @@ type WriteRecordsResult = {
   written: WrittenRecord[];
   failed: FailedRecord[];
   skipped: number;
+  // uuids whose changed server revision was dropped in favor of a local vault
+  // edit during a suffix/skip reuse. The caller warns about these and holds them
+  // back from the server-side delete/mark-synced so the revision isn't lost
+  // silently (issue #110).
+  droppedServerChangeUuids: Set<string>;
 };
 
 // A function declaration (not a `const` arrow) so it's hoisted above the
@@ -240,6 +245,7 @@ function writeRecordSafely(
   seenSlugs: Map<string, string>,
   includeFrontmatter: boolean,
   writtenState: Map<string, WrittenRecordState>,
+  droppedServerChanges: Set<string>,
 ): WriteOutcome {
   try {
     const filePath = writeMarkdown(
@@ -248,6 +254,7 @@ function writeRecordSafely(
       seenSlugs,
       includeFrontmatter,
       writtenState,
+      droppedServerChanges,
     );
 
     if (filePath === null) {
@@ -278,6 +285,9 @@ function writeRecords(
   // the one Map across every record; ownership semantics live in writeMarkdown.
   const written: WrittenRecord[] = [];
   const failed: FailedRecord[] = [];
+  // One collector shared across the batch: writeMarkdown adds a uuid whenever a
+  // suffix/skip reuse drops a changed server revision for a local vault edit.
+  const droppedServerChangeUuids = new Set<string>();
   let skipped = 0;
 
   for (const record of records) {
@@ -287,6 +297,7 @@ function writeRecords(
       seenSlugs,
       includeFrontmatter,
       writtenState,
+      droppedServerChangeUuids,
     );
 
     if (outcome.status === 'written') {
@@ -302,7 +313,7 @@ function writeRecords(
     failed.push({ record, error: outcome.error });
   }
 
-  return { written, failed, skipped };
+  return { written, failed, skipped, droppedServerChangeUuids };
 }
 
 // End the write phase on the right indicator. A run where every record threw
@@ -352,6 +363,54 @@ function reportWriteFailures(failedRecords: FailedRecord[]): void {
   });
 
   process.exitCode = 1;
+}
+
+// Split written records into the ones safe to settle server-side and the ones
+// whose changed server revision was dropped for a local vault edit. The latter
+// are held back from the delete/mark-synced so the server keeps the revision the
+// user hasn't reconciled yet — deleting it would lose it for good (issue #110).
+function partitionDeferredRecords(
+  writtenRecords: WrittenRecord[],
+  droppedServerChangeUuids: Set<string>,
+): { settleable: WrittenRecord[]; deferred: WrittenRecord[] } {
+  const settleable = writtenRecords.filter(
+    ({ record }) => !droppedServerChangeUuids.has(record.uuid),
+  );
+  const deferred = writtenRecords.filter(({ record }) =>
+    droppedServerChangeUuids.has(record.uuid),
+  );
+
+  return { settleable, deferred };
+}
+
+// Surface dropped server revisions loudly rather than deleting them silently: the
+// server copy changed while the user also edited the local file, so the local
+// edit was kept and the record is left on the server (excluded from the delete)
+// for the user to reconcile. A warning, not an error — this is an expected,
+// recoverable conflict state, mirroring how the `skip` count is reported. A no-op
+// when nothing was deferred.
+function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
+  if (deferredRecords.length === 0) {
+    return;
+  }
+
+  console.log(
+    chalk.yellow(
+      `Deferred ${deferredRecords.length} record(s): the server copy changed but your local file has edits — left on the server so the server version isn't lost. Reconcile each file, then re-run.`,
+    ),
+  );
+  deferredRecords.forEach(({ record, filePath }) => {
+    // Sanitize the composed line: record.title/uuid come from the untrusted API
+    // response and filePath embeds the user-configured output path — any could
+    // carry an escape sequence, same guard as the write/mark failure reporters.
+    console.log(
+      chalk.yellow(
+        sanitizeForTerminal(
+          `  ~ ${record.title} (${record.uuid}) -> ${filePath}`,
+        ),
+      ),
+    );
+  });
 }
 
 // Outcome of a whole mark-synced run. `outcomes` holds one entry per *attempted*
@@ -634,6 +693,7 @@ async function runDefaultSync(): Promise<boolean> {
       written: writtenRecords,
       failed: failedRecords,
       skipped: skippedCount,
+      droppedServerChangeUuids,
     } = writeRecords(
       allRecords,
       conflictStrategy,
@@ -658,6 +718,14 @@ async function runDefaultSync(): Promise<boolean> {
     }
 
     reportWriteFailures(failedRecords);
+
+    // Hold back any record whose changed server revision was dropped for a local
+    // edit: warn about it and exclude it from the delete/mark-synced below so the
+    // server keeps the unreconciled revision (issue #110). Everything else is
+    // safe to settle.
+    const { settleable: settleableRecords, deferred: deferredRecords } =
+      partitionDeferredRecords(writtenRecords, droppedServerChangeUuids);
+    reportDeferredServerChanges(deferredRecords);
 
     // Settings unreadable: autoDelete is forced off above and we don't know
     // the user's real preference, so mutate nothing on the server. Marking
@@ -684,7 +752,7 @@ async function runDefaultSync(): Promise<boolean> {
     // files.
     if (!autoDelete) {
       await markWrittenRecordsSynced(
-        writtenRecords,
+        settleableRecords,
         spinner,
         processWrittenState,
       );
@@ -692,10 +760,11 @@ async function runDefaultSync(): Promise<boolean> {
       return autoSync;
     }
 
-    // Delete Records — skipped when nothing was written (a bare DELETE with an
+    // Delete Records — skipped when nothing is settleable (a bare DELETE with an
     // empty uuid list would be a wasted, possibly-rejected request reported as
-    // success).
-    if (writtenRecords.length === 0) {
+    // success). Deferred records are excluded so their changed server revision
+    // survives (issue #110).
+    if (settleableRecords.length === 0) {
       reportIncompleteSync(recordsResult.partial);
       return autoSync;
     }
@@ -717,7 +786,7 @@ async function runDefaultSync(): Promise<boolean> {
     // so the failure branch can tell the two apart.
     let deletePermanentlyFailed = false;
     const deleteMeta = await deleteRecords(
-      writtenRecords.map(({ record }) => record.uuid),
+      settleableRecords.map(({ record }) => record.uuid),
     ).catch((error: unknown) => {
       deletePermanentlyFailed =
         isSystemicApiFailure(error) && error.isPermanent;
@@ -749,10 +818,10 @@ async function runDefaultSync(): Promise<boolean> {
     // ones that were deleted. A record not deleted stays pending and, without
     // its tracked path, would drop a fresh `<slug>-2.md` duplicate next pass —
     // the exact bug this split prevents.
-    if (deleteMeta.deleted === writtenRecords.length) {
+    if (deleteMeta.deleted === settleableRecords.length) {
       forgetSettledRecords(
         processWrittenState,
-        writtenRecords.map(({ record }) => record.uuid),
+        settleableRecords.map(({ record }) => record.uuid),
       );
     }
 
