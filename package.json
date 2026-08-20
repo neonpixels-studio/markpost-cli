@@ -19,7 +19,8 @@
     "lint": "prettier --check ./src && eslint ./src",
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
     "prepare": "husky",
-    "sync:contract": "node scripts/sync-contract.mjs"
+    "sync:contract": "node scripts/sync-contract.mjs",
+    "sync:markdown-serialization": "node scripts/sync-markdown-serialization.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
