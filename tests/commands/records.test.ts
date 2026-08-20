@@ -20,6 +20,8 @@ const firstRecord: Record = {
   createdAt: '2024-01-01T00:00:00Z',
   title: 'First Record',
   content: 'First record content',
+  status: 'synced',
+  syncedAt: '2024-01-03T00:00:00Z',
 };
 
 const secondRecord: Record = {
@@ -27,6 +29,7 @@ const secondRecord: Record = {
   createdAt: '2024-01-02T00:00:00Z',
   title: 'Second Record',
   content: 'Second record content',
+  status: 'pending',
 };
 
 describe('runRecordsCommand', () => {
@@ -145,6 +148,67 @@ describe('runRecordsCommand', () => {
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('def-456'),
       );
+    });
+
+    it("prints each record's status, and syncedAt when present", async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord, secondRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list']);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('status:     synced'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('synced at:  2024-01-03T00:00:00Z'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('status:     pending'),
+      );
+    });
+
+    // syncedAt is null until a record is first written to disk, so a pending
+    // record must not print a blank "synced at:" line.
+    it('omits the synced at line for a record without syncedAt', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [secondRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list']);
+
+      const printedSyncedAt = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes('synced at:'),
+        );
+      expect(printedSyncedAt).toBe(false);
+    });
+
+    it('includes status and syncedAt in the --json output', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--json']);
+
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)[0]).toMatchObject({
+        status: 'synced',
+        syncedAt: '2024-01-03T00:00:00Z',
+      });
     });
 
     it('strips control characters from untrusted record fields before printing', async () => {

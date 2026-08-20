@@ -79,6 +79,18 @@ const printRecord = (record: Record): void => {
   console.log(chalk.bold(sanitizeForTerminal(record.title)));
   console.log(`  uuid:       ${sanitizeForTerminal(record.uuid)}`);
   console.log(`  created at: ${sanitizeForTerminal(record.createdAt)}`);
+
+  // status and syncedAt are printed only when present: markpost sends both on
+  // every record, but they stay optional in the type for off-contract
+  // responses, and a missing value shouldn't print a blank label.
+  if (record.status) {
+    console.log(`  status:     ${sanitizeForTerminal(record.status)}`);
+  }
+
+  if (record.syncedAt) {
+    console.log(`  synced at:  ${sanitizeForTerminal(record.syncedAt)}`);
+  }
+
   console.log('');
   console.log(sanitizeBlockForTerminal(record.content));
 };
