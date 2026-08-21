@@ -16,6 +16,13 @@ export type Record = {
   createdAt: string;
   title: string;
   content: string;
+  // markpost's recordSerializer (server/utils/response.ts) returns these on
+  // every record: `status` is the lifecycle state (pending/synced/error) the
+  // `records list --status` filter already keys off, and `syncedAt` is when
+  // the record was last written to disk (null until first synced). Typed
+  // optional so older/off-contract responses that omit them still parse.
+  status?: string | null;
+  syncedAt?: string | null;
   // Present on records markpost ingested through its markdown pipeline
   // (webhook/email); null for records created with only a title + content
   // (e.g. `markpost push`). Typed for good DX, but treated as untrusted JSON

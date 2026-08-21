@@ -16,6 +16,8 @@ const mockRecord: Record = {
   title: 'Test Title',
   content: 'Test Content',
   createdAt: '2024-01-01T00:00:00Z',
+  status: 'synced',
+  syncedAt: '2024-01-02T00:00:00Z',
 };
 
 describe('runGetCommand', () => {
@@ -70,6 +72,59 @@ describe('runGetCommand', () => {
       expect.stringContaining('uuid:       abc-123'),
     );
     expect(console.log).toHaveBeenCalledWith('Test Content');
+  });
+
+  it("prints the record's status and syncedAt", async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('status:     synced'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('synced at:  2024-01-02T00:00:00Z'),
+    );
+  });
+
+  // syncedAt is null until a record is first written to disk, so a pending
+  // record must not print a blank "synced at:" line.
+  it('omits the synced at line when syncedAt is absent', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: 'pending',
+      syncedAt: null,
+    });
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedSyncedAt = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && arg.includes('synced at:'),
+      );
+    expect(printedSyncedAt).toBe(false);
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('status:     pending'),
+    );
+  });
+
+  it('includes status and syncedAt in the --json output', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--json']);
+
+    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+    expect(JSON.parse(output)).toMatchObject({
+      status: 'synced',
+      syncedAt: '2024-01-02T00:00:00Z',
+    });
   });
 
   it('reports an error when the record is not found', async () => {

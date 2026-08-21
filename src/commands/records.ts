@@ -118,12 +118,23 @@ const normalizeFilter = (
   return trimmed;
 };
 
-// title, uuid, and createdAt all come from the untrusted API response, so each
-// is stripped of control/ANSI escapes before printing (see terminal.ts).
+// title, uuid, createdAt, status, and syncedAt all come from the untrusted API
+// response, so each is stripped of control/ANSI escapes before printing (see
+// terminal.ts). status and syncedAt are printed only when present: markpost
+// sends both on every record, but they stay optional in the type for
+// off-contract responses, and a missing value shouldn't print a blank label.
 const printRecord = (record: Record): void => {
   console.log(chalk.bold(sanitizeForTerminal(record.title)));
   console.log(`  uuid:       ${sanitizeForTerminal(record.uuid)}`);
   console.log(`  created at: ${sanitizeForTerminal(record.createdAt)}`);
+
+  if (record.status) {
+    console.log(`  status:     ${sanitizeForTerminal(record.status)}`);
+  }
+
+  if (record.syncedAt) {
+    console.log(`  synced at:  ${sanitizeForTerminal(record.syncedAt)}`);
+  }
 };
 
 // Read-only preview of the records on the server (optionally filtered).
