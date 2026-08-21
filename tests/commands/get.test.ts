@@ -275,4 +275,66 @@ describe('runGetCommand', () => {
     expect(console.error).toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
+
+  // The unified --json failure contract: an argument error, a not-found fetch,
+  // and a thrown fetch error all surface as one parseable { error, message }
+  // shape on stderr (never stdout) so a script can parse any failure uniformly.
+  describe('--json failure contract', () => {
+    // clearAllMocks (outer beforeEach) keeps mock implementations, so a prior
+    // test's checkConfig rejection would leak in — pin it back to a resolve.
+    beforeEach(async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      vi.mocked(checkConfig).mockResolvedValue(undefined);
+    });
+
+    it('emits a usage-coded JSON error on stderr when no uuid is given', async () => {
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed).toEqual({ error: 'usage', message: 'No uuid given.' });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('emits a fetch_failed JSON error on stderr when the record is missing', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue(null);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed).toMatchObject({
+        error: 'fetch_failed',
+        message: 'Failed to fetch record "abc-123".',
+      });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('emits a fetch_failed JSON error on stderr for a thrown systemic failure', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(fetchRecord).mockRejectedValue(
+        new ApiRequestError('Invalid or missing API token', 401),
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('fetch_failed');
+      expect(parsed.message).toContain('Authentication failed (HTTP 401)');
+      expect(process.exitCode).toBe(1);
+    });
+  });
 });

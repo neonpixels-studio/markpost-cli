@@ -53,3 +53,38 @@ export const printJson = (value: unknown): void => {
 
   console.log(escapeResidualControls(json));
 };
+
+// Machine-readable `error` codes for the unified `--json` failure contract. A
+// `--json` consumer switches on these, so they are part of the CLI's public
+// contract and must stay stable — see README "JSON failure contract". Every
+// failure classifies into exactly one: a missing/unconfigured value, a bad
+// argument or usage, or a failed request/result.
+export const JSON_ERROR_CONFIG_REQUIRED = 'config_required';
+export const JSON_ERROR_USAGE = 'usage';
+export const JSON_ERROR_FETCH_FAILED = 'fetch_failed';
+
+const JSON_FLAG = '--json';
+
+// Detect `--json` straight from argv, independent of a command's `parseArgs`
+// (which throws on an unrelated bad flag before it can report whether `--json`
+// was set). The failure path needs this so a malformed invocation that also
+// passed `--json` still fails in the JSON contract rather than chalk prose.
+export const hasJsonFlag = (args: string[]): boolean =>
+  args.includes(JSON_FLAG);
+
+// The single serializer for every `--json` failure. Config, argument/usage,
+// and fetch/result errors all route through here so a script parsing stderr
+// sees one documented shape: `{ "error": <code>, "message": <string>, ... }`.
+// Written to stderr, never stdout — stdout is the `--json | jq` data channel
+// and a valid-JSON error there would be silently parsed as data. Reuses
+// escapeResidualControls because `message` can be server-derived, so an
+// untrusted API string must not smuggle a live terminal escape onto stderr.
+export const printJsonError = (
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {},
+): void => {
+  const json = JSON.stringify({ error: code, message, ...details });
+
+  console.error(escapeResidualControls(json));
+};

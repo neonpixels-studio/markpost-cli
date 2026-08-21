@@ -2,6 +2,7 @@ import Conf from 'conf';
 import packageJson from './../../package.json' with { type: 'json' };
 import { input } from '@inquirer/prompts';
 import chalk from 'chalk';
+import { JSON_ERROR_CONFIG_REQUIRED, printJsonError } from '@/libs/output.js';
 
 const schema = {
   apiToken: {
@@ -77,12 +78,10 @@ const OUTPUT_DIRECTORY_FIELD: ConfigField = {
 // reads, and a valid-JSON error there would be silently parsed as data),
 // leaving stdout empty, then exit non-zero.
 const failConfigRequiredAsJson = (field: ConfigField): void => {
-  console.error(
-    JSON.stringify({
-      error: 'config_required',
-      missing: field.key,
-      message: `${field.key} is not configured. In --json mode the CLI will not prompt; set the ${field.envVar} environment variable or run \`markpost config set ${field.key} <value>\` before retrying.`,
-    }),
+  printJsonError(
+    JSON_ERROR_CONFIG_REQUIRED,
+    `${field.key} is not configured. In --json mode the CLI will not prompt; set the ${field.envVar} environment variable or run \`markpost config set ${field.key} <value>\` before retrying.`,
+    { missing: field.key },
   );
   process.exit(1);
 };
