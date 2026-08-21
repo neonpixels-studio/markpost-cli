@@ -395,6 +395,32 @@ const serverChangedWhileLocalUntouched = (
   );
 };
 
+// The dropped-server-change case (issue #110): under suffix/skip a reused file is
+// kept as-is whenever the local file was edited, so the vault edit wins. But if
+// the server content ALSO changed since the baseline was written, keeping the
+// local edit silently discards the new server revision. Detect exactly that pair
+// — the server changed (the freshly rendered document no longer matches the
+// baseline) AND the local file was edited (the on-disk bytes no longer match the
+// baseline) — so the caller can warn and defer the server-side delete rather than
+// lose the revision. `overwrite` never reaches this branch (it always rewrites),
+// and neither a server-unchanged nor a locally-untouched reuse is a drop.
+const serverChangeDroppedForLocalEdit = (
+  reusableState: WrittenRecordState,
+  renderedContent: string,
+): boolean => {
+  const serverChanged =
+    hashContent(renderedContent) !== reusableState.contentHash;
+
+  if (!serverChanged) {
+    return false;
+  }
+
+  return !localFileMatchesBaseline(
+    reusableState.path,
+    reusableState.contentHash,
+  );
+};
+
 // Whether a reused file should be rewritten with the freshly fetched content.
 // `overwrite` always refreshes — the user opted into the newest record winning
 // the slug. suffix/skip refresh only in the narrow server-changed-and-untouched
@@ -444,13 +470,22 @@ const reuseWrittenFile = (
   conflictStrategy: ConflictStrategy,
   recordUuid: string,
   writtenState: Map<string, WrittenRecordState>,
+  droppedServerChanges: Set<string>,
 ): string => {
-  if (!shouldRewriteReusedFile(reusableState, content, conflictStrategy)) {
+  if (shouldRewriteReusedFile(reusableState, content, conflictStrategy)) {
+    writeReplacingExisting(reusableState.path, content);
+    rememberWrittenState(writtenState, recordUuid, reusableState.path, content);
+
     return reusableState.path;
   }
 
-  writeReplacingExisting(reusableState.path, content);
-  rememberWrittenState(writtenState, recordUuid, reusableState.path, content);
+  // File kept as-is. Under suffix/skip that may mean a changed server revision
+  // was dropped in favor of a local vault edit — collect the uuid so the caller
+  // can warn the user and hold the record back from the server-side delete
+  // instead of losing the revision silently (issue #110).
+  if (serverChangeDroppedForLocalEdit(reusableState, content)) {
+    droppedServerChanges.add(recordUuid);
+  }
 
   return reusableState.path;
 };
@@ -491,13 +526,17 @@ export const ensureOutputDirectory = (): string => {
 // server-side content change without clobbering a vault edit (see
 // resolveReusableWrittenState and reuseWrittenFile). `includeFrontmatter` is the
 // user's `frontmatter` setting; when off the file is written without a
-// frontmatter block (see buildRecordDocument).
+// frontmatter block (see buildRecordDocument). `droppedServerChanges` collects
+// the uuid of any reused record whose changed server revision was dropped in
+// favor of a local vault edit, so the caller can warn and defer the delete
+// (see serverChangeDroppedForLocalEdit, issue #110).
 export const writeMarkdown = (
   record: Record,
   conflictStrategy: ConflictStrategy = DEFAULT_CONFLICT_STRATEGY,
   seenSlugs: Map<string, string> = new Map(),
   includeFrontmatter = true,
   writtenState: Map<string, WrittenRecordState> = new Map(),
+  droppedServerChanges: Set<string> = new Set(),
 ): string | null => {
   const outputDirectory = ensureOutputDirectory();
 
@@ -525,6 +564,7 @@ export const writeMarkdown = (
       conflictStrategy,
       record.uuid,
       writtenState,
+      droppedServerChanges,
     );
   }
 
