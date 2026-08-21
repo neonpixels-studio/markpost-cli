@@ -20,6 +20,7 @@ vi.mock('@/libs/records.js', async (importOriginal) => ({
 vi.mock('@/libs/markdown.js', () => ({
   writeMarkdown: vi.fn(),
   ensureOutputDirectory: vi.fn(),
+  buildWritePreview: vi.fn(),
 }));
 vi.mock('@/libs/settings.js', () => ({ fetchSettings: vi.fn() }));
 // Run the sync once synchronously instead of arming a real timer: the
@@ -2160,5 +2161,182 @@ describe('index', () => {
     // Pass two (snapshot index 2) still carries both uuids.
     expect(snapshots[2].has('abc-123')).toBe(true);
     expect(snapshots[2].has('def-456')).toBe(true);
+  });
+
+  describe('sync --dry-run', () => {
+    const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
+
+    // Arranges a two-record dry run: fetch succeeds and the write preview
+    // reports both records landing on fresh paths.
+    const arrangeDryRun = async (settingsOverrides: Partial<UserSettings> = {}) => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { buildWritePreview } = await import('@/libs/markdown.js');
+      const { fetchSettings } = await import('@/libs/settings.js');
+      const { default: yoctoSpinner } = await import('yocto-spinner');
+
+      vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+      vi.mocked(fetchSettings).mockResolvedValue(mockSettings(settingsOverrides));
+      vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, secondRecord], partial: false });
+      vi.mocked(buildWritePreview).mockReturnValue([
+        { record: mockRecord, path: '/mock/output/test-title.md', action: 'write' },
+        { record: secondRecord, path: '/mock/output/title-2.md', action: 'write' },
+      ]);
+    };
+
+    it('writes nothing, deletes nothing, and marks nothing under --dry-run', async () => {
+      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+      const { fetchAllRecords, deleteRecords, markRecordSynced } = await import('@/libs/records.js');
+      const { writeMarkdown, ensureOutputDirectory, buildWritePreview } = await import('@/libs/markdown.js');
+      await arrangeDryRun();
+
+      await import('@/index.js');
+
+      // The fetch (a read) still runs — the preview needs the real record set.
+      expect(fetchAllRecords).toHaveBeenCalledWith({ status: 'pending' });
+      expect(buildWritePreview).toHaveBeenCalledWith([mockRecord, secondRecord], 'suffix');
+      // Every mutation path must be short-circuited.
+      expect(writeMarkdown).not.toHaveBeenCalled();
+      expect(ensureOutputDirectory).not.toHaveBeenCalled();
+      expect(deleteRecords).not.toHaveBeenCalled();
+      expect(markRecordSynced).not.toHaveBeenCalled();
+      expect(mockSpinner.start).not.toHaveBeenCalledWith('Writing records...');
+      expect(mockSpinner.start).not.toHaveBeenCalledWith('Deleting records...');
+      // A successful preview exits 0.
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('lists the intended writes and the server-side deletes under --dry-run', async () => {
+      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+      await arrangeDryRun({ autoDelete: true });
+
+      await import('@/index.js');
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Dry run — previewing 2 record(s)'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Would write 2 record(s):'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('/mock/output/test-title.md (write)'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('/mock/output/title-2.md (write)'),
+      );
+      // autoDelete on → the server plan is a delete, listing each record.
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Would delete 2 record(s) from the server:'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('abc-123 (Test Title)'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('def-456 (Title 2)'),
+      );
+    });
+
+    it('previews a mark-synced (not a delete) when autoDelete is off', async () => {
+      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+      await arrangeDryRun({ autoDelete: false });
+
+      await import('@/index.js');
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Would mark 2 record(s) synced on the server:'),
+      );
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('Would delete'),
+      );
+    });
+
+    it('excludes skipped records from the server-side plan under --dry-run', async () => {
+      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { buildWritePreview } = await import('@/libs/markdown.js');
+      const { fetchSettings } = await import('@/libs/settings.js');
+      const { default: yoctoSpinner } = await import('yocto-spinner');
+
+      vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+      vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true, conflictStrategy: 'skip' }));
+      vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, secondRecord], partial: false });
+      vi.mocked(buildWritePreview).mockReturnValue([
+        { record: mockRecord, path: '/mock/output/test-title.md', action: 'write' },
+        { record: secondRecord, path: '/mock/output/title-2.md', action: 'skip' },
+      ]);
+
+      await import('@/index.js');
+
+      // Only the one non-skipped record is written and (would be) deleted.
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Would write 1 record(s):'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Would skip 1 record(s)'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Would delete 1 record(s) from the server:'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('abc-123 (Test Title)'),
+      );
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('def-456 (Title 2)'),
+      );
+    });
+
+    it('mutates nothing on the server preview when settings cannot be read', async () => {
+      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { buildWritePreview } = await import('@/libs/markdown.js');
+      const { fetchSettings } = await import('@/libs/settings.js');
+      const { default: yoctoSpinner } = await import('yocto-spinner');
+
+      vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+      vi.mocked(fetchSettings).mockResolvedValue({ ok: false });
+      vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
+      vi.mocked(buildWritePreview).mockReturnValue([
+        { record: mockRecord, path: '/mock/output/test-title.md', action: 'write' },
+      ]);
+
+      await import('@/index.js');
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Settings unreadable'),
+      );
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('Would delete'),
+      );
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('Would mark'),
+      );
+    });
+
+    it('previews once and never self-schedules, even with autoSync on', async () => {
+      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+      const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+      let scheduledAutoSync: boolean | undefined;
+      vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+        scheduledAutoSync = await runSync();
+      });
+      await arrangeDryRun({ autoSync: true });
+
+      await import('@/index.js');
+
+      // A dry run reports back `false` so the scheduler won't loop a preview.
+      expect(scheduledAutoSync).toBe(false);
+    });
+
+    it('still rejects an unexpected argument alongside --dry-run', async () => {
+      process.argv = ['node', 'index.js', 'sync', '--dry-run', 'oops'];
+      const { fetchAllRecords } = await import('@/libs/records.js');
+
+      await import('@/index.js');
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Unexpected arguments: oops'),
+      );
+      expect(process.exitCode).toBe(1);
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+    });
   });
 });

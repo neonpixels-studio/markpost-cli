@@ -562,6 +562,119 @@ export const writeMarkdown = (
   return writtenPath;
 };
 
+// The three ways a record shows up in a dry-run write preview: it would be
+// written to a fresh path, it would `overwrite` an existing file, or the `skip`
+// strategy would leave an existing file untouched. Mirrors the outcomes the real
+// writers produce so the preview matches what an actual sync would do.
+export type WritePreviewAction = 'write' | 'overwrite' | 'skip';
+
+export type WritePreview = {
+  record: Record;
+  path: string;
+  action: WritePreviewAction;
+};
+
+// Read-only counterpart to ensureOutputDirectory: resolves the configured output
+// directory without creating it. ensureOutputDirectory mkdir's the path as a side
+// effect, which a dry run must never do, so the preview validates-but-doesn't-
+// create here — still failing loud (same message) when the directory is unset.
+const requireOutputDirectory = (): string => {
+  const outputDirectory = getOutputDirectory();
+
+  if (!outputDirectory) {
+    throw Error('Output directory is not set!');
+  }
+
+  return outputDirectory;
+};
+
+// Non-mutating preview of the path the `suffix` strategy would land on: walk
+// `<slug>.md`, `<slug>-2.md`, ... and return the first that is neither already on
+// disk nor already claimed by an earlier record in this same batch. Uses
+// existsSync (a read) instead of writeToFirstAvailablePath's atomic exclusive-
+// create (a write), so it can plan without touching the filesystem.
+const previewSuffixPath = (
+  outputDirectory: string,
+  slug: string,
+  plannedPaths: Set<string>,
+): string => {
+  let candidateFileName = `${slug}${MARKDOWN_EXTENSION}`;
+  let suffix = FIRST_COLLISION_SUFFIX;
+
+  while (suffix <= MAX_COLLISION_SUFFIX) {
+    const candidatePath = resolveWithinOutputDirectory(
+      outputDirectory,
+      candidateFileName,
+    );
+
+    if (!plannedPaths.has(candidatePath) && !existsSync(candidatePath)) {
+      return candidatePath;
+    }
+
+    candidateFileName = `${slug}-${suffix}${MARKDOWN_EXTENSION}`;
+    suffix += 1;
+  }
+
+  throw Error(
+    `Too many filename collisions for "${slug}" in ${outputDirectory}`,
+  );
+};
+
+// Plan one record's write without performing it. `plannedPaths` accumulates the
+// base paths already claimed by earlier records in the batch so two same-slug
+// records preview distinct targets (and an `overwrite` whose base was already
+// claimed by a *different* record downgrades to `suffix`, mirroring
+// resolveStrategyForSlug). A `skip` against an existing/claimed base reports
+// `skip`; every other case reports the path it would land on.
+const previewRecordWrite = (
+  record: Record,
+  conflictStrategy: ConflictStrategy,
+  outputDirectory: string,
+  plannedPaths: Set<string>,
+): WritePreview => {
+  const slug = slugifyTitle(record.title, record.uuid);
+  const basePath = resolveBasePath(outputDirectory, slug);
+  const baseTaken = plannedPaths.has(basePath) || existsSync(basePath);
+
+  if (conflictStrategy === 'skip' && baseTaken) {
+    return { record, path: basePath, action: 'skip' };
+  }
+
+  if (conflictStrategy === 'skip') {
+    plannedPaths.add(basePath);
+    return { record, path: basePath, action: 'write' };
+  }
+
+  if (conflictStrategy === 'overwrite' && !plannedPaths.has(basePath)) {
+    plannedPaths.add(basePath);
+    return {
+      record,
+      path: basePath,
+      action: existsSync(basePath) ? 'overwrite' : 'write',
+    };
+  }
+
+  const writtenPath = previewSuffixPath(outputDirectory, slug, plannedPaths);
+  plannedPaths.add(writtenPath);
+  return { record, path: writtenPath, action: 'write' };
+};
+
+// Build the full write plan for a dry run: for each record, the path it would
+// land on and whether that is a fresh write, an overwrite, or a skip — computed
+// entirely from reads (existsSync) so nothing is written. Defaults to `suffix`
+// (markpost's own default) when no strategy is supplied, matching writeMarkdown.
+export const buildWritePreview = (
+  records: Record[],
+  conflictStrategy: ConflictStrategy = DEFAULT_CONFLICT_STRATEGY,
+): WritePreview[] => {
+  const outputDirectory = requireOutputDirectory();
+  const plannedPaths = new Set<string>();
+
+  return records.map((record) =>
+    previewRecordWrite(record, conflictStrategy, outputDirectory, plannedPaths),
+  );
+};
+
 // Used by the push command to create a new record from a local file: the
 // title comes from the filename (no extension). Note this is the filename
 // as written on disk, which may be a slug rather than the original title
