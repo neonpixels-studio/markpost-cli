@@ -166,6 +166,7 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 | `npm run lint`     | Check formatting and linting           |
 | `npm run lint:fix` | Auto-fix formatting and linting issues |
 | `npm run sync:contract` | Refresh the vendored markpost API contract (see below) |
+| `npm run sync:markdown-serialization` | Refresh the vendored markpost serialization slice (see below) |
 
 ### Contract sync
 
@@ -205,6 +206,42 @@ re-exports the generic envelope types (`ApiError`, `ApiRequest`,
   would require network access at test time (flaky, and fails offline CI).
   Re-run `npm run sync:contract` periodically or whenever a markpost API
   change is suspected.
+
+### Markdown serialization sync
+
+The CLI writes synced records to disk as markdown, and those files must be
+**byte-identical** to what markpost itself would write — otherwise a `markpost
+push` re-wraps or corrupts them. markpost's `server/utils/markdown.ts` is the
+source of truth for that format (`quoteYamlScalar`, `serializeTagsLine`,
+`serializeFrontmatter`, `assembleMarkdownDocument`); `src/libs/frontmatter.ts`
+hand-mirrors it. That mirror used to have zero automated guard — a change to
+markpost's quoting or block layout would silently corrupt synced files with no
+test failing. This closes that gap the same way the contract sync does.
+
+- **Refreshing it:** run `npm run sync:markdown-serialization` (optionally
+  `-- --from <path-to-a-local-markpost-checkout>`; without `--from` it
+  shallow-clones markpost fresh). Like the contract sync this is a
+  **human-run** step, not part of CI — it needs network access (or a local
+  checkout). It extracts just the serialization slice of `markdown.ts` (the
+  four functions above plus the two types they use, leaving the
+  turndown-dependent server code behind) and writes it verbatim to
+  `tests/libs/vendor/markpost-markdown-serialization.generated.ts`, alongside a
+  manifest recording the exact source commit. The file lives under `tests/` so
+  it never ships in the published `dist/`. Review the diff, run `npm test`,
+  then commit.
+- **Catching drift:** `tests/libs/frontmatter-drift.test.ts` runs on every
+  `npm test` / `npm run test:ci`. It executes markpost's *real* (vendored)
+  serialization functions and the CLI's mirrored ones over a shared battery of
+  inputs — plain values, empty and multi-tag lists, every YAML metacharacter,
+  whitespace, and escape sequences — and fails if any input serializes
+  differently. No network access needed. When markpost's serialization
+  changes, re-run the sync: the vendored slice updates, and if the CLI mirror
+  has not been updated to match, this test goes red.
+- **What this does *not* do:** it does not detect when markpost's upstream
+  serialization has changed and the vendored slice has fallen behind — that
+  would require network access at test time. Re-run
+  `npm run sync:markdown-serialization` whenever a markpost markdown change is
+  suspected.
 
 ## Security scanning
 

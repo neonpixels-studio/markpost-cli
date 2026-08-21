@@ -1,0 +1,14 @@
+{
+  "sourceRepo": "https://github.com/neonpixels-studio/markpost",
+  "sourceFile": "server/utils/markdown.ts",
+  "sourceCommit": "405e4e122bf3f1d34cddde46417e13f4012fed1c",
+  "exportedDeclarations": [
+    "FrontmatterObject",
+    "ParsedPayload",
+    "quoteYamlScalar",
+    "serializeTagsLine",
+    "serializeFrontmatter",
+    "assembleMarkdownDocument"
+  ],
+  "syncedAt": "2026-08-20T07:47:16.920Z"
+}
