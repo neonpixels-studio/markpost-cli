@@ -3,10 +3,9 @@
 import {
   deleteRecords,
   fetchAllRecords,
-  markRecordSynced,
+  markRecordsSynced,
   MARK_SYNCED,
-  MARK_TIMED_OUT,
-  MarkSyncedOutcome,
+  MarkSyncedResult,
   PENDING_STATUS,
 } from '@/libs/records.js';
 import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
@@ -49,14 +48,6 @@ import {
 } from '@/types/settings.types.js';
 
 type Spinner = ReturnType<typeof yoctoSpinner>;
-
-// Cap how many mark-synced PATCHes are in flight at once. A large first sync
-// can write hundreds of records; firing one unbounded `Promise.all` over all
-// of them risks rate-limit/connection failures exactly when the batch is
-// biggest — and every failed mark stays pending and re-duplicates next run.
-// Declared here (above the top-level `dispatch()` call) so the hoisted helpers
-// don't hit its temporal dead zone when the default sync runs.
-const MARK_SYNCED_CONCURRENCY = 10;
 
 // Slug ownership (resolved `<slug>.md` path -> the uuid that wrote it), shared
 // across every autoSync pass in this process rather than rebuilt per pass.
@@ -430,46 +421,23 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
   });
 }
 
-// Outcome of a whole mark-synced run. `outcomes` holds one entry per *attempted*
-// record in the original order; on a timeout abort it's shorter than the input
-// because the remaining batches were never sent. `timedOut` records whether a
-// timeout stopped the run early so the caller can report the abort explicitly.
-interface MarkSyncedRun {
-  outcomes: MarkSyncedOutcome[];
-  timedOut: boolean;
-}
-
-// PATCHes the written records synced in bounded-concurrency batches, stopping on
-// the first timeout. A timeout means the server is hung, so firing the remaining
-// batches would burn the full request timeout on each one before reporting;
-// aborting leaves those records pending to retry next run, mirroring the push
-// command's batch-abort. Non-timeout failures don't abort — the next record may
-// still succeed.
+// PATCHes the written records synced through markpost's bulk endpoint, settling
+// up to MAX_MARK_SYNCED_BATCH_SIZE records per request instead of one PATCH per
+// record. `markRecordsSynced` owns the chunking and the stop-on-timeout abort
+// (a hung server would otherwise burn the full request timeout on every
+// remaining chunk); this adapter just projects each written record down to the
+// `{ uuid, filePath }` the bulk call needs, keeping the API surface isolated in
+// the records lib. The returned outcomes stay aligned to `writtenRecords` by
+// index, so the caller can map each result back to its record.
 async function markRecordsInBatches(
   writtenRecords: WrittenRecord[],
-): Promise<MarkSyncedRun> {
-  const outcomes: MarkSyncedOutcome[] = [];
-
-  for (
-    let start = 0;
-    start < writtenRecords.length;
-    start += MARK_SYNCED_CONCURRENCY
-  ) {
-    const batch = writtenRecords.slice(start, start + MARK_SYNCED_CONCURRENCY);
-    const batchOutcomes = await Promise.all(
-      batch.map(({ record, filePath }) =>
-        markRecordSynced(record.uuid, filePath),
-      ),
-    );
-
-    outcomes.push(...batchOutcomes);
-
-    if (batchOutcomes.includes(MARK_TIMED_OUT)) {
-      return { outcomes, timedOut: true };
-    }
-  }
-
-  return { outcomes, timedOut: false };
+): Promise<MarkSyncedResult> {
+  return markRecordsSynced(
+    writtenRecords.map(({ record, filePath }) => ({
+      uuid: record.uuid,
+      filePath,
+    })),
+  );
 }
 
 // Headline for the mark-synced failure report. A timeout abort reads

@@ -360,48 +360,82 @@ export const createRecord = async (
   }
 };
 
-// Marks a single record synced after the CLI has written it to disk, via
-// markpost's PATCH /api/records/[uuid] (server/api/records/[uuid].patch.ts),
-// which accepts `status`, `syncedAt`, and `filePath`. This is the
-// non-destructive counterpart to `deleteRecords`: with autoDelete off, moving
-// the record out of `pending` is what stops the next run's pending-only fetch
-// from re-writing it. `syncedAt` is injected (defaulting to now) so callers
-// and tests can pin the timestamp. Content-Type mirrors createRecord/
-// deleteRecords for consistency; markpost reads the body regardless.
-//
-// Goes through `authedRequest` so the PATCH inherits the same request timeout
-// as every other API call (a stalled connection can't hang the sync forever).
-// Unlike the fetch helpers above, a failure here is logged rather than
-// re-thrown: this is non-critical post-write bookkeeping (the file is already
-// on disk), so a failed mark simply leaves the record `pending` to re-sync
-// next run, which is far less disruptive than aborting the whole sync after
-// files have landed.
-//
-// Returns a three-way outcome rather than a bare boolean so the caller can
-// tell a per-record failure (`MARK_FAILED`, keep going — the next record may
-// succeed) apart from a timeout (`MARK_TIMED_OUT`). A timeout signals a hung
-// server, so the caller stops the remaining batches instead of burning the
-// full request timeout on every one; the record still stays `pending` either
-// way. Reading the body back as a resource would mis-report a legitimate 2xx
-// that carries no `data` (markpost's PATCH always returns the record, but a
-// `data: null` shape still counts as success here) as a failure, wrongly
-// warning the user of duplicates. `filePath` is sent deliberately — markpost
-// stores it on the record so its UI can show where a synced note landed; it's
-// the user's own local path going to their own account, not a third-party leak.
-export const markRecordSynced = async (
-  uuid: string,
-  filePath: string,
-  syncedAt: string = new Date().toISOString(),
-): Promise<MarkSyncedOutcome> => {
+// markpost's bulk update handler (server/api/records/index.patch.ts) caps each
+// PATCH /api/records request at this many records (`MAX_UPDATE_BATCH_SIZE`); a
+// larger `records[]` array is rejected with a 422. The CLI chunks to this size
+// so a first sync of hundreds of records settles in `ceil(N / 100)` requests
+// instead of one PATCH per record — the whole point of moving off the per-uuid
+// endpoint (issue #123).
+export const MAX_MARK_SYNCED_BATCH_SIZE = 100;
+
+// One record the CLI wants marked synced: the uuid to update and the on-disk
+// path markpost stores so its UI can show where the note landed.
+export type MarkSyncedItem = {
+  uuid: string;
+  filePath: string;
+};
+
+// Outcome of a whole bulk mark-synced run. `outcomes` holds one entry per
+// record in the ORIGINAL input order, so the caller can align each result back
+// to its record by index. On a timeout abort it's shorter than the input: the
+// chunk that timed out and every chunk after it were never confirmed, so those
+// trailing records have no outcome and the caller treats them as still pending.
+// `timedOut` records whether a request timeout stopped the run early.
+export type MarkSyncedResult = {
+  outcomes: MarkSyncedOutcome[];
+  timedOut: boolean;
+};
+
+// The `records[]` item markpost's bulk PATCH expects: the uuid to match plus
+// the attributes to set. The CLI always sets `status`, `syncedAt`, and
+// `filePath` together — moving a written record out of `pending` so the next
+// run's pending-only fetch skips it. `filePath` is sent deliberately: markpost
+// stores it on the record so its UI can show where a synced note landed — the
+// user's own local path going to their own account, not a third-party leak.
+const buildBulkRecordPayload = (item: MarkSyncedItem, syncedAt: string) => {
+  return {
+    uuid: item.uuid,
+    status: SYNCED_STATUS,
+    syncedAt,
+    filePath: item.filePath,
+  };
+};
+
+// Maps one chunk's request outcome to a per-item result. markpost returns only
+// the records it actually updated (foreign/nonexistent uuids are silently
+// dropped, mirroring the bulk delete endpoint), so a uuid absent from the
+// response was NOT marked — it stays `pending` and is reported `MARK_FAILED`
+// so the caller can warn the user rather than silently losing it. Reading the
+// returned collection (rather than trusting a bare 2xx) is what gives the CLI
+// real partial-failure detection across a 100-record chunk.
+const outcomesFromResponse = (
+  items: MarkSyncedItem[],
+  body: RecordListApiResponse,
+): MarkSyncedOutcome[] => {
+  const updated = unwrapResourceCollection('markRecordsSynced', body, 'record');
+  const updatedUuids = new Set(updated.map((record) => record.uuid));
+
+  return items.map((item) =>
+    updatedUuids.has(item.uuid) ? MARK_SYNCED : MARK_FAILED,
+  );
+};
+
+// PATCHes one chunk (<= MAX_MARK_SYNCED_BATCH_SIZE records) synced in a single
+// bulk request. Routes through the shared `authedRequest` seam (like every
+// other call): it attaches the bearer token, asserts success (throwing on a
+// non-2xx, an errors-carrying 2xx, or an unparseable body such as an HTML error
+// page behind a 200), and inherits the request timeout so a stalled connection
+// can't hang the sync forever. A failure here is logged, not re-thrown — this
+// is non-critical post-write bookkeeping (the files are already on disk), so a
+// failed chunk simply leaves its records `pending` to re-sync next run. A
+// timeout maps every item in the chunk to `MARK_TIMED_OUT` so the caller can
+// stop the remaining chunks; any other failure maps them to `MARK_FAILED`.
+const markSyncedChunk = async (
+  items: MarkSyncedItem[],
+  syncedAt: string,
+): Promise<MarkSyncedOutcome[]> => {
   try {
-    // Route through the shared authedRequest seam (like createRecord/
-    // fetchRecord): it attaches the bearer token and asserts success (throwing
-    // on a non-2xx or an errors-carrying 2xx, and on an unparseable body such
-    // as an HTML error page behind a 200), so a failure lands in the catch
-    // below rather than being mistaken for a silent success that leaves the
-    // record pending. We ignore the returned body — the caller only needs to
-    // know the server accepted the change.
-    await authedRequest(`/api/records/${encodeURIComponent(uuid)}`, {
+    const body = (await authedRequest('/api/records', {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/vnd.api+json',
@@ -410,30 +444,74 @@ export const markRecordSynced = async (
         data: {
           type: 'records',
           attributes: {
-            status: SYNCED_STATUS,
-            syncedAt,
-            filePath,
+            records: items.map((item) =>
+              buildBulkRecordPayload(item, syncedAt),
+            ),
           },
         },
       }),
-    });
+    })) as RecordListApiResponse;
 
-    return MARK_SYNCED;
+    return outcomesFromResponse(items, body);
   } catch (error) {
     logErrorMessage(
-      `markRecordSynced["${uuid}"]`,
+      `markRecordsSynced[${items.length} record(s)]`,
       error instanceof Error ? error.message : String(error),
     );
 
     // A timeout gets its own outcome so the caller can abort the remaining
-    // marks on the first one; every other error just leaves this record
-    // pending and lets the rest of the batch proceed.
-    if (error instanceof ApiTimeoutError) {
-      return MARK_TIMED_OUT;
-    }
+    // chunks on the first one; every other error just leaves this chunk's
+    // records pending and lets the rest of the run proceed.
+    const outcome =
+      error instanceof ApiTimeoutError ? MARK_TIMED_OUT : MARK_FAILED;
 
-    return MARK_FAILED;
+    return items.map(() => outcome);
   }
+};
+
+// Marks written records synced after the CLI has written them to disk, via
+// markpost's bulk PATCH /api/records (server/api/records/index.patch.ts). This
+// is the non-destructive counterpart to `deleteRecords`: with autoDelete off,
+// moving each record out of `pending` is what stops the next run's pending-only
+// fetch from re-writing it. `syncedAt` is injected (defaulting to now) so
+// callers and tests can pin the timestamp.
+//
+// Chunks the input into `ceil(N / MAX_MARK_SYNCED_BATCH_SIZE)` requests so a
+// large first sync settles up to 100 records per PATCH instead of one request
+// per record — the rate-limit/connection pressure that motivated issue #123.
+// Chunks run sequentially (not in parallel): the previous per-record path
+// bounded concurrency for exactly this reason, and one request per 100 records
+// is already few enough that firing them serially keeps the burst small without
+// a concurrency limiter.
+//
+// Returns one outcome per record in input order. A timeout signals a hung
+// server, so the run stops at the chunk that first timed out rather than paying
+// the full request timeout on every remaining chunk; those trailing records get
+// no outcome and stay `pending` (their outcome index is `undefined`, which the
+// caller reads as not-synced). Non-timeout failures don't abort — a later chunk
+// may still succeed.
+export const markRecordsSynced = async (
+  items: MarkSyncedItem[],
+  syncedAt: string = new Date().toISOString(),
+): Promise<MarkSyncedResult> => {
+  const outcomes: MarkSyncedOutcome[] = [];
+
+  for (
+    let start = 0;
+    start < items.length;
+    start += MAX_MARK_SYNCED_BATCH_SIZE
+  ) {
+    const chunk = items.slice(start, start + MAX_MARK_SYNCED_BATCH_SIZE);
+    const chunkOutcomes = await markSyncedChunk(chunk, syncedAt);
+
+    outcomes.push(...chunkOutcomes);
+
+    if (chunkOutcomes.includes(MARK_TIMED_OUT)) {
+      return { outcomes, timedOut: true };
+    }
+  }
+
+  return { outcomes, timedOut: false };
 };
 
 export const fetchRecord = async (uuid: string): Promise<Record | null> => {
