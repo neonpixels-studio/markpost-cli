@@ -109,7 +109,11 @@ const ensureConfigValue = async (
     return;
   }
 
-  const value = await input({ message: field.promptMessage });
+  // Trim so a pasted answer with surrounding whitespace matches the `config
+  // set` path (which trims too) — a stray leading space would otherwise defeat
+  // the leading `~`/`$HOME` expansion and store an unusable token. The guard
+  // below then also rejects a whitespace-only answer.
+  const value = (await input({ message: field.promptMessage })).trim();
 
   if (!value) {
     console.error(chalk.redBright(`${field.promptMessage} is required!`));

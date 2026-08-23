@@ -118,6 +118,17 @@ describe('checkConfig', () => {
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
+  it('trims surrounding whitespace from a prompted value before storing it', async () => {
+    mockGet.mockReturnValue(undefined);
+    process.env.API_TOKEN = 'env-token';
+    vi.mocked(input).mockResolvedValue('  ~/notes  ');
+
+    await checkConfig();
+
+    expect(mockSet).toHaveBeenCalledWith('outputDirectory', '~/notes');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
   it('prompts for both values in order when neither is set', async () => {
     mockGet.mockReturnValue(undefined);
     vi.mocked(input).mockResolvedValueOnce('my-token').mockResolvedValueOnce('/my/dir');
