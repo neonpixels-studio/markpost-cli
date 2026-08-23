@@ -189,6 +189,22 @@ describe('writeMarkdown', () => {
     );
   });
 
+  it('expands $HOME in the persisted config value before creating the directory', () => {
+    delete process.env.OUTPUT_DIRECTORY;
+    vi.mocked(config.get).mockReturnValue('$HOME/notes');
+
+    writeMarkdown(mockRecord);
+
+    expect(mkdirSync).toHaveBeenCalledWith(resolve(homedir(), 'notes'), {
+      recursive: true,
+    });
+    expect(writeFileSync).toHaveBeenCalledWith(
+      resolve(homedir(), 'notes', 'test-title.md'),
+      mockRecord.content,
+      EXCLUSIVE_WRITE_OPTIONS,
+    );
+  });
+
   it('calls mkdirSync when the output directory does not exist', () => {
     writeMarkdown(mockRecord);
     expect(mkdirSync).toHaveBeenCalledWith(outputDirectory, {
