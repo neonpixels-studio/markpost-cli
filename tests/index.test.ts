@@ -78,14 +78,17 @@ const mockRecord: Record = {
 // index-level tests drive the settle/report logic without re-deriving chunking
 // (chunk boundaries and the timeout abort are covered in tests/libs/records.test.ts).
 // `markResultBy` maps each item's uuid to an outcome; `markResultAll` is the
-// common "every record shares one outcome" shorthand.
+// common "every record shares one outcome" shorthand. Both always report every
+// record attempted (`timedOut: false`, full-length outcomes) — an abort produces
+// a SHORTER outcomes array, so timeout/abort cases use an explicit
+// `mockResolvedValue({ outcomes: [...], timedOut: true })` instead of these.
 const markResultBy =
   (outcomeFor: (uuid: string) => MarkSyncedOutcome) =>
   async (
     items: { uuid: string; filePath: string }[],
   ): Promise<MarkSyncedResult> => ({
     outcomes: items.map((item) => outcomeFor(item.uuid)),
-    timedOut: items.some((item) => outcomeFor(item.uuid) === MARK_TIMED_OUT),
+    timedOut: false,
   });
 
 const markResultAll = (outcome: MarkSyncedOutcome) =>

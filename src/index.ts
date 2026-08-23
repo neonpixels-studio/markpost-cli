@@ -5,7 +5,7 @@ import {
   fetchAllRecords,
   markRecordsSynced,
   MARK_SYNCED,
-  MarkSyncedResult,
+  MarkSyncedItem,
   PENDING_STATUS,
 } from '@/libs/records.js';
 import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
@@ -421,23 +421,15 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
   });
 }
 
-// PATCHes the written records synced through markpost's bulk endpoint, settling
-// up to MAX_MARK_SYNCED_BATCH_SIZE records per request instead of one PATCH per
-// record. `markRecordsSynced` owns the chunking and the stop-on-timeout abort
-// (a hung server would otherwise burn the full request timeout on every
-// remaining chunk); this adapter just projects each written record down to the
-// `{ uuid, filePath }` the bulk call needs, keeping the API surface isolated in
-// the records lib. The returned outcomes stay aligned to `writtenRecords` by
-// index, so the caller can map each result back to its record.
-async function markRecordsInBatches(
-  writtenRecords: WrittenRecord[],
-): Promise<MarkSyncedResult> {
-  return markRecordsSynced(
-    writtenRecords.map(({ record, filePath }) => ({
-      uuid: record.uuid,
-      filePath,
-    })),
-  );
+// Projects each written record down to the `{ uuid, filePath }` shape the bulk
+// mark-synced call needs, preserving order so the returned outcomes stay aligned
+// to `writtenRecords` by index. Chunking and the stop-on-timeout abort live in
+// `markRecordsSynced` (the records lib), keeping the API surface isolated there.
+function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
+  return writtenRecords.map(({ record, filePath }) => ({
+    uuid: record.uuid,
+    filePath,
+  }));
 }
 
 // Headline for the mark-synced failure report. A timeout abort reads
@@ -510,7 +502,9 @@ async function markWrittenRecordsSynced(
 
   spinner.start('Marking records synced...');
 
-  const { outcomes, timedOut } = await markRecordsInBatches(writtenRecords);
+  const { outcomes, timedOut } = await markRecordsSynced(
+    toMarkSyncedItems(writtenRecords),
+  );
   // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
   // pending if its mark failed or was never attempted (its outcome is undefined
   // because a timeout aborted the run before its batch). Evict settled records

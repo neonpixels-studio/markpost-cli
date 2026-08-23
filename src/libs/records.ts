@@ -25,11 +25,15 @@ import {
 export const PENDING_STATUS = 'pending';
 const SYNCED_STATUS = 'synced';
 
-// Result of marking one record synced. `MARK_SYNCED` — the server accepted the
-// PATCH. `MARK_FAILED` — a non-timeout error; the record stays pending and the
-// rest of the batch still runs. `MARK_TIMED_OUT` — the PATCH hit the request
-// timeout, a signal the server is hung; the batch runner stops on the first one
-// rather than paying the full timeout on every remaining record.
+// Per-record result of a bulk mark-synced run (see `markRecordsSynced`, which
+// PATCHes records in chunks of up to MAX_MARK_SYNCED_BATCH_SIZE). `MARK_SYNCED`
+// — the server returned this record among the ones it updated. `MARK_FAILED` —
+// the record's chunk failed (a non-timeout error), or the server didn't return
+// this uuid (partial success); it stays pending to re-sync next run. A plain
+// chunk failure doesn't stop the run, but a systemic one (auth/rate-limit/5xx)
+// aborts the remaining chunks — see `markSyncedChunk`. `MARK_TIMED_OUT` — the
+// record's chunk hit the request timeout, a signal the server is hung; the run
+// stops there rather than paying the full timeout on every remaining chunk.
 //
 // Values are prefixed (`mark-*`) so they never collide with the wire
 // `SYNCED_STATUS = 'synced'` above: these are internal outcome tags, not the
@@ -377,10 +381,12 @@ export type MarkSyncedItem = {
 
 // Outcome of a whole bulk mark-synced run. `outcomes` holds one entry per
 // record in the ORIGINAL input order, so the caller can align each result back
-// to its record by index. On a timeout abort it's shorter than the input: the
-// chunk that timed out and every chunk after it were never confirmed, so those
-// trailing records have no outcome and the caller treats them as still pending.
-// `timedOut` records whether a request timeout stopped the run early.
+// to its record by index. On an abort (a timeout OR a systemic auth/rate-limit/
+// 5xx failure) it's shorter than the input: the chunk that aborted and every
+// chunk after it were never confirmed, so those trailing records have no outcome
+// and the caller treats them as still pending. `timedOut` is true only when a
+// timeout (not a systemic failure) caused the abort, so the caller can word its
+// report accordingly.
 export type MarkSyncedResult = {
   outcomes: MarkSyncedOutcome[];
   timedOut: boolean;
@@ -401,23 +407,58 @@ const buildBulkRecordPayload = (item: MarkSyncedItem, syncedAt: string) => {
   };
 };
 
-// Maps one chunk's request outcome to a per-item result. markpost returns only
-// the records it actually updated (foreign/nonexistent uuids are silently
-// dropped, mirroring the bulk delete endpoint), so a uuid absent from the
-// response was NOT marked — it stays `pending` and is reported `MARK_FAILED`
-// so the caller can warn the user rather than silently losing it. Reading the
-// returned collection (rather than trusting a bare 2xx) is what gives the CLI
-// real partial-failure detection across a 100-record chunk.
+// Reads the `meta.updated` count off a bulk-PATCH response, if present. markpost
+// sends it alongside `data` (server/api/records/index.patch.ts); it's the
+// corroborating signal used only when `data` itself is unreadable.
+const updatedCountFromMeta = (
+  body: RecordListApiResponse,
+): number | undefined => {
+  const meta = body.meta as { updated?: unknown } | undefined;
+
+  return typeof meta?.updated === 'number' ? meta.updated : undefined;
+};
+
+// Maps one chunk's request outcome to a per-item result. markpost returns the
+// records it actually updated as the `data` collection (always an array;
+// foreign/nonexistent uuids are silently dropped, mirroring the bulk delete
+// endpoint), so a uuid present there was synced and one absent stays `pending`
+// and is reported `MARK_FAILED` — that per-uuid diff is what gives the CLI real
+// partial-failure detection across a 100-record chunk, rather than trusting a
+// bare 2xx.
+//
+// If `data` is ever NOT an array (an off-contract or proxied response the
+// declared contract never produces), the per-uuid diff can't run, so fall back
+// to the corroborating `meta.updated` count: a full count means the whole chunk
+// was accepted (all `MARK_SYNCED`); anything else fails the chunk loud so its
+// records retry next run rather than being silently reported synced.
 const outcomesFromResponse = (
   items: MarkSyncedItem[],
   body: RecordListApiResponse,
 ): MarkSyncedOutcome[] => {
+  if (!Array.isArray(body.data)) {
+    const wholeChunkAccepted = updatedCountFromMeta(body) === items.length;
+
+    return items.map(() => (wholeChunkAccepted ? MARK_SYNCED : MARK_FAILED));
+  }
+
   const updated = unwrapResourceCollection('markRecordsSynced', body, 'record');
   const updatedUuids = new Set(updated.map((record) => record.uuid));
 
   return items.map((item) =>
     updatedUuids.has(item.uuid) ? MARK_SYNCED : MARK_FAILED,
   );
+};
+
+// The result of PATCHing one chunk: a per-item outcome list plus whether the
+// run should stop. `abort` is set when the failure dooms every remaining chunk
+// too (a hung server or a systemic auth/rate-limit/5xx failure), so the caller
+// stops rather than firing a burst it already knows will fail. `timedOut`
+// distinguishes the hung-server case from a systemic one so the caller can word
+// its report accordingly.
+type MarkSyncedChunkResult = {
+  outcomes: MarkSyncedOutcome[];
+  abort: boolean;
+  timedOut: boolean;
 };
 
 // PATCHes one chunk (<= MAX_MARK_SYNCED_BATCH_SIZE records) synced in a single
@@ -427,13 +468,19 @@ const outcomesFromResponse = (
 // page behind a 200), and inherits the request timeout so a stalled connection
 // can't hang the sync forever. A failure here is logged, not re-thrown — this
 // is non-critical post-write bookkeeping (the files are already on disk), so a
-// failed chunk simply leaves its records `pending` to re-sync next run. A
-// timeout maps every item in the chunk to `MARK_TIMED_OUT` so the caller can
-// stop the remaining chunks; any other failure maps them to `MARK_FAILED`.
+// failed chunk simply leaves its records `pending` to re-sync next run.
+//
+// A timeout maps every item to `MARK_TIMED_OUT` and aborts (a hung server would
+// burn the full request timeout on every remaining chunk). A systemic failure
+// (auth/rate-limit/5xx) also aborts — it will recur for every remaining chunk,
+// so the caller backs off rather than hammering a server that just rejected the
+// burst (the same rule the fetch helpers apply via `isSystemicApiFailure`). Any
+// other (per-chunk) failure maps to `MARK_FAILED` without aborting — a later
+// chunk may still succeed.
 const markSyncedChunk = async (
   items: MarkSyncedItem[],
   syncedAt: string,
-): Promise<MarkSyncedOutcome[]> => {
+): Promise<MarkSyncedChunkResult> => {
   try {
     const body = (await authedRequest('/api/records', {
       method: 'PATCH',
@@ -452,20 +499,35 @@ const markSyncedChunk = async (
       }),
     })) as RecordListApiResponse;
 
-    return outcomesFromResponse(items, body);
+    return {
+      outcomes: outcomesFromResponse(items, body),
+      abort: false,
+      timedOut: false,
+    };
   } catch (error) {
+    // Identify the chunk by its uuid range so a stderr reader can tell which
+    // records this failure left pending without cross-referencing the caller's
+    // own per-record report.
+    const firstUuid = items[0]?.uuid;
+    const lastUuid = items[items.length - 1]?.uuid;
     logErrorMessage(
-      `markRecordsSynced[${items.length} record(s)]`,
+      `markRecordsSynced[${firstUuid}..${lastUuid}, ${items.length} record(s)]`,
       error instanceof Error ? error.message : String(error),
     );
 
-    // A timeout gets its own outcome so the caller can abort the remaining
-    // chunks on the first one; every other error just leaves this chunk's
-    // records pending and lets the rest of the run proceed.
-    const outcome =
-      error instanceof ApiTimeoutError ? MARK_TIMED_OUT : MARK_FAILED;
+    if (error instanceof ApiTimeoutError) {
+      return {
+        outcomes: items.map(() => MARK_TIMED_OUT),
+        abort: true,
+        timedOut: true,
+      };
+    }
 
-    return items.map(() => outcome);
+    return {
+      outcomes: items.map(() => MARK_FAILED),
+      abort: isSystemicApiFailure(error),
+      timedOut: false,
+    };
   }
 };
 
@@ -484,12 +546,13 @@ const markSyncedChunk = async (
 // is already few enough that firing them serially keeps the burst small without
 // a concurrency limiter.
 //
-// Returns one outcome per record in input order. A timeout signals a hung
-// server, so the run stops at the chunk that first timed out rather than paying
-// the full request timeout on every remaining chunk; those trailing records get
-// no outcome and stay `pending` (their outcome index is `undefined`, which the
-// caller reads as not-synced). Non-timeout failures don't abort — a later chunk
-// may still succeed.
+// Returns one outcome per record in input order. A timeout or a systemic
+// failure (auth/rate-limit/5xx) stops the run at that chunk rather than firing a
+// burst that's already doomed; the trailing records get no outcome and stay
+// `pending` (their outcome index is `undefined`, which the caller reads as
+// not-synced). A plain per-chunk failure doesn't abort — a later chunk may still
+// succeed. `timedOut` is true only when a timeout (not a systemic failure)
+// caused the stop, so the caller can word its report accordingly.
 export const markRecordsSynced = async (
   items: MarkSyncedItem[],
   syncedAt: string = new Date().toISOString(),
@@ -502,12 +565,12 @@ export const markRecordsSynced = async (
     start += MAX_MARK_SYNCED_BATCH_SIZE
   ) {
     const chunk = items.slice(start, start + MAX_MARK_SYNCED_BATCH_SIZE);
-    const chunkOutcomes = await markSyncedChunk(chunk, syncedAt);
+    const chunkResult = await markSyncedChunk(chunk, syncedAt);
 
-    outcomes.push(...chunkOutcomes);
+    outcomes.push(...chunkResult.outcomes);
 
-    if (chunkOutcomes.includes(MARK_TIMED_OUT)) {
-      return { outcomes, timedOut: true };
+    if (chunkResult.abort) {
+      return { outcomes, timedOut: chunkResult.timedOut };
     }
   }
 

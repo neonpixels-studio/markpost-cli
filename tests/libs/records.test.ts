@@ -1217,27 +1217,37 @@ describe('markRecordsSynced', () => {
       filePath: `/vault/note-${index}.md`,
     }));
 
-  // Echoes back every requested uuid as an updated record, so each chunk resolves
-  // MARK_SYNCED for all its items. Mirrors markpost returning the records it
-  // actually updated; reading the response `data` is what gives per-record
-  // outcomes rather than a bare 2xx.
-  const mockBulkPatchEcho = () => {
-    global.fetch = vi.fn().mockImplementation((_url, init) => {
-      const body = JSON.parse(String(init.body));
-      const records = body.data.attributes.records as { uuid: string }[];
+  // Builds markpost's real bulk-PATCH success body from a request: it echoes
+  // back every requested uuid it "updated" as a resource, with a `meta.updated`
+  // count. `wasUpdated` decides which uuids the server matched — the default
+  // matches all; a partial-success test narrows it. Reading this `data`
+  // collection is what gives the CLI per-record outcomes rather than a bare 2xx.
+  const echoBulkPatch = (
+    init: RequestInit,
+    wasUpdated: (uuid: string) => boolean = () => true,
+  ) => {
+    const body = JSON.parse(String(init.body));
+    const records = body.data.attributes.records as { uuid: string }[];
+    const updated = records.filter((record) => wasUpdated(record.uuid));
 
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            data: records.map((record) => ({
-              type: 'records',
-              attributes: { uuid: record.uuid },
-            })),
-            meta: { updated: records.length },
-          }),
-      });
+    return Promise.resolve({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          data: updated.map((record) => ({
+            type: 'records',
+            attributes: { uuid: record.uuid },
+          })),
+          meta: { updated: updated.length },
+        }),
     });
+  };
+
+  // Every chunk resolves MARK_SYNCED for all its items.
+  const mockBulkPatchEcho = () => {
+    global.fetch = vi
+      .fn()
+      .mockImplementation((_url, init) => echoBulkPatch(init));
   };
 
   // The number of records in each chunk request, in call order.
@@ -1337,26 +1347,37 @@ describe('markRecordsSynced', () => {
     expect(result.timedOut).toBe(false);
   });
 
+  it('pairs each record its own uuid, filePath, and syncedAt across chunks', async () => {
+    mockBulkPatchEcho();
+    await markRecordsSynced(items(250), '2024-05-01T00:00:00.000Z');
+    // Inspect the SECOND chunk's body: a mis-pairing (e.g. every record getting
+    // items[0].filePath) would still pass the size/uuid-echo assertions above.
+    const secondBody = JSON.parse(
+      String(vi.mocked(global.fetch).mock.calls[1]?.[1]?.body),
+    );
+    const secondRecords = secondBody.data.attributes.records;
+    expect(secondRecords[0]).toEqual({
+      uuid: 'uuid-100',
+      status: 'synced',
+      syncedAt: '2024-05-01T00:00:00.000Z',
+      filePath: '/vault/note-100.md',
+    });
+    expect(secondRecords[49]).toEqual({
+      uuid: 'uuid-149',
+      status: 'synced',
+      syncedAt: '2024-05-01T00:00:00.000Z',
+      filePath: '/vault/note-149.md',
+    });
+  });
+
   it('reports MARK_FAILED for a uuid the server did not return (partial success)', async () => {
     // The server updates every record except uuid-2 (e.g. it no longer exists);
     // an absent uuid in the response means that record stays pending.
-    global.fetch = vi.fn().mockImplementation((_url, init) => {
-      const body = JSON.parse(String(init.body));
-      const records = body.data.attributes.records as { uuid: string }[];
-      const updated = records.filter((record) => record.uuid !== 'uuid-2');
-
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            data: updated.map((record) => ({
-              type: 'records',
-              attributes: { uuid: record.uuid },
-            })),
-            meta: { updated: updated.length },
-          }),
-      });
-    });
+    global.fetch = vi
+      .fn()
+      .mockImplementation((_url, init) =>
+        echoBulkPatch(init, (uuid) => uuid !== 'uuid-2'),
+      );
 
     const result = await markRecordsSynced(items(5));
     expect(result.outcomes).toEqual([
@@ -1369,29 +1390,38 @@ describe('markRecordsSynced', () => {
     expect(result.timedOut).toBe(false);
   });
 
+  it('aligns a per-record failure to its index when it lands in a later chunk', async () => {
+    // uuid-120 sits in the second chunk (records 100-149). The accumulated
+    // outcomes array must map it to index 120 — pins cross-chunk index
+    // alignment, which a uniform-outcome multi-chunk test can't catch.
+    global.fetch = vi
+      .fn()
+      .mockImplementation((_url, init) =>
+        echoBulkPatch(init, (uuid) => uuid !== 'uuid-120'),
+      );
+
+    const result = await markRecordsSynced(items(150));
+    expect(result.outcomes).toHaveLength(150);
+    expect(result.outcomes[120]).toBe(MARK_FAILED);
+    expect(
+      result.outcomes.every((outcome, index) =>
+        index === 120 ? outcome === MARK_FAILED : outcome === MARK_SYNCED,
+      ),
+    ).toBe(true);
+    expect(result.timedOut).toBe(false);
+  });
+
   it('aborts remaining chunks on a timeout and marks the timed-out chunk pending', async () => {
     // First chunk succeeds; the second times out. The third chunk must never be
     // sent — a hung server would otherwise burn the full timeout on every chunk.
-    let call = 0;
+    let callCount = 0;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
-      call += 1;
-      if (call === 2) {
+      callCount += 1;
+      if (callCount === 2) {
         return Promise.reject(new DOMException('timed out', 'TimeoutError'));
       }
 
-      const body = JSON.parse(String(init.body));
-      const records = body.data.attributes.records as { uuid: string }[];
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            data: records.map((record) => ({
-              type: 'records',
-              attributes: { uuid: record.uuid },
-            })),
-            meta: { updated: records.length },
-          }),
-      });
+      return echoBulkPatch(init);
     });
 
     const result = await markRecordsSynced(items(250));
@@ -1408,6 +1438,100 @@ describe('markRecordsSynced', () => {
         .slice(100, 200)
         .every((outcome) => outcome === MARK_TIMED_OUT),
     ).toBe(true);
+  });
+
+  it('does not abort remaining chunks on a plain (non-timeout) failure', async () => {
+    // Chunk 1 rejects with a plain network error; unlike a timeout, that must NOT
+    // stop the run — chunks 2 and 3 still fire and settle their records.
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.reject(new Error('Network error'));
+      }
+
+      return echoBulkPatch(init);
+    });
+
+    const result = await markRecordsSynced(items(250));
+    // All three chunks are attempted — no abort.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result.timedOut).toBe(false);
+    expect(result.outcomes).toHaveLength(250);
+    expect(
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
+    ).toBe(true);
+    expect(
+      result.outcomes.slice(100).every((outcome) => outcome === MARK_SYNCED),
+    ).toBe(true);
+  });
+
+  // markpost's bulk PATCH always returns the records it actually updated as the
+  // `data` collection (server/api/records/index.patch.ts), so an empty `data` is
+  // the authoritative "nothing matched" signal, not a shape to treat as success.
+  // Reporting those records MARK_FAILED (fail loud) is deliberate — it leaves
+  // them pending to retry rather than falsely claiming a sync that didn't happen.
+  it('marks every record MARK_FAILED when the server returns an empty data set', async () => {
+    mockFetch({ data: [], meta: { updated: 0 } });
+    const result = await markRecordsSynced(items(3));
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
+    expect(result.timedOut).toBe(false);
+  });
+
+  // Off-contract safety net: the declared contract always sends `data` as an
+  // array, but a proxy or future shape could send a meta-only body. Fall back to
+  // `meta.updated` rather than crashing or spuriously failing the chunk.
+  it('accepts the chunk via meta.updated when the response omits the data array', async () => {
+    mockFetch({ meta: { updated: 3 } });
+    const result = await markRecordsSynced(items(3));
+    expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED, MARK_SYNCED]);
+    expect(result.timedOut).toBe(false);
+  });
+
+  // `data: null` is off-contract (markpost always sends the updated array), so
+  // with no `meta.updated` to confirm it, fail the chunk loud rather than
+  // guessing success — the records retry next run.
+  it('fails the chunk when data is null and no meta.updated confirms it', async () => {
+    mockFetch({ data: null });
+    const result = await markRecordsSynced(items(2));
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED]);
+  });
+
+  it('does not crash on a non-array data object, falling back to meta.updated', async () => {
+    // A single resource object (the old per-uuid shape) must not throw a
+    // TypeError through the catch; meta.updated confirms the whole chunk.
+    mockFetch({ data: { attributes: { uuid: 'uuid-0' } }, meta: { updated: 2 } });
+    const result = await markRecordsSynced(items(2));
+    expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED]);
+  });
+
+  it('fails the chunk when data is unreadable and meta.updated does not confirm all', async () => {
+    // No data array and a short/absent updated count — fail loud so the records
+    // retry next run rather than being falsely reported synced.
+    mockFetch({ meta: { updated: 1 } });
+    const result = await markRecordsSynced(items(3));
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
+  });
+
+  it('aborts remaining chunks on a systemic failure (e.g. 401) without a timeout flag', async () => {
+    // A 401 (or any auth/rate-limit/5xx) will recur for every remaining chunk,
+    // so the run backs off after the first rather than hammering the server.
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({}),
+    });
+
+    const result = await markRecordsSynced(items(250));
+    // Only the first chunk is attempted — the other two are never sent.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // A systemic abort is not a timeout, so the caller uses the failure wording.
+    expect(result.timedOut).toBe(false);
+    // The attempted chunk is all pending; the unsent chunks have no outcome.
+    expect(result.outcomes).toHaveLength(100);
+    expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
+      true,
+    );
   });
 
   it('marks a whole chunk MARK_FAILED when the request rejects with an error response', async () => {
