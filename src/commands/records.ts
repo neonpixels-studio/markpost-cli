@@ -38,7 +38,10 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
     // not after dragging the user through (or blocking a non-TTY run on) the
     // config prompts. Mirrors the subcommand validation above.
     const { filters } = parseListArgs(args);
-    await checkConfig(json);
+    if (!(await checkConfig(json))) {
+      return;
+    }
+
     await listRecords(filters, json);
   } catch (error) {
     // A systemic auth/5xx failure now re-throws from fetchAllRecords (issue

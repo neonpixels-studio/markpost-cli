@@ -62,6 +62,7 @@ const restoreEnv = (name: string, original: string | undefined): void => {
 describe('checkConfig', () => {
   const originalApiToken = process.env.API_TOKEN;
   const originalOutputDirectory = process.env.OUTPUT_DIRECTORY;
+  const originalExitCode = process.exitCode;
 
   let exitSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
@@ -69,7 +70,14 @@ describe('checkConfig', () => {
   beforeEach(() => {
     delete process.env.API_TOKEN;
     delete process.env.OUTPUT_DIRECTORY;
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    // The fix never calls process.exit anymore — it sets process.exitCode so
+    // the async stderr diagnostic can flush on a pipe before exit. Spy on
+    // process.exit purely to prove it is not called, and reset exitCode so
+    // each test observes only what checkConfig sets.
+    process.exitCode = 0;
+    exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation(() => undefined as never);
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
@@ -78,6 +86,7 @@ describe('checkConfig', () => {
     // string "undefined" (truthy), leaking a bogus token to the rest of the run.
     restoreEnv('API_TOKEN', originalApiToken);
     restoreEnv('OUTPUT_DIRECTORY', originalOutputDirectory);
+    process.exitCode = originalExitCode;
     exitSpy.mockRestore();
     errorSpy.mockRestore();
     mockGet.mockReset();
@@ -85,11 +94,12 @@ describe('checkConfig', () => {
     vi.mocked(input).mockReset();
   });
 
-  it('returns without prompting when both configs are stored', async () => {
+  it('resolves true without prompting when both configs are stored', async () => {
     mockGet.mockReturnValue('stored-value');
-    await checkConfig();
+    await expect(checkConfig()).resolves.toBe(true);
     expect(input).not.toHaveBeenCalled();
     expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
   });
 
   it('sets both values from env vars without prompting when both are set', async () => {
@@ -97,7 +107,7 @@ describe('checkConfig', () => {
     process.env.API_TOKEN = 'env-token';
     process.env.OUTPUT_DIRECTORY = '/env/dir';
 
-    await checkConfig();
+    await expect(checkConfig()).resolves.toBe(true);
 
     expect(mockSet).toHaveBeenCalledWith('apiToken', 'env-token');
     expect(mockSet).toHaveBeenCalledWith('outputDirectory', '/env/dir');
@@ -109,7 +119,7 @@ describe('checkConfig', () => {
     process.env.API_TOKEN = 'env-token';
     vi.mocked(input).mockResolvedValue('/prompted/dir');
 
-    await checkConfig();
+    await expect(checkConfig()).resolves.toBe(true);
 
     expect(mockSet).toHaveBeenCalledWith('apiToken', 'env-token');
     expect(input).toHaveBeenCalledTimes(1);
@@ -120,13 +130,34 @@ describe('checkConfig', () => {
 
   it('prompts for both values in order when neither is set', async () => {
     mockGet.mockReturnValue(undefined);
-    vi.mocked(input).mockResolvedValueOnce('my-token').mockResolvedValueOnce('/my/dir');
+    vi.mocked(input)
+      .mockResolvedValueOnce('my-token')
+      .mockResolvedValueOnce('/my/dir');
 
-    await checkConfig();
+    await expect(checkConfig()).resolves.toBe(true);
 
     expect(input).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(input).mock.calls[0][0]).toEqual({ message: 'Sync API Token' });
-    expect(vi.mocked(input).mock.calls[1][0]).toEqual({ message: 'Output Directory' });
+    expect(vi.mocked(input).mock.calls[0][0]).toEqual({
+      message: 'Sync API Token',
+    });
+    expect(vi.mocked(input).mock.calls[1][0]).toEqual({
+      message: 'Output Directory',
+    });
+  });
+
+  it('stops at the first field when its prompt is empty, never prompting the second', async () => {
+    mockGet.mockReturnValue(undefined);
+    vi.mocked(input).mockResolvedValue('');
+
+    await expect(checkConfig()).resolves.toBe(false);
+
+    // Only the token was prompted: the false short-circuit kept the second
+    // field (Output Directory) from ever rendering a prompt.
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(input).mock.calls[0][0]).toEqual({
+      message: 'Sync API Token',
+    });
+    expect(process.exitCode).toBe(1);
   });
 
   describe('--json mode', () => {
@@ -134,31 +165,27 @@ describe('checkConfig', () => {
 
     beforeEach(() => {
       logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      // Model process.exit realistically: in production it terminates, so the
-      // second field is never reached. Throwing here reproduces that
-      // short-circuit and lets the test assert exactly one diagnostic is
-      // emitted (the guarantee `--json | jq` depends on).
-      exitSpy.mockImplementation(() => {
-        throw new Error('process.exit');
-      });
     });
 
     afterEach(() => {
       logSpy.mockRestore();
     });
 
-    it('never prompts when a value is missing', async () => {
+    it('never prompts when a value is missing and resolves false', async () => {
       mockGet.mockReturnValue(undefined);
 
-      await expect(checkConfig(true)).rejects.toThrow('process.exit');
+      await expect(checkConfig(true)).resolves.toBe(false);
 
       expect(input).not.toHaveBeenCalled();
     });
 
-    it('writes nothing to stdout and emits one structured error to stderr, exiting non-zero', async () => {
+    it('writes nothing to stdout and emits one structured error to stderr, flagging a non-zero exit without calling process.exit', async () => {
       mockGet.mockReturnValue(undefined);
 
-      await expect(checkConfig(true)).rejects.toThrow('process.exit');
+      // The return value is the real short-circuit now — no reliance on
+      // process.exit terminating — so the second field is never reached and
+      // exactly one diagnostic is emitted, the guarantee `--json | jq` needs.
+      await expect(checkConfig(true)).resolves.toBe(false);
 
       // stdout is the data channel `--json | jq` reads: it must stay empty.
       expect(logSpy).not.toHaveBeenCalled();
@@ -171,7 +198,10 @@ describe('checkConfig', () => {
         missing: 'apiToken',
       });
       expect(parsed.message).toContain('API_TOKEN');
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      // The diagnostic must survive on a pipe: exit via exitCode, never a
+      // non-flushing process.exit.
+      expect(process.exitCode).toBe(1);
+      expect(exitSpy).not.toHaveBeenCalled();
     });
 
     it('reports the outputDirectory field when only the token is stored', async () => {
@@ -179,7 +209,7 @@ describe('checkConfig', () => {
         key === 'apiToken' ? 'stored-token' : undefined,
       );
 
-      await expect(checkConfig(true)).rejects.toThrow('process.exit');
+      await expect(checkConfig(true)).resolves.toBe(false);
 
       const stderr = errorSpy.mock.calls[0][0] as string;
       const parsed = JSON.parse(stderr);
@@ -188,6 +218,8 @@ describe('checkConfig', () => {
         missing: 'outputDirectory',
       });
       expect(parsed.message).toContain('OUTPUT_DIRECTORY');
+      expect(process.exitCode).toBe(1);
+      expect(exitSpy).not.toHaveBeenCalled();
     });
 
     it('still resolves values from env vars without prompting or erroring', async () => {
@@ -195,25 +227,27 @@ describe('checkConfig', () => {
       process.env.API_TOKEN = 'env-token';
       process.env.OUTPUT_DIRECTORY = '/env/dir';
 
-      await checkConfig(true);
+      await expect(checkConfig(true)).resolves.toBe(true);
 
       expect(input).not.toHaveBeenCalled();
       expect(logSpy).not.toHaveBeenCalled();
       expect(errorSpy).not.toHaveBeenCalled();
       expect(exitSpy).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
       expect(mockSet).toHaveBeenCalledWith('apiToken', 'env-token');
       expect(mockSet).toHaveBeenCalledWith('outputDirectory', '/env/dir');
     });
 
-    it('returns silently when both values are already stored', async () => {
+    it('resolves true silently when both values are already stored', async () => {
       mockGet.mockReturnValue('stored-value');
 
-      await checkConfig(true);
+      await expect(checkConfig(true)).resolves.toBe(true);
 
       expect(input).not.toHaveBeenCalled();
       expect(logSpy).not.toHaveBeenCalled();
       expect(errorSpy).not.toHaveBeenCalled();
       expect(exitSpy).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
     });
   });
 
@@ -238,13 +272,16 @@ describe('checkConfig', () => {
       expect(exitSpy).not.toHaveBeenCalled();
     });
 
-    it('logs error and exits when token prompt is empty', async () => {
+    it('logs error and flags a non-zero exit when token prompt is empty', async () => {
       vi.mocked(input).mockResolvedValue('');
-      await checkConfig();
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Sync API Token is required!'));
-      expect(exitSpy).toHaveBeenCalledWith(1);
-      // The early return after exit must keep an empty answer out of the store,
-      // even when process.exit is stubbed non-terminating (as it is here).
+      await expect(checkConfig()).resolves.toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Sync API Token is required!'),
+      );
+      expect(process.exitCode).toBe(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+      // The false return keeps an empty answer out of the store without relying
+      // on process.exit to terminate mid-function.
       expect(mockSet).not.toHaveBeenCalledWith('apiToken', '');
     });
   });
@@ -283,13 +320,16 @@ describe('checkConfig', () => {
       expect(exitSpy).not.toHaveBeenCalled();
     });
 
-    it('logs error and exits when directory prompt is empty', async () => {
+    it('logs error and flags a non-zero exit when directory prompt is empty', async () => {
       vi.mocked(input).mockResolvedValue('');
-      await checkConfig();
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Output Directory is required!'));
-      expect(exitSpy).toHaveBeenCalledWith(1);
-      // The early return after exit must keep an empty answer out of the store,
-      // even when process.exit is stubbed non-terminating (as it is here).
+      await expect(checkConfig()).resolves.toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Output Directory is required!'),
+      );
+      expect(process.exitCode).toBe(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+      // The false return keeps an empty answer out of the store without relying
+      // on process.exit to terminate mid-function.
       expect(mockSet).not.toHaveBeenCalledWith('outputDirectory', '');
     });
   });

@@ -144,7 +144,9 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    await checkConfig();
+    if (!(await checkConfig())) {
+      return;
+    }
 
     const { files, missing, skipped } = resolveMarkdownInputs(paths);
 

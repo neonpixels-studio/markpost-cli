@@ -719,7 +719,12 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
   let autoSync = false;
 
   try {
-    await checkConfig();
+    // A missing-config exit must never arm the auto-sync daemon, so return a
+    // literal false rather than the `autoSync` initializer that merely happens
+    // to still be false here.
+    if (!(await checkConfig())) {
+      return false;
+    }
 
     // Read settings up front so both write and delete honor the user's
     // markpost preferences. A failed read (`ok: false`) still writes (suffix

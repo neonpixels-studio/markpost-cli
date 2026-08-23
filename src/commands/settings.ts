@@ -289,7 +289,10 @@ export const runSettingsCommand = async (args: string[]): Promise<void> => {
   }
 
   try {
-    await checkConfig();
+    if (!(await checkConfig())) {
+      return;
+    }
+
     await handler(rest);
   } catch (error) {
     console.error(chalk.redBright(error));

@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Record } from '@/types/records.types.js';
 
-vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('@/libs/config.js', () => ({
+  checkConfig: vi.fn().mockResolvedValue(true),
+}));
 vi.mock('@/libs/records.js', () => ({ createRecord: vi.fn() }));
 vi.mock('@/libs/markdown.js', () => ({ readMarkdown: vi.fn() }));
 vi.mock('@/libs/files.js', () => ({ resolveMarkdownInputs: vi.fn() }));
@@ -107,6 +109,25 @@ describe('runPushCommand', () => {
       expect.stringContaining('Pushed "Test Title" (abc-123)'),
     );
     expect(process.exitCode).toBeUndefined();
+  });
+
+  // checkConfig signals failure by resolving false rather than terminating the
+  // process, so push must short-circuit before resolving inputs or creating a
+  // record.
+  it('does not resolve inputs or create a record when checkConfig resolves false', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    vi.mocked(checkConfig).mockResolvedValueOnce(false);
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('@/libs/records.js');
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['./notes/test-title.md']);
+
+    expect(resolveMarkdownInputs).not.toHaveBeenCalled();
+    expect(createRecord).not.toHaveBeenCalled();
+    // checkConfig owns the diagnostic on the false path, so push emits nothing
+    // — which also distinguishes a false return from a thrown checkConfig.
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('pushes every file when given multiple', async () => {

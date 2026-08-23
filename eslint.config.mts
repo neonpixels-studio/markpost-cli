@@ -44,4 +44,24 @@ export default tseslint.config(
       ],
     },
   },
+  // `checkConfig` resolves false (having emitted its own diagnostic and set a
+  // non-zero exit code) when config is missing, instead of terminating the
+  // process. A bare `await checkConfig()` discards that signal and runs
+  // unauthenticated — in `--json` mode it emits `config_required` and then
+  // still hits the API, breaking the one-diagnostic contract. Force every call
+  // site to guard on the result.
+  {
+    files: ['src/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "ExpressionStatement > AwaitExpression > CallExpression[callee.name='checkConfig']",
+          message:
+            'checkConfig resolves false when config is missing — guard on it (`if (!(await checkConfig())) { return; }`) instead of discarding the result.',
+        },
+      ],
+    },
+  },
 );
