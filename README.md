@@ -115,7 +115,7 @@ inspect or change those values afterwards without hand-editing the file:
 markpost config get                      # show all stored config
 markpost config get apiToken             # show one value
 markpost config set apiToken <token>     # change the stored API token
-markpost config set outputDirectory <path>   # a leading ~, $HOME, or ${HOME} is expanded when writing
+markpost config set outputDirectory '~/notes'  # quote it: a leading ~, $HOME, or ${HOME} is expanded when writing
 markpost config path                     # print the config file location
 ```
 
@@ -152,7 +152,7 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 |---|---|
 | `API_TOKEN` | API token for sync.danholloran.me |
 | `BASE_URL` | Base URL of the sync API (e.g. `http://localhost:8888` for local dev) |
-| `OUTPUT_DIRECTORY` | Path to the directory where synced files are written; a leading `~`, `$HOME`, or `${HOME}` is expanded to your home directory |
+| `OUTPUT_DIRECTORY` | Path to the directory where synced files are written; a leading `~`, `$HOME`, or `${HOME}` is expanded to your home directory. A relative path is resolved against the current working directory, so prefer an absolute path or a `~` prefix for scheduled runs |
 
 ### Scripts
 

@@ -31,10 +31,10 @@ const isLeadingHomePrefix = (inputPath: string, prefix: string): boolean => {
 // Expand a leading home reference (`~`, `~/…`, `$HOME`, `${HOME}`) to an
 // absolute path under the home directory. `resolveHomeDirectory` is injected
 // (the caller passes `os.homedir`) and called *only* when a prefix actually
-// matched, so a path with no home reference never touches the environment — a
-// fully absolute or plainly relative value is returned untouched even in a
-// home-less context (bare container, CI) where `os.homedir()` would throw. A
-// path carrying only a mid-string tilde is likewise returned unchanged.
+// matched, so a path with no home reference never depends on the environment at
+// all — a fully absolute, plainly relative, or mid-string-tilde value is
+// returned untouched. os.homedir() falls back to the passwd entry when `$HOME`
+// is unset, so the empty-string guard below is defensive rather than routine.
 export const expandHomeDirectory = (
   inputPath: string,
   resolveHomeDirectory: () => string,
