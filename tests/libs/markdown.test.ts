@@ -1466,6 +1466,16 @@ describe('buildWritePreview', () => {
     });
   });
 
+  // The dry-run seam must expand the home reference too, so the previewed path
+  // matches where a real sync would write instead of a literal `~/` folder.
+  it('expands a leading ~ in the previewed output directory', () => {
+    process.env.OUTPUT_DIRECTORY = '~/notes';
+
+    const [preview] = buildWritePreview([mockRecord], 'suffix');
+
+    expect(preview.path).toBe(resolve(homedir(), 'notes', 'test-title.md'));
+  });
+
   // Two records slugging to the same base must preview distinct suffixed
   // targets, exactly as the suffix strategy would land them.
   it('suffixes a within-batch collision without touching disk', () => {
