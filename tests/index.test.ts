@@ -7,7 +7,9 @@ import { SettingsReadResult } from '@/libs/settings.js';
 import { MARK_FAILED, MARK_SYNCED, MARK_TIMED_OUT } from '@/libs/records.js';
 import type { WrittenRecordState } from '@/libs/markdown.js';
 
-vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('@/libs/config.js', () => ({
+  checkConfig: vi.fn().mockResolvedValue(true),
+}));
 // Keep the real module's exports (notably the MARK_* outcome constants and
 // PENDING_STATUS) so the tests compare against the same literals production
 // code does; only the network-touching functions are stubbed.
@@ -389,6 +391,27 @@ describe('index', () => {
     // (regression guard for the `-2`/`-3` duplicate bug).
     expect(fetchAllRecords).toHaveBeenCalledWith({ status: 'pending' });
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+  });
+
+  // checkConfig now signals failure by resolving false rather than terminating
+  // the process, so the sync must abort before reading settings or fetching
+  // records instead of falling through with unconfigured credentials.
+  it('aborts the sync without fetching when checkConfig resolves false', async () => {
+    process.argv = ['node', 'index.js', 'sync'];
+    const { checkConfig } = await import('@/libs/config.js');
+    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    // Once so the false result can't leak past this test's single sync call
+    // (beforeEach clears call history, not implementations).
+    vi.mocked(checkConfig).mockResolvedValueOnce(false);
+
+    await import('@/index.js');
+
+    expect(fetchSettings).not.toHaveBeenCalled();
+    expect(fetchAllRecords).not.toHaveBeenCalled();
   });
 
   it('fetches all records and writes each as markdown', async () => {

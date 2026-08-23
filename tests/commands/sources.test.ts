@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CreatedSource, Source } from '@/types/sources.types.js';
 
-vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('@/libs/config.js', () => ({
+  checkConfig: vi.fn().mockResolvedValue(true),
+}));
 vi.mock('@/libs/sources.js', () => ({
   fetchSources: vi.fn(),
   createSource: vi.fn(),
@@ -738,13 +740,33 @@ describe('runSourcesCommand', () => {
 
   it('catches and logs unexpected errors (e.g. checkConfig failing)', async () => {
     const { checkConfig } = await import('@/libs/config.js');
-    vi.mocked(checkConfig).mockRejectedValue(new Error('boom'));
+    // Once so the rejection can't leak into later tests — clearAllMocks clears
+    // call history but not implementations, which would otherwise make the
+    // fetch_failed test below throw at checkConfig instead of at the fetch.
+    vi.mocked(checkConfig).mockRejectedValueOnce(new Error('boom'));
     const { runSourcesCommand } = await import('@/commands/sources.js');
 
     await runSourcesCommand(['list']);
 
     expect(console.error).toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+  });
+
+  // checkConfig signals failure by resolving false rather than terminating the
+  // process, so the command must short-circuit before dispatching to the
+  // handler that would hit the network.
+  it('does not reach the handler when checkConfig resolves false', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    vi.mocked(checkConfig).mockResolvedValueOnce(false);
+    const { fetchSources } = await import('@/libs/sources.js');
+    const { runSourcesCommand } = await import('@/commands/sources.js');
+
+    await runSourcesCommand(['list']);
+
+    expect(fetchSources).not.toHaveBeenCalled();
+    // checkConfig owns the diagnostic on the false path, so the command emits
+    // nothing — distinguishing a false return from a thrown checkConfig.
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   // The unified --json failure contract: rejecting --json on a non-list

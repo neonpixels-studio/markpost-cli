@@ -33,12 +33,16 @@ const secondRecord: Record = {
 };
 
 describe('runRecordsCommand', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
     vi.resetAllMocks();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
     process.exitCode = undefined;
+    // resetAllMocks strips the default implementation, so re-pin checkConfig to
+    // a passing resolve; failure-path tests override with mockRejectedValue.
+    const { checkConfig } = await import('@/libs/config.js');
+    vi.mocked(checkConfig).mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -70,6 +74,22 @@ describe('runRecordsCommand', () => {
 
     expect(fetchAllRecords).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalled();
+  });
+
+  // checkConfig now signals failure by resolving false (diagnostic already
+  // emitted, exitCode set) rather than throwing, so list must not run.
+  it('never dispatches to list when checkConfig resolves false', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    vi.mocked(checkConfig).mockResolvedValueOnce(false);
+    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { runRecordsCommand } = await import('@/commands/records.js');
+
+    await runRecordsCommand(['list']);
+
+    expect(fetchAllRecords).not.toHaveBeenCalled();
+    // checkConfig owns the diagnostic on the false path, so the command emits
+    // nothing — distinguishing a false return from a thrown checkConfig.
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('errors to stderr and exits 1 when no subcommand is given', async () => {

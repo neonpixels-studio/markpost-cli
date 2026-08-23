@@ -72,58 +72,79 @@ const OUTPUT_DIRECTORY_FIELD: ConfigField = {
   promptMessage: 'Output Directory',
 };
 
+// Every field checkConfig requires, in resolution order. Kept as data (like
+// CONFIG_KEYS) so the resolver loops instead of duplicating a guard per field.
+const REQUIRED_CONFIG_FIELDS: readonly ConfigField[] = [
+  API_TOKEN_FIELD,
+  OUTPUT_DIRECTORY_FIELD,
+];
+
 // In --json mode an interactive prompt would render to the terminal and a
 // piped consumer can't answer it anyway. So fail loud: write a structured
 // diagnostic to stderr (not stdout — stdout is the data channel `--json | jq`
 // reads, and a valid-JSON error there would be silently parsed as data),
-// leaving stdout empty, then exit non-zero.
+// leaving stdout empty, then flag a non-zero exit. Set `process.exitCode`
+// rather than calling `process.exit(1)`: stderr writes are async on a pipe and
+// `process.exit` tears the process down without flushing them, so on the exact
+// piped path this diagnostic exists for it could be dropped. Setting the exit
+// code lets the process drain stderr and exit non-zero on its own — matching
+// the repo-wide `process.exitCode = 1` convention (see errors.ts, usage.ts).
 const failConfigRequiredAsJson = (field: ConfigField): void => {
+  process.exitCode = 1;
   printJsonError(
     JSON_ERROR_CONFIG_REQUIRED,
     `${field.key} is not configured. In --json mode the CLI will not prompt; set the ${field.envVar} environment variable or run \`markpost config set ${field.key} <value>\` before retrying.`,
     { missing: field.key },
   );
-  process.exit(1);
 };
 
+// Resolves one field, returning whether the caller may proceed: `true` when the
+// value is present (stored, from env, or freshly prompted), `false` when it
+// could not be resolved and a diagnostic was emitted with a non-zero exit code
+// set. Callers must stop on `false` — without a terminating `process.exit`, the
+// short-circuit now rides on this return value instead of process teardown.
 const ensureConfigValue = async (
   field: ConfigField,
   json: boolean,
-): Promise<void> => {
+): Promise<boolean> => {
   if (getConfigValue(field.key)) {
-    return;
+    return true;
   }
 
   const fromEnv = process.env[field.envVar];
 
   if (fromEnv) {
     setConfigValue(field.key, fromEnv);
-    return;
+    return true;
   }
 
   if (json) {
-    // Explicit return so the short-circuit doesn't rely on process.exit being
-    // terminating — without it, a non-terminating exit would fall through to
-    // the interactive prompt this branch exists to avoid.
     failConfigRequiredAsJson(field);
-    return;
+    return false;
   }
 
   const value = await input({ message: field.promptMessage });
 
   if (!value) {
+    process.exitCode = 1;
     console.error(chalk.redBright(`${field.promptMessage} is required!`));
-    // Explicit return so the write below stays unreachable even if process.exit
-    // is stubbed/patched (as it is in tests) and doesn't terminate — matching
-    // the --json branch's invariant, without which an empty answer persists ''.
-    process.exit(1);
-    return;
+    return false;
   }
 
   setConfigValue(field.key, value);
+  return true;
 };
 
-export const checkConfig = async (json = false): Promise<void> => {
-  await ensureConfigValue(API_TOKEN_FIELD, json);
-  await ensureConfigValue(OUTPUT_DIRECTORY_FIELD, json);
+// Resolves every required config field in order, stopping at the first that
+// can't be resolved. Returns `true` only when all fields are present; a `false`
+// return means a diagnostic was emitted and a non-zero exit code set, so the
+// caller must return without doing work that needs the config.
+export const checkConfig = async (json = false): Promise<boolean> => {
+  for (const field of REQUIRED_CONFIG_FIELDS) {
+    if (!(await ensureConfigValue(field, json))) {
+      return false;
+    }
+  }
+
+  return true;
 };

@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Record } from '@/types/records.types.js';
 
-vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('@/libs/config.js', () => ({
+  checkConfig: vi.fn().mockResolvedValue(true),
+}));
 vi.mock('@/libs/records.js', () => ({ fetchRecord: vi.fn() }));
 vi.mock('chalk', () => ({
   default: {
@@ -322,7 +324,9 @@ describe('runGetCommand', () => {
 
   it('catches and logs an error when checkConfig throws', async () => {
     const { checkConfig } = await import('@/libs/config.js');
-    vi.mocked(checkConfig).mockRejectedValue(new Error('boom'));
+    // Once so the rejection can't leak into later tests via clearAllMocks
+    // (which clears call history but not implementations).
+    vi.mocked(checkConfig).mockRejectedValueOnce(new Error('boom'));
     const { runGetCommand } = await import('@/commands/get.js');
 
     await runGetCommand(['abc-123']);
@@ -331,15 +335,38 @@ describe('runGetCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // checkConfig now signals failure by resolving false (it set exitCode and
+  // emitted its own diagnostic) rather than terminating the process, so the
+  // command must short-circuit before fetching or printing anything — and emit
+  // nothing itself, since checkConfig already owns the diagnostic on this path.
+  it('does not fetch or print when checkConfig resolves false', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    // Once so the false result can't leak past this test's single call
+    // (clearAllMocks clears call history, not implementations).
+    vi.mocked(checkConfig).mockResolvedValueOnce(false);
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    expect(fetchRecord).not.toHaveBeenCalled();
+    expect(console.log).not.toHaveBeenCalled();
+    // Distinguishes the false-return path from a throw: a rejected checkConfig
+    // would route through the catch to console.error, so asserting silence
+    // pins that the command returned rather than threw.
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
   // The unified --json failure contract: an argument error, a not-found fetch,
   // and a thrown fetch error all surface as one parseable { error, message }
   // shape on stderr (never stdout) so a script can parse any failure uniformly.
   describe('--json failure contract', () => {
     // clearAllMocks (outer beforeEach) keeps mock implementations, so a prior
-    // test's checkConfig rejection would leak in — pin it back to a resolve.
+    // test's checkConfig rejection would leak in — pin it back to a passing
+    // resolve (true) so the command proceeds to the fetch path under test.
     beforeEach(async () => {
       const { checkConfig } = await import('@/libs/config.js');
-      vi.mocked(checkConfig).mockResolvedValue(undefined);
+      vi.mocked(checkConfig).mockResolvedValue(true);
     });
 
     it('emits a usage-coded JSON error on stderr when no uuid is given', async () => {

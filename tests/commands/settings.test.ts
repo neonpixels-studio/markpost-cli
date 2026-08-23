@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UserSettings } from '@/types/settings.types.js';
 
-vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('@/libs/config.js', () => ({
+  checkConfig: vi.fn().mockResolvedValue(true),
+}));
 vi.mock('@/libs/settings.js', async (importOriginal) => {
   // Keep the real `resolveSyncSettings` (pure normalizer the command reuses to
   // print) and only stub the two network seams, so the tests exercise the real
@@ -85,6 +87,23 @@ describe('runSettingsCommand', () => {
 
     expect(fetchSettings).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+  });
+
+  // checkConfig signals failure by resolving false (having emitted its own
+  // diagnostic and set exitCode) rather than throwing, so the handler must not
+  // run its API call.
+  it('gates the handler on config: a false config check runs no API call', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    vi.mocked(checkConfig).mockResolvedValueOnce(false);
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSettingsCommand } = await import('@/commands/settings.js');
+
+    await runSettingsCommand(['get']);
+
+    expect(fetchSettings).not.toHaveBeenCalled();
+    // checkConfig owns the diagnostic on the false path, so the command emits
+    // nothing — distinguishing a false return from a thrown checkConfig.
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('errors to stderr and exits 1 when no subcommand is given', async () => {
