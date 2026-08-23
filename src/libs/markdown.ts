@@ -16,8 +16,10 @@ import {
   sep,
 } from 'node:path';
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import slugify from '@sindresorhus/slugify';
 import { config } from '@/libs/config.js';
+import { expandHomeDirectory } from '@/libs/paths.js';
 import {
   buildRecordDocument,
   stripFrontmatterDocument,
@@ -65,10 +67,20 @@ const hashContent = (content: string): string => {
   return createHash(CONTENT_HASH_ALGORITHM).update(content).digest('hex');
 };
 
+// The configured output directory can carry a leading `~`/`$HOME` that no shell
+// expanded (a quoted `config set` value, or the interactive prompt), which
+// existsSync/mkdirSync/resolve would otherwise treat as a literal folder in the
+// cwd. Expand it here — the one read seam both ensureOutputDirectory and
+// requireOutputDirectory go through — so every writer sees the real path.
 const getOutputDirectory = () => {
-  return (
-    process.env.OUTPUT_DIRECTORY ?? (config.get('outputDirectory') as string)
-  );
+  const configured =
+    process.env.OUTPUT_DIRECTORY ?? (config.get('outputDirectory') as string);
+
+  if (!configured) {
+    return configured;
+  }
+
+  return expandHomeDirectory(configured, homedir());
 };
 
 // Slugify the title so it is always a single, safe path segment. Falls back

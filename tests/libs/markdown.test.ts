@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import slugify from '@sindresorhus/slugify';
@@ -171,6 +172,18 @@ describe('writeMarkdown', () => {
 
     expect(writeFileSync).toHaveBeenCalledWith(
       resolve(outputDirectory, 'test-title.md'),
+      mockRecord.content,
+      EXCLUSIVE_WRITE_OPTIONS,
+    );
+  });
+
+  it('expands a leading ~ in the configured output directory before writing', () => {
+    process.env.OUTPUT_DIRECTORY = '~/notes';
+
+    writeMarkdown(mockRecord);
+
+    expect(writeFileSync).toHaveBeenCalledWith(
+      resolve(homedir(), 'notes', 'test-title.md'),
       mockRecord.content,
       EXCLUSIVE_WRITE_OPTIONS,
     );
