@@ -80,7 +80,7 @@ const getOutputDirectory = () => {
     return configured;
   }
 
-  return expandHomeDirectory(configured, homedir());
+  return expandHomeDirectory(configured, homedir);
 };
 
 // Slugify the title so it is always a single, safe path segment. Falls back
