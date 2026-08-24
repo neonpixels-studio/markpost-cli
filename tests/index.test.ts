@@ -2096,7 +2096,11 @@ describe('index', () => {
   ): string | null => {
     const filePath = `/mock/output/${record.uuid}.md`;
     snapshots.push(new Map(writtenState));
-    writtenState?.set(record.uuid, { path: filePath, contentHash: 'hash' });
+    writtenState?.set(record.uuid, {
+      path: filePath,
+      contentHash: 'hash',
+      identity: { deviceId: 1n, inode: 1n },
+    });
     return filePath;
   };
 
