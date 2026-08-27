@@ -219,12 +219,26 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
 
     const { files, missing, skipped } = resolveMarkdownInputs(paths);
 
+    // Sanitize both unresolved-input lines: a `skipped` path is discovered by
+    // walking a directory (resolveMarkdownInputs), so it can carry a filename
+    // the user never typed and doesn't control — an escape sequence in that name
+    // must not reach the terminal live. `missing` echoes a user-typed glob (lower
+    // risk), but keeping both branches identical stops a reader having to work
+    // out which one is trusted.
     for (const input of missing) {
-      console.error(chalk.redBright(`No markdown files found for "${input}".`));
+      console.error(
+        chalk.redBright(
+          sanitizeForTerminal(`No markdown files found for "${input}".`),
+        ),
+      );
     }
 
     for (const path of skipped) {
-      console.error(chalk.redBright(`Skipped unreadable path "${path}".`));
+      console.error(
+        chalk.redBright(
+          sanitizeForTerminal(`Skipped unreadable path "${path}".`),
+        ),
+      );
     }
 
     if (files.length === 0) {

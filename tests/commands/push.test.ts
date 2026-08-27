@@ -645,6 +645,27 @@ describe('runPushCommand', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  // A dry run walks directories, so a previewed path can carry a filename the
+  // user never typed; a control character in it must be stripped before print.
+  it('strips control characters from a previewed path', async () => {
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['notes/\u001b[2Jgotcha.md'],
+      missing: [],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['notes', '--dry-run']);
+
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('notes/ [2Jgotcha.md'),
+    );
+    expect(console.log).not.toHaveBeenCalledWith(
+      expect.stringContaining('\u001b'),
+    );
+  });
+
   it('excludes the --dry-run flag from the resolved input paths', async () => {
     const { resolveMarkdownInputs } = await import('@/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
