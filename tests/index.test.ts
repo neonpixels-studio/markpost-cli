@@ -4,7 +4,12 @@ import type { Spinner } from 'yocto-spinner';
 import { Record } from '@/types/records.types.js';
 import { UserSettings, ConflictStrategy } from '@/types/settings.types.js';
 import { SettingsReadResult } from '@/libs/settings.js';
-import { MARK_FAILED, MARK_SYNCED, MARK_TIMED_OUT } from '@/libs/records.js';
+import {
+  MARK_ABORTED,
+  MARK_FAILED,
+  MARK_SYNCED,
+  MARK_TIMED_OUT,
+} from '@/libs/records.js';
 import type { WrittenRecordState } from '@/libs/markdown.js';
 
 vi.mock('@/libs/config.js', () => ({
@@ -1350,6 +1355,587 @@ describe('index', () => {
     );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Marked 14 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('aborts the run when a whole batch is rejected as a request-shape 4xx — the next batch is never attempted', async () => {
+    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Every PATCH is rejected the same way — the request shape itself is wrong (a
+    // malformed body or a PATCH contract markpost tightened). Batch 1 (10) all
+    // abort, then the confirmation probe of the LAST record (uuid-14) also aborts,
+    // confirming the shape is wrong — so uuid-10..13 are never attempted.
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_ABORTED);
+
+    await import('@/index.js');
+
+    // 10 in the first batch plus the one probe of the last record (uuid-14) = 11.
+    expect(markRecordSynced).toHaveBeenCalledTimes(11);
+    expect(markRecordSynced).not.toHaveBeenCalledWith(
+      'uuid-11',
+      expect.anything(),
+    );
+    // All 15 stay pending: 10 rejected, the probed last one, and 4 never attempted.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('15 record(s) still pending'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    // The abort headline must not read as a timeout or a plain scatter of
+    // failures — guards the reason wiring.
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-0 -> /mock/output/uuid-0.md'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-14 -> /mock/output/uuid-14.md'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not abort when only one un-attempted record remains after a rejected batch', async () => {
+    const records: Record[] = Array.from({ length: 11 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // 11 records all reject: batch 1 (uuid-0..9) triggers a probe of the last
+    // record (uuid-10) — but uuid-10 IS the only record left, so a confirmed abort
+    // would save no work. It must NOT abort; the loop marks uuid-10 in its own
+    // batch (an idempotent repeat of the probe) and reports plain failures.
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_ABORTED);
+
+    await import('@/index.js');
+
+    // 10 (batch 1) + 1 probe (uuid-10) + 1 (uuid-10's own batch) = 12.
+    expect(markRecordSynced).toHaveBeenCalledTimes(12);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 11 record(s) synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not claim an abort when the whole (only) batch is rejected and nothing is left to probe', async () => {
+    const records: Record[] = Array.from({ length: 10 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Exactly one batch (10 records), all rejected — the whole pending set was
+    // already attempted, so there is no later record to probe and no work an
+    // abort could save. Reporting an abort here would assert a request-shape
+    // cause we never confirmed, so it must fall back to plain per-record failures.
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_ABORTED);
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(10);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 10 record(s) synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('aborts on a whole request-shape 4xx batch that lands after an earlier transient-failure batch', async () => {
+    const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Batch 1 (uuid-0..9) all fail transiently (nothing synced), batch 2
+    // (uuid-10..19) is wholly request-shape rejected → probe the last record
+    // (uuid-24), which also aborts → confirmed, so uuid-20..23 are never
+    // attempted. Proves the abort works in a later batch, not just the first, and
+    // uses its headline (not the plain-failure one) despite the earlier failures.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
+      const index = Number(uuid.replace('uuid-', ''));
+      return Promise.resolve(index < 10 ? MARK_FAILED : MARK_ABORTED);
+    });
+
+    await import('@/index.js');
+
+    // 10 transient + 10 rejected + the one probe of the last record (uuid-24) = 21.
+    expect(markRecordSynced).toHaveBeenCalledTimes(21);
+    expect(markRecordSynced).not.toHaveBeenCalledWith(
+      'uuid-20',
+      expect.anything(),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('25 record(s) still pending'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not strand valid records behind a contiguous block of per-record 4xx — the probe rescues them', async () => {
+    const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // The first 10 pending records each 4xx for their OWN bad value (a contiguous
+    // block, not a wrong request shape); uuid-10..24 are valid. Batch 1 all
+    // aborts, but the probe of the LAST record (uuid-24) SUCCEEDS, proving the
+    // shape is fine — so the run must NOT abort and must sync every record behind
+    // the bad block. Without the probe, uuid-10..24 would strand forever.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
+      const index = Number(uuid.replace('uuid-', ''));
+      return Promise.resolve(index < 10 ? MARK_ABORTED : MARK_SYNCED);
+    });
+
+    await import('@/index.js');
+
+    // Every record attempted: no stranding. The probed last record (uuid-24) is
+    // attempted twice — once as the decision-only probe, once in its own batch
+    // (an idempotent repeat) — so 25 records + 1 probe = 26 calls.
+    expect(markRecordSynced).toHaveBeenCalledTimes(26);
+    expect(markRecordSynced).toHaveBeenCalledWith(
+      'uuid-24',
+      expect.anything(),
+    );
+    // The 10 bad records stay pending as plain failures; nothing aborted.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 10 record(s) synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 15 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not strand valid records behind a bad block wider than one batch', async () => {
+    const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // A per-record bad block of 20 records (uuid-0..19) — TWO full batches, wider
+    // than one batch — with uuid-20..24 valid. Probing the far end (uuid-24)
+    // rather than the record next to each rejected batch keeps the block from
+    // ever confirming an abort, so the valid tail still syncs. This is the case
+    // an adjacent probe would strand.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
+      const index = Number(uuid.replace('uuid-', ''));
+      return Promise.resolve(index < 20 ? MARK_ABORTED : MARK_SYNCED);
+    });
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledWith('uuid-24', expect.anything());
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 20 record(s) synced'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 5 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not report a probe-synced record as pending when a later batch stops the run', async () => {
+    const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Batch 1 (uuid-0..9) rejects → probe of the last record (uuid-24) SYNCS,
+    // proving the shape is fine. Then batch 2 times out (uuid-10) and stops the
+    // run before uuid-24 is re-marked in order. uuid-24 was accepted server-side,
+    // so it must NOT be listed as still pending — regression guard for the
+    // out-of-order probe outcome being discarded.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
+      const index = Number(uuid.replace('uuid-', ''));
+      if (index < 10) {
+        return Promise.resolve(MARK_ABORTED);
+      }
+      if (uuid === 'uuid-10') {
+        return Promise.resolve(MARK_TIMED_OUT);
+      }
+      return Promise.resolve(MARK_SYNCED);
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    // uuid-24 synced via the probe — it must not appear in the still-pending list.
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-24 -> /mock/output/uuid-24.md'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('stops as a timeout when the confirmation probe times out', async () => {
+    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Batch 1 (uuid-0..9) all reject; the probe of the LAST record (uuid-14)
+    // times out. A hung server outranks the shape question, so the run stops as a
+    // timeout and uuid-10..13 are never attempted.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
+      if (uuid === 'uuid-14') {
+        return Promise.resolve(MARK_TIMED_OUT);
+      }
+      return Promise.resolve(MARK_ABORTED);
+    });
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(11);
+    expect(markRecordSynced).not.toHaveBeenCalledWith(
+      'uuid-11',
+      expect.anything(),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('keeps going when the confirmation probe fails transiently rather than aborting', async () => {
+    const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Batch 1 (uuid-0..9) all reject; the probe of the LAST record (uuid-24)
+    // fails transiently (a network blip / 429), which does NOT confirm a wrong
+    // shape — so the run must keep going and attempt every remaining record, not
+    // abort. uuid-10..23 are valid.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
+      const index = Number(uuid.replace('uuid-', ''));
+      if (index < 10) {
+        return Promise.resolve(MARK_ABORTED);
+      }
+      return Promise.resolve(uuid === 'uuid-24' ? MARK_FAILED : MARK_SYNCED);
+    });
+
+    await import('@/index.js');
+
+    // 25 records + the one decision-only probe of uuid-24 (idempotent repeat) = 26.
+    expect(markRecordSynced).toHaveBeenCalledTimes(26);
+    expect(markRecordSynced).toHaveBeenCalledWith('uuid-24', expect.anything());
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    // uuid-0..9 rejected + uuid-24 transient = 11 pending, reported as plain
+    // failures.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 11 record(s) synced'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not abort on a lone request-shape 4xx — one poison record must not strand the rest', async () => {
+    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Only uuid-3 hits a 4xx (its own value the server rejects); the other nine
+    // in the batch succeed. Since the batch did NOT all fail the same way, the
+    // run must keep going — otherwise this one record would strand every later
+    // record on every future run. Guards the batch-agreement abort condition.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(uuid === 'uuid-3' ? MARK_ABORTED : MARK_SYNCED),
+    );
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(15);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 1 record(s) synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-3 -> /mock/output/uuid-3.md'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 14 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not abort a whole final batch of 4xx once earlier records have synced — the shape is proven good', async () => {
+    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // The first batch of 10 all succeed, proving the request shape the CLI
+    // builds is valid; the final batch of 5 (uuid-10..14) is then wholly 4xx.
+    // Because something already synced, those 4xx must be per-record — the run
+    // must NOT abort, and must report them as plain failures, not an abort.
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
+      const index = Number(uuid.replace('uuid-', ''));
+      return Promise.resolve(index >= 10 ? MARK_ABORTED : MARK_SYNCED);
+    });
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(15);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 5 record(s) synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-10 -> /mock/output/uuid-10.md'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 10 record(s) synced despite'),
     );
     expect(process.exitCode).toBe(1);
   });

@@ -7,6 +7,9 @@ import {
   fetchPaginatedRecords,
   fetchRecord,
   markRecordSynced,
+  markSyncedStopReason,
+  probeStopReason,
+  MARK_ABORTED,
   MARK_FAILED,
   MARK_SYNCED,
   MARK_TIMED_OUT,
@@ -1307,5 +1310,196 @@ describe('markRecordSynced', () => {
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
       MARK_FAILED,
     );
+  });
+
+  // A request-shape 4xx (a contract-validation 422 or a malformed-payload 400)
+  // means the request the CLI built may be wrong for every record. Return the
+  // abort outcome so the batch runner can stop once it sees a whole batch fail
+  // this way instead of retrying each doomed record.
+  it('returns the aborted outcome on a 422 the request payload caused', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: () =>
+        Promise.resolve({
+          data: {
+            errors: [
+              { title: 'Unprocessable', detail: 'Unknown attribute: filePath' },
+            ],
+          },
+        }),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_ABORTED,
+    );
+  });
+
+  it('returns the aborted outcome on a malformed-payload 400', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () =>
+        Promise.resolve({
+          data: { errors: [{ title: 'Bad Request', detail: 'Invalid body' }] },
+        }),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_ABORTED,
+    );
+  });
+
+  // A 404 means THIS record is gone server-side (deleted in the UI between the
+  // fetch and the PATCH), not that the request shape is wrong — the rest of the
+  // batch can still be marked. Guards the 4xx-abort against catching a per-record
+  // 404.
+  it('returns the failed outcome on a 404 instead of aborting', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: () =>
+        Promise.resolve({
+          data: { errors: [{ title: 'Not Found', detail: 'No such record' }] },
+        }),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_FAILED,
+    );
+  });
+
+  // An auth 401/403 is systemic but out of this abort's scope — mark-synced
+  // treats it as a plain per-record failure (the file is already on disk), same
+  // as before. Guards the 4xx-abort against widening to auth codes.
+  it('returns the failed outcome on a 401 instead of aborting', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_FAILED,
+    );
+  });
+
+  // A 429 is transient (back off and retry), NOT a doomed payload — it must stay
+  // a plain failure so the run doesn't abort the rest of the batch on a
+  // rate-limit blip. Guards the 4xx-abort against catching 429.
+  it('returns the failed outcome on a 429 rate-limit instead of aborting', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: () =>
+        Promise.resolve({
+          data: {
+            errors: [{ title: 'Too Many Requests', detail: 'Slow down' }],
+          },
+        }),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_FAILED,
+    );
+  });
+
+  // A 4xx delivered as a non-JSON body (an HTML WAF/proxy interstitial) throws
+  // while parsing before it can be classified as request-shape, so it must
+  // degrade to a plain failure — never an abort — failing in the safe direction.
+  it('returns the failed outcome on a 422 whose body is not JSON', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_FAILED,
+    );
+  });
+
+  // A 5xx is a server-side fault the payload can't fix and may clear on retry, so
+  // it stays a plain failure rather than aborting the batch.
+  it('returns the failed outcome on a 500 instead of aborting', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () =>
+        Promise.resolve({
+          data: { errors: [{ title: 'Server Error', detail: 'Boom' }] },
+        }),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_FAILED,
+    );
+  });
+});
+
+describe('markSyncedStopReason', () => {
+  it('stops on a timeout anywhere in the batch, regardless of prior success', () => {
+    expect(markSyncedStopReason([MARK_SYNCED, MARK_TIMED_OUT], false)).toBe(
+      MARK_TIMED_OUT,
+    );
+    expect(markSyncedStopReason([MARK_TIMED_OUT, MARK_ABORTED], true)).toBe(
+      MARK_TIMED_OUT,
+    );
+  });
+
+  it('aborts when a multi-record batch is unanimously rejected and nothing has synced yet', () => {
+    expect(markSyncedStopReason([MARK_ABORTED, MARK_ABORTED], false)).toBe(
+      MARK_ABORTED,
+    );
+  });
+
+  // A one-record tail batch trivially satisfies `every`, so a lone 4xx there is
+  // NOT proof the shape is categorically wrong — it's a per-record rejection and
+  // must not strand whatever follows.
+  it('does NOT abort a single-record batch — a lone 4xx there is per-record', () => {
+    expect(markSyncedStopReason([MARK_ABORTED], false)).toBeNull();
+  });
+
+  // An empty batch is unreachable from the batch runner, but the exported policy
+  // must not treat a vacuous `every` as evidence to abort.
+  it('does NOT abort an empty batch', () => {
+    expect(markSyncedStopReason([], false)).toBeNull();
+  });
+
+  // The core guard against stranding: once any record has synced, the request
+  // shape is proven valid, so a later whole-batch 4xx is per-record and must not
+  // abort the run.
+  it('does NOT abort a whole-rejected batch once a record has already synced', () => {
+    expect(markSyncedStopReason([MARK_ABORTED, MARK_ABORTED], true)).toBeNull();
+  });
+
+  it('does NOT abort a mixed batch — a lone 4xx alongside a success is per-record', () => {
+    expect(markSyncedStopReason([MARK_SYNCED, MARK_ABORTED], true)).toBeNull();
+  });
+
+  // Deliberately conservative: unanimity is required, so one transient blip (a
+  // 429/5xx surfaced as MARK_FAILED) among the rejections keeps the run going.
+  // Erring toward a few extra doomed requests is safer than aborting on what may
+  // be a lone per-record 4xx and stranding syncable records.
+  it('does NOT abort a batch of rejections mixed with a transient failure', () => {
+    expect(
+      markSyncedStopReason([MARK_ABORTED, MARK_FAILED], false),
+    ).toBeNull();
+  });
+
+  it('does NOT abort when the batch failed but not as a request-shape 4xx', () => {
+    expect(markSyncedStopReason([MARK_FAILED, MARK_FAILED], false)).toBeNull();
+  });
+});
+
+describe('probeStopReason', () => {
+  // A probe is a DIFFERENT record than the rejected batch, so a lone reject here
+  // is decisive — it confirms the request shape itself is wrong.
+  it('confirms an abort when the probe is also rejected', () => {
+    expect(probeStopReason(MARK_ABORTED)).toBe(MARK_ABORTED);
+  });
+
+  it('stops as a timeout when the probe times out', () => {
+    expect(probeStopReason(MARK_TIMED_OUT)).toBe(MARK_TIMED_OUT);
+  });
+
+  // A surviving probe (synced) or an inconclusive one (transient failure) does
+  // not confirm a bad shape, so the run continues.
+  it('does not stop when the probe succeeds or fails transiently', () => {
+    expect(probeStopReason(MARK_SYNCED)).toBeNull();
+    expect(probeStopReason(MARK_FAILED)).toBeNull();
   });
 });

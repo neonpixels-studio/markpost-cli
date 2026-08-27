@@ -1,6 +1,7 @@
 import {
   ApiTimeoutError,
   authedRequest,
+  isFatalRequestError,
   isSystemicApiFailure,
   logApiFailure,
   unwrapResourceAttributes,
@@ -26,10 +27,15 @@ export const PENDING_STATUS = 'pending';
 const SYNCED_STATUS = 'synced';
 
 // Result of marking one record synced. `MARK_SYNCED` — the server accepted the
-// PATCH. `MARK_FAILED` — a non-timeout error; the record stays pending and the
-// rest of the batch still runs. `MARK_TIMED_OUT` — the PATCH hit the request
-// timeout, a signal the server is hung; the batch runner stops on the first one
-// rather than paying the full timeout on every remaining record.
+// PATCH. `MARK_FAILED` — a transient/per-record error (network blip, 429, 5xx,
+// an unparseable 2xx); the record stays pending and the rest of the batch still
+// runs. `MARK_TIMED_OUT` — the PATCH hit the request timeout, a signal the
+// server is hung; the batch runner stops on the first one rather than paying the
+// full timeout on every remaining record. `MARK_ABORTED` — a request-shape 4xx
+// (a malformed-payload 400 or a contract-validation 422, but NOT a per-record
+// 404, an auth 401/403, or a transient 429): the request the CLI built may be
+// wrong for every record, so the batch runner aborts once it sees a whole batch
+// rejected the same way rather than retrying each doomed record.
 //
 // Values are prefixed (`mark-*`) so they never collide with the wire
 // `SYNCED_STATUS = 'synced'` above: these are internal outcome tags, not the
@@ -38,9 +44,76 @@ const SYNCED_STATUS = 'synced';
 export const MARK_SYNCED = 'mark-synced';
 export const MARK_FAILED = 'mark-failed';
 export const MARK_TIMED_OUT = 'mark-timed-out';
+export const MARK_ABORTED = 'mark-aborted';
 
 export type MarkSyncedOutcome =
-  typeof MARK_SYNCED | typeof MARK_FAILED | typeof MARK_TIMED_OUT;
+  | typeof MARK_SYNCED
+  | typeof MARK_FAILED
+  | typeof MARK_TIMED_OUT
+  | typeof MARK_ABORTED;
+
+// Why a mark-synced run stopped early (a hung server or a categorically wrong
+// request), or null if every record was attempted.
+export type MarkSyncedStop = typeof MARK_TIMED_OUT | typeof MARK_ABORTED | null;
+
+// Decides whether a mark-synced run should stop early, given ONE concurrency
+// batch's outcomes and whether any record has already synced this run. Pure so
+// the batch runner stays a thin loop and this policy is unit-testable in
+// isolation.
+//
+// A timeout stops immediately — the server is hung, so firing more batches just
+// burns the full request timeout on each. A request-shape 4xx stops the run only
+// when the evidence is unambiguous: nothing has synced yet (a single success
+// would prove the shape valid) AND a full batch of MORE THAN ONE record was
+// UNANIMOUSLY rejected that way. Both guards avoid stranding records:
+//   - Requiring unanimity (`every`, not `some`) means one transient blip (a 429
+//     or 5xx) among the rejections keeps the run going rather than aborting on
+//     what might be a lone per-record 4xx. Cost is bounded (a few more doomed
+//     requests); the alternative risks stranding syncable records.
+//   - Requiring `length > 1` stops a one-record tail batch from trivially
+//     satisfying `every` — a lone 4xx there is per-record (one bad filePath, a
+//     record deleted mid-run), not proof the shape is categorically wrong.
+// A timeout and an all-aborted batch are mutually exclusive (an aborted batch
+// contains no timeout), so their order here is not a tie-break.
+export const markSyncedStopReason = (
+  batchOutcomes: MarkSyncedOutcome[],
+  anySynced: boolean,
+): MarkSyncedStop => {
+  if (batchOutcomes.includes(MARK_TIMED_OUT)) {
+    return MARK_TIMED_OUT;
+  }
+
+  const wholeBatchRejected =
+    batchOutcomes.length > 1 &&
+    batchOutcomes.every((outcome) => outcome === MARK_ABORTED);
+
+  if (!anySynced && wholeBatchRejected) {
+    return MARK_ABORTED;
+  }
+
+  return null;
+};
+
+// Maps a single confirmation-probe outcome to a stop reason. After a whole batch
+// is rejected with nothing synced, the runner probes ONE record from beyond that
+// batch (see markRecordsInBatches). Unlike `markSyncedStopReason`, a lone reject
+// here IS decisive: the probe is a different record than the ones that failed, so
+// its rejection confirms the request shape itself is wrong. A probe timeout still
+// means a hung server. Any other outcome (synced, or a transient failure) leaves
+// the shape unproven-bad, so the run keeps going rather than strand the rest.
+export const probeStopReason = (
+  probeOutcome: MarkSyncedOutcome,
+): MarkSyncedStop => {
+  if (probeOutcome === MARK_TIMED_OUT) {
+    return MARK_TIMED_OUT;
+  }
+
+  if (probeOutcome === MARK_ABORTED) {
+    return MARK_ABORTED;
+  }
+
+  return null;
+};
 
 // markpost paginates with a cursor: each response's `links.next` embeds the
 // `page[after]` cursor to request the following page, and is `null` once
@@ -377,12 +450,14 @@ export const createRecord = async (
 // next run, which is far less disruptive than aborting the whole sync after
 // files have landed.
 //
-// Returns a three-way outcome rather than a bare boolean so the caller can
-// tell a per-record failure (`MARK_FAILED`, keep going — the next record may
-// succeed) apart from a timeout (`MARK_TIMED_OUT`). A timeout signals a hung
-// server, so the caller stops the remaining batches instead of burning the
-// full request timeout on every one; the record still stays `pending` either
-// way. Reading the body back as a resource would mis-report a legitimate 2xx
+// Returns a four-way outcome rather than a bare boolean so the caller can tell
+// a per-record failure (`MARK_FAILED`, keep going — the next record may succeed)
+// apart from the two abort signals: a timeout (`MARK_TIMED_OUT`, a hung server)
+// and a request-shape 4xx (`MARK_ABORTED`, a 400/422 the server rejected). On
+// either abort the caller stops the remaining batches — a timeout to avoid
+// burning the full request timeout on every one, an aborted 4xx because every
+// remaining record would fail identically; the record still stays `pending`
+// either way. Reading the body back as a resource would mis-report a legitimate 2xx
 // that carries no `data` (markpost's PATCH always returns the record, but a
 // `data: null` shape still counts as success here) as a failure, wrongly
 // warning the user of duplicates. `filePath` is sent deliberately — markpost
@@ -426,12 +501,25 @@ export const markRecordSynced = async (
     );
 
     // A timeout gets its own outcome so the caller can abort the remaining
-    // marks on the first one; every other error just leaves this record
-    // pending and lets the rest of the batch proceed.
+    // marks on the first one.
     if (error instanceof ApiTimeoutError) {
       return MARK_TIMED_OUT;
     }
 
+    // A request-shape 4xx (a malformed-payload 400 or a contract-validation 422)
+    // means the request the CLI built may be wrong for every record. Tag it so
+    // the batch runner can abort — but only once it confirms the WHOLE batch
+    // failed the same way (see markRecordsInBatches); a per-record 404, an auth
+    // 401/403, and a transient 429 stay out of this entirely.
+    if (isFatalRequestError(error)) {
+      return MARK_ABORTED;
+    }
+
+    // Everything else just leaves this record pending and lets the rest of the
+    // batch proceed: a network blip, a 404/401/403/429/5xx, or an unparseable
+    // body at ANY status — a 4xx delivered as an HTML error page (a WAF/proxy
+    // interstitial) throws before it can be classified as request-shape, so it
+    // safely degrades here rather than aborting the run.
     return MARK_FAILED;
   }
 };
