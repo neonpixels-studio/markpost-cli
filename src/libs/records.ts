@@ -1,6 +1,7 @@
 import {
   ApiTimeoutError,
   authedRequest,
+  isPermanentApiFailure,
   isSystemicApiFailure,
   logApiFailure,
   unwrapResourceAttributes,
@@ -26,10 +27,20 @@ export const PENDING_STATUS = 'pending';
 const SYNCED_STATUS = 'synced';
 
 // Result of marking one record synced. `MARK_SYNCED` — the server accepted the
-// PATCH. `MARK_FAILED` — a non-timeout error; the record stays pending and the
-// rest of the batch still runs. `MARK_TIMED_OUT` — the PATCH hit the request
-// timeout, a signal the server is hung; the batch runner stops on the first one
-// rather than paying the full timeout on every remaining record.
+// PATCH. `MARK_FAILED` — a non-timeout, non-permanent error (a lone 404 or bad
+// body, but also a transient systemic 429/5xx that may be a one-off blip); the
+// record stays pending and the rest of the batch still runs, since the next
+// record may succeed. `MARK_TIMED_OUT` — the PATCH hit the request timeout, a
+// signal the server is hung; the batch runner stops on the first one rather than
+// paying the full timeout on every remaining record. `MARK_PERMANENTLY_FAILED` —
+// a permanent systemic failure (a dead token or a forbidden account: 401/403)
+// that will recur on every record and every pass, so the batch runner stops on
+// it AND the caller shuts the autoSync daemon down rather than looping into the
+// same failure forever — mirroring how the delete path stops the daemon only on
+// a permanent delete failure (see runDefaultSync). A transient systemic failure
+// deliberately stays `MARK_FAILED`: unlike a permanent one it isn't guaranteed to
+// doom every other record (a lone 5xx can be a blip), so aborting the whole run
+// would strand records that would have settled.
 //
 // Values are prefixed (`mark-*`) so they never collide with the wire
 // `SYNCED_STATUS = 'synced'` above: these are internal outcome tags, not the
@@ -38,9 +49,13 @@ const SYNCED_STATUS = 'synced';
 export const MARK_SYNCED = 'mark-synced';
 export const MARK_FAILED = 'mark-failed';
 export const MARK_TIMED_OUT = 'mark-timed-out';
+export const MARK_PERMANENTLY_FAILED = 'mark-permanently-failed';
 
 export type MarkSyncedOutcome =
-  typeof MARK_SYNCED | typeof MARK_FAILED | typeof MARK_TIMED_OUT;
+  | typeof MARK_SYNCED
+  | typeof MARK_FAILED
+  | typeof MARK_TIMED_OUT
+  | typeof MARK_PERMANENTLY_FAILED;
 
 // markpost paginates with a cursor: each response's `links.next` embeds the
 // `page[after]` cursor to request the following page, and is `null` once
@@ -377,12 +392,17 @@ export const createRecord = async (
 // next run, which is far less disruptive than aborting the whole sync after
 // files have landed.
 //
-// Returns a three-way outcome rather than a bare boolean so the caller can
+// Returns a discriminated outcome rather than a bare boolean so the caller can
 // tell a per-record failure (`MARK_FAILED`, keep going — the next record may
-// succeed) apart from a timeout (`MARK_TIMED_OUT`). A timeout signals a hung
-// server, so the caller stops the remaining batches instead of burning the
-// full request timeout on every one; the record still stays `pending` either
-// way. Reading the body back as a resource would mis-report a legitimate 2xx
+// succeed) apart from a timeout (`MARK_TIMED_OUT`) and a permanent systemic
+// failure (`MARK_PERMANENTLY_FAILED`). A timeout (hung server) stops the
+// remaining batches to avoid paying the full timeout on each; a permanent
+// failure (dead token / forbidden account) stops them because it will recur on
+// every record — and additionally shuts the autoSync daemon down, since it can't
+// clear on retry (matching the delete path). Both leave the affected records
+// `pending`.
+//
+// Reading the body back as a resource would mis-report a legitimate 2xx
 // that carries no `data` (markpost's PATCH always returns the record, but a
 // `data: null` shape still counts as success here) as a failure, wrongly
 // warning the user of duplicates. `filePath` is sent deliberately — markpost
@@ -426,12 +446,26 @@ export const markRecordSynced = async (
     );
 
     // A timeout gets its own outcome so the caller can abort the remaining
-    // marks on the first one; every other error just leaves this record
-    // pending and lets the rest of the batch proceed.
+    // marks on the first one.
     if (error instanceof ApiTimeoutError) {
       return MARK_TIMED_OUT;
     }
 
+    // A permanent systemic failure (dead token / forbidden account: 401/403)
+    // will recur on every subsequent record and every future pass, so the batch
+    // runner stops on it and the caller shuts the autoSync daemon down instead
+    // of re-PATCHing a server it already knows will reject.
+    if (isPermanentApiFailure(error)) {
+      return MARK_PERMANENTLY_FAILED;
+    }
+
+    // Every other error — a per-record 4xx or a transient systemic 5xx that may
+    // be a one-off — leaves this record pending and lets the rest of the batch
+    // proceed; aborting on a lone transient failure would strand records that
+    // would have settled. The daemon stays alive to retry next pass.
+    // @todo A sustained 429 (rate limit) would be better handled by aborting the
+    // burst to back off (per the api.ts contract) while keeping the daemon alive;
+    // out of scope for the permanent-failure fix — tracked as a follow-up.
     return MARK_FAILED;
   }
 };

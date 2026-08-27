@@ -10,6 +10,7 @@ import {
   MARK_FAILED,
   MARK_SYNCED,
   MARK_TIMED_OUT,
+  MARK_PERMANENTLY_FAILED,
 } from '@/libs/records.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
@@ -1304,6 +1305,47 @@ describe('markRecordSynced', () => {
 
   it('returns the failed outcome on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_FAILED,
+    );
+  });
+
+  // A permanent systemic failure (a dead token, 401, or a forbidden account,
+  // 403) will recur on every subsequent record and every future pass, so it gets
+  // its own outcome the batch runner and sync loop key off — the sync stops the
+  // autoSync daemon instead of re-PATCHing a server it already knows will reject.
+  it('returns the permanently-failed outcome on an auth (401) failure', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_PERMANENTLY_FAILED,
+    );
+  });
+
+  it('returns the permanently-failed outcome on a forbidden (403) failure', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
+      MARK_PERMANENTLY_FAILED,
+    );
+  });
+
+  // A transient systemic failure (rate-limit or 5xx) stays MARK_FAILED, NOT
+  // permanent: it may be a one-off blip, so the record is left pending, the rest
+  // of the batch still runs, and the autoSync daemon keeps going to retry next
+  // pass. Only a permanent 401/403 aborts the run and stops the daemon.
+  it('returns the failed (not permanent) outcome on a transient server (503) failure', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
     expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
       MARK_FAILED,
     );

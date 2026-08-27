@@ -176,6 +176,16 @@ export const isSystemicApiFailure = (
 ): error is ApiRequestError =>
   error instanceof ApiRequestError && error.isSystemic;
 
+// Narrowing guard: true only for a PERMANENT failure (a dead token / forbidden
+// account) that won't clear on a blind retry. Keeps the permanence rule inside
+// the API seam so callers deciding whether to stop an autoSync daemon (the
+// sync's mark-synced and delete paths) don't re-derive it. `isPermanent` already
+// implies systemic, so no separate systemic check is needed.
+export const isPermanentApiFailure = (
+  error: unknown,
+): error is ApiRequestError =>
+  error instanceof ApiRequestError && error.isPermanent;
+
 // Labels the failure by kind so the classification stays inside the API layer
 // instead of leaking status-code logic into command code. Falls back to a
 // generic label if handed a non-systemic error, so a mislabel can't happen.

@@ -12,6 +12,7 @@ import {
   formatErrorMessages,
   getApiToken,
   getBaseUrl,
+  isPermanentApiFailure,
   isSystemicApiFailure,
   logApiFailure,
   rethrowIfTimeout,
@@ -446,6 +447,32 @@ describe('isSystemicApiFailure', () => {
     expect(isSystemicApiFailure(new Error('network down'))).toBe(false);
     expect(isSystemicApiFailure('boom')).toBe(false);
     expect(isSystemicApiFailure(undefined)).toBe(false);
+  });
+});
+
+describe('isPermanentApiFailure', () => {
+  // Gates the autoSync daemon shutdown, so its two boundaries matter: a
+  // permanent 401/403 is true; a systemic-but-transient 429/5xx is false (the
+  // daemon retries those); and anything that isn't a systemic ApiRequestError is
+  // false so the caller keeps its per-item handling.
+  it('is true only for a permanent (auth) ApiRequestError', () => {
+    expect(isPermanentApiFailure(new ApiRequestError('nope', 401))).toBe(true);
+    expect(isPermanentApiFailure(new ApiRequestError('nope', 403))).toBe(true);
+  });
+
+  it('is false for a transient systemic ApiRequestError (429/5xx)', () => {
+    expect(isPermanentApiFailure(new ApiRequestError('nope', 429))).toBe(false);
+    expect(isPermanentApiFailure(new ApiRequestError('nope', 503))).toBe(false);
+  });
+
+  it('is false for a non-permanent 4xx ApiRequestError', () => {
+    expect(isPermanentApiFailure(new ApiRequestError('nope', 422))).toBe(false);
+  });
+
+  it('is false for a plain Error or non-error value', () => {
+    expect(isPermanentApiFailure(new Error('network down'))).toBe(false);
+    expect(isPermanentApiFailure('boom')).toBe(false);
+    expect(isPermanentApiFailure(undefined)).toBe(false);
   });
 });
 

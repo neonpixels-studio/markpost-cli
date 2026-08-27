@@ -4,7 +4,13 @@ import type { Spinner } from 'yocto-spinner';
 import { Record } from '@/types/records.types.js';
 import { UserSettings, ConflictStrategy } from '@/types/settings.types.js';
 import { SettingsReadResult } from '@/libs/settings.js';
-import { MARK_FAILED, MARK_SYNCED, MARK_TIMED_OUT } from '@/libs/records.js';
+import {
+  MARK_FAILED,
+  MARK_SYNCED,
+  MARK_TIMED_OUT,
+  MARK_PERMANENTLY_FAILED,
+  MarkSyncedOutcome,
+} from '@/libs/records.js';
 import type { WrittenRecordState } from '@/libs/markdown.js';
 
 vi.mock('@/libs/config.js', () => ({
@@ -1789,6 +1795,342 @@ describe('index', () => {
     );
     expect(process.exitCode).toBe(1);
     expect(scheduledAutoSync).toBe(true);
+  });
+
+  // The mark-synced counterpart of the delete-permanent-failure test: with
+  // autoDelete off, a permanent mark-synced failure (dead token / forbidden
+  // account) surfaces as MARK_PERMANENTLY_FAILED. The sync must fail loud AND
+  // stop rescheduling the autoSync daemon — otherwise it wakes every few minutes
+  // and re-PATCHes the same records against a server it already knows will
+  // reject, re-writing them as duplicates every pass (issue #133).
+  it('stops autoSync from rescheduling on a permanent mark-synced failure', async () => {
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    let scheduledAutoSync: boolean | undefined;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    // autoSync on, so a naive mark-synced-failure path would return `true` and
+    // keep the daemon alive looping into the same failure.
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false, autoSync: true }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_PERMANENTLY_FAILED);
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(1);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('auto-sync was stopped'),
+    );
+    expect(process.exitCode).toBe(1);
+    // A permanent failure recurs, so the scheduler must not spin another pass.
+    expect(scheduledAutoSync).toBe(false);
+  });
+
+  // A TRANSIENT mark-synced failure (a per-record MARK_FAILED from a 5xx/network
+  // blip) also fails loud, but must keep autoSync alive: the record is still
+  // pending and the next pass should retry rather than the daemon shutting down.
+  it('keeps autoSync alive after a transient mark-synced failure', async () => {
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    let scheduledAutoSync: boolean | undefined;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false, autoSync: true }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_FAILED);
+
+    await import('@/index.js');
+
+    // Match text unique to the generic headline — 'still pending on the server'
+    // alone also appears in the timeout headline, so it wouldn't catch a
+    // transient failure wrongly routed through the timeout branch.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('written locally but still pending on the server'),
+    );
+    expect(process.exitCode).toBe(1);
+    // Transient failure: the daemon must retry, so autoSync is preserved.
+    expect(scheduledAutoSync).toBe(true);
+  });
+
+  // Drives a batched mark-sync (autoDelete off) of `count` records where each
+  // record's mark-synced outcome comes from `outcomeFor(uuid)`, capturing what
+  // the run reports back to the scheduler. Shared by the batch-abort tests below,
+  // which differ only in count, the outcome map, and the `autoSync` setting.
+  // Returns a capture whose `scheduledAutoSync` is filled once `@/index.js` runs.
+  const arrangeBatchedMarkSync = async ({
+    count,
+    outcomeFor,
+    autoSync,
+  }: {
+    count: number;
+    outcomeFor: (uuid: string) => MarkSyncedOutcome;
+    autoSync: boolean;
+  }): Promise<{ scheduledAutoSync: boolean | undefined }> => {
+    const records: Record[] = Array.from({ length: count }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const capture: { scheduledAutoSync: boolean | undefined } = {
+      scheduledAutoSync: undefined,
+    };
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        capture.scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false, autoSync }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
+      Promise.resolve(outcomeFor(uuid)),
+    );
+
+    return capture;
+  };
+
+  // A permanent failure must ABORT the remaining batches, not just flip a flag:
+  // firing more PATCHes against a dead token is wasted work. With 15 records
+  // (concurrency 10) and uuid-3 permanently failing in the first batch, the
+  // second batch of five must never run — so markRecordSynced is called exactly
+  // 10 times. A single-record test can't catch a regression here (the loop ends
+  // anyway), so this uses two batches.
+  it('aborts the remaining batches on a permanent mark-synced failure', async () => {
+    const capture = await arrangeBatchedMarkSync({
+      count: 15,
+      autoSync: true,
+      outcomeFor: (uuid) =>
+        uuid === 'uuid-3' ? MARK_PERMANENTLY_FAILED : MARK_SYNCED,
+    });
+    const { markRecordSynced } = await import('@/libs/records.js');
+
+    await import('@/index.js');
+
+    // First batch of ten ran; the second batch of five never did.
+    expect(markRecordSynced).toHaveBeenCalledTimes(10);
+    expect(markRecordSynced).not.toHaveBeenCalledWith(
+      'uuid-10',
+      expect.anything(),
+    );
+    // uuid-3 failed plus the five never attempted = six pending; nine marked.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 6 record(s) synced'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 9 record(s) synced despite the above.'),
+    );
+    expect(process.exitCode).toBe(1);
+    // A permanent failure recurs, so the scheduler must not spin another pass.
+    expect(capture.scheduledAutoSync).toBe(false);
+  });
+
+  // The other side of the discriminant: a TIMEOUT aborts the batches too, but
+  // must NOT stop the daemon — the server may un-hang, so the next pass should
+  // retry. Guards against a regression that treats any abort reason as a stop.
+  it('aborts the remaining batches but keeps autoSync alive on a timeout', async () => {
+    const capture = await arrangeBatchedMarkSync({
+      count: 15,
+      autoSync: true,
+      outcomeFor: (uuid) => (uuid === 'uuid-3' ? MARK_TIMED_OUT : MARK_SYNCED),
+    });
+    const { markRecordSynced } = await import('@/libs/records.js');
+
+    await import('@/index.js');
+
+    expect(markRecordSynced).toHaveBeenCalledTimes(10);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(process.exitCode).toBe(1);
+    // A timeout can clear, so the daemon must retry next pass.
+    expect(capture.scheduledAutoSync).toBe(true);
+  });
+
+  // A per-record MARK_FAILED (a lone 404, a transient 5xx blip) must NOT abort:
+  // the next record can still succeed, so all 15 across both batches are
+  // attempted and only the one failed record stays pending. Pins that only the
+  // two systemic/timeout reasons abort, not an ordinary per-record failure.
+  it('does not abort the remaining batches on a per-record mark-synced failure', async () => {
+    const capture = await arrangeBatchedMarkSync({
+      count: 15,
+      autoSync: true,
+      outcomeFor: (uuid) => (uuid === 'uuid-3' ? MARK_FAILED : MARK_SYNCED),
+    });
+    const { markRecordSynced } = await import('@/libs/records.js');
+
+    await import('@/index.js');
+
+    // Every record attempted — no abort — so both batches ran.
+    expect(markRecordSynced).toHaveBeenCalledTimes(15);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 1 record(s) synced'),
+    );
+    expect(process.exitCode).toBe(1);
+    // A per-record failure isn't permanent, so the daemon retries next pass.
+    expect(capture.scheduledAutoSync).toBe(true);
+  });
+
+  // A permanent mark-synced failure on a plain one-shot `markpost sync`
+  // (autoDelete off, autoSync off) must NOT claim "auto-sync was stopped" — there
+  // was no daemon. The headline still guides the user to fix the cause, but a
+  // cron log must not read a false statement about what the tool did.
+  it('does not claim auto-sync was stopped when it was never on', async () => {
+    const { fetchAllRecords, markRecordSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false, autoSync: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(markRecordSynced).mockResolvedValue(MARK_PERMANENTLY_FAILED);
+
+    await import('@/index.js');
+
+    const headline = vi
+      .mocked(mockSpinner.error)
+      .mock.calls.map(([message]) => String(message))
+      .find((message) => message.includes('a permanent error'));
+    expect(headline).toBeDefined();
+    expect(headline).not.toContain('auto-sync was stopped');
+    expect(process.exitCode).toBe(1);
+  });
+
+  // Abort precedence is load-bearing: when a single batch returns BOTH a timeout
+  // and a permanent failure (a token expiring mid-run against a slow server), the
+  // permanent reason must win — otherwise the run reports 'timeout', keeps
+  // autoSync alive, and the daemon reschedules straight back into the dead token.
+  // uuid-2 times out and uuid-3 permanently fails in the same first batch.
+  it('lets a permanent failure outrank a timeout in the same batch', async () => {
+    const outcomeFor = (uuid: string): MarkSyncedOutcome => {
+      if (uuid === 'uuid-2') {
+        return MARK_TIMED_OUT;
+      }
+      if (uuid === 'uuid-3') {
+        return MARK_PERMANENTLY_FAILED;
+      }
+      return MARK_SYNCED;
+    };
+    const capture = await arrangeBatchedMarkSync({
+      count: 15,
+      autoSync: true,
+      outcomeFor,
+    });
+
+    await import('@/index.js');
+
+    // The permanent headline wins, not the timeout one.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('a permanent error'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(process.exitCode).toBe(1);
+    // The daemon must stop despite the concurrent timeout.
+    expect(capture.scheduledAutoSync).toBe(false);
+  });
+
+  // A permanent failure in a LATER batch (not the first) guards the
+  // `outcomes[index]` alignment: `outcomes` already holds 20 entries before the
+  // aborting third batch would run, so an off-by-one would strand the wrong
+  // records. 25 records, uuid-13 fails in batch 2 of 3 — batch 3 (five records)
+  // never runs, so 20 PATCHes fire and 6 records (uuid-13 + the five unattempted)
+  // are reported pending, 19 marked.
+  it('aborts a later batch on a permanent failure and counts pending correctly', async () => {
+    const capture = await arrangeBatchedMarkSync({
+      count: 25,
+      autoSync: true,
+      outcomeFor: (uuid) =>
+        uuid === 'uuid-13' ? MARK_PERMANENTLY_FAILED : MARK_SYNCED,
+    });
+    const { markRecordSynced } = await import('@/libs/records.js');
+
+    await import('@/index.js');
+
+    // Batches 1 and 2 ran (20 records); batch 3 of five never did.
+    expect(markRecordSynced).toHaveBeenCalledTimes(20);
+    expect(markRecordSynced).not.toHaveBeenCalledWith(
+      'uuid-20',
+      expect.anything(),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 6 record(s) synced'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 19 record(s) synced despite the above.'),
+    );
+    // The aborting record (batch 2) is listed pending; a settled batch-1 record
+    // (uuid-0) is not — proving the outcome/index alignment holds across batches.
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-13 -> /mock/output/uuid-13.md'),
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-0 -> /mock/output/uuid-0.md'),
+    );
+    expect(capture.scheduledAutoSync).toBe(false);
+    expect(process.exitCode).toBe(1);
   });
 
   // Tests 1 and 2 share the same arrange: two records where mockRecord's write
