@@ -699,6 +699,28 @@ describe('runPushCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('reports skipped unreadable inputs and exits 1 on a dry run without pushing', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['real.md'],
+      missing: [],
+      skipped: ['./vault/locked'],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['real.md', './vault', '--dry-run']);
+
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Skipped unreadable path "./vault/locked".'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push 1 file(s):'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it('exits 1 on a dry run when no inputs resolve to any file', async () => {
     const { createRecord } = await import('@/libs/records.js');
     const { resolveMarkdownInputs } = await import('@/libs/files.js');

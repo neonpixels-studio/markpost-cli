@@ -10,6 +10,7 @@ import { readMarkdown } from '@/libs/markdown.js';
 import { resolveMarkdownInputs } from '@/libs/files.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithUsage } from '@/libs/usage.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 
 export const USAGE = `Usage: markpost push [--dry-run] <path...>
 
@@ -23,9 +24,10 @@ export const USAGE = `Usage: markpost push [--dry-run] <path...>
 // the one literal, mirroring sync's --dry-run.
 const DRY_RUN_FLAG = '--dry-run';
 
-// Any leading-dash token is a flag, not a path — used to reject a stray or
-// mistyped flag before it's mistaken for a file to push.
-const FLAG_PREFIX = '-';
+// A leading `--` marks a long flag, not a path — used to reject a stray or
+// mistyped long flag before it's mistaken for a file to push. Kept to `--` (not
+// a bare `-`) so a legitimate dash-leading filename from a glob still pushes.
+const FLAG_PREFIX = '--';
 
 // `systemicError` is set only when this file failed for a reason that will
 // recur for every other file (auth/5xx). Carrying it on the result rather than
@@ -128,13 +130,19 @@ const abortLine = (abort: PushAbort): string => {
 };
 
 // The push dry run mirrors sync's --dry-run output style (a yellow preview
-// header over a dim "would" list). It can't reuse sync's reportDryRunPlan:
-// that previews server records being written to local files, whereas push
-// previews local files being sent to the server — disjoint inputs, so only the
-// visual style is shared, not the code. File paths are the user's own local
-// inputs (not untrusted API data), so they're printed unsanitized like the rest
-// of push's file output.
-const reportPushDryRun = (filePaths: string[]): void => {
+// header over a dim "would" list) and, like reportSummary, owns the failure
+// exit code the real run would set for unresolved inputs — so a script
+// previewing a wrong glob still learns it matched nothing. It can't reuse sync's
+// reportDryRunPlan: that previews server records written to local files, whereas
+// push previews local files sent to the server — disjoint inputs, so only the
+// visual style is shared. Paths are sanitized like sync's printWritePreview: a
+// directory/glob walk can surface a filename the user never typed and doesn't
+// control (a synced folder, a cloned repo), so an escape sequence in a name
+// can't reach the terminal live.
+const reportPushDryRun = (
+  filePaths: string[],
+  unresolvedCount: number,
+): void => {
   console.log(
     chalk.yellow(
       `Dry run — previewing ${filePaths.length} file(s); nothing will be pushed.`,
@@ -142,8 +150,17 @@ const reportPushDryRun = (filePaths: string[]): void => {
   );
   console.log(chalk.dim(`Would push ${filePaths.length} file(s):`));
   filePaths.forEach((filePath) => {
-    console.log(chalk.dim(`  -> ${filePath}`));
+    console.log(chalk.dim(sanitizeForTerminal(`  -> ${filePath}`)));
   });
+
+  // A wrong glob (missing/unreadable inputs) is exactly what --dry-run exists to
+  // catch, so it exits non-zero like the real run would — minus the per-file
+  // push failures a dry run can't produce.
+  if (unresolvedCount === 0) {
+    return;
+  }
+
+  process.exitCode = 1;
 };
 
 const reportSummary = (run: PushRun, unresolvedCount: number): void => {
@@ -218,18 +235,10 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
 
     const unresolvedCount = missing.length + skipped.length;
 
-    // A dry run stops before any createRecord call: report the resolved plan,
-    // then mirror the real run's honesty by exiting non-zero when inputs went
-    // unresolved (a wrong glob, an unreadable path) — the exact mistake the
-    // preview exists to catch — minus the per-file push failures a dry run
-    // can't produce.
+    // A dry run stops before any createRecord call: report the resolved plan
+    // (which sets its own failure exit code for unresolved inputs) and return.
     if (dryRun) {
-      reportPushDryRun(files);
-
-      if (unresolvedCount > 0) {
-        process.exitCode = 1;
-      }
-
+      reportPushDryRun(files, unresolvedCount);
       return;
     }
 
