@@ -91,16 +91,22 @@ describe('buildEndpointUrl', () => {
 });
 
 describe('runSourcesCommand', () => {
+  // `sources delete` now refuses to prompt without a TTY, so simulate an
+  // interactive terminal by default; the non-TTY guard has its own case below.
+  const originalIsTTY = process.stdin.isTTY;
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
     process.exitCode = undefined;
+    process.stdin.isTTY = true;
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.exitCode = undefined;
+    process.stdin.isTTY = originalIsTTY;
   });
 
   it('always checks config before dispatching', async () => {
@@ -794,6 +800,42 @@ describe('runSourcesCommand', () => {
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
     });
 
+    // A Ctrl+C at the confirmation is a deliberate abort: it must delete
+    // nothing, exit 0, and stay quiet — never fall through to the DELETE.
+    it('aborts cleanly without deleting when the confirmation is Ctrl+C-ed', async () => {
+      const { deleteSource } = await import('@/libs/sources.js');
+      const { confirm } = await import('@inquirer/prompts');
+      const exitPromptError = Object.assign(new Error('User force closed'), {
+        name: 'ExitPromptError',
+      });
+      vi.mocked(confirm).mockRejectedValue(exitPromptError);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+      expect(console.error).not.toHaveBeenCalled();
+    });
+
+    // The interactive confirmation names the picked source so the user can
+    // recognize it, not just the opaque uuid they never typed.
+    it('names the picked source in the confirmation prompt', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { select, confirm } = await import('@inquirer/prompts');
+      vi.mocked(select).mockResolvedValue('abc-123');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete']);
+
+      const message = vi.mocked(confirm).mock.calls[0][0].message;
+      expect(message).toContain('Webhook Source');
+      expect(message).toContain('abc-123');
+    });
+
     // --yes is meaningless outside delete; it must fail loudly like a misplaced
     // --json rather than appearing to take effect.
     it('rejects --yes on a non-delete subcommand', async () => {
@@ -809,6 +851,70 @@ describe('runSourcesCommand', () => {
         expect.stringContaining('--yes is only supported by `sources delete`.'),
       );
       expect(process.exitCode).toBe(1);
+    });
+
+    // The guard is shared, but assert create and update hit it too so a future
+    // reorder that moves it below dispatch can't pass unnoticed.
+    it('rejects --yes on create and update, not just list', async () => {
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create', '--yes']);
+      expect(process.exitCode).toBe(1);
+
+      process.exitCode = undefined;
+      await runSourcesCommand(['update', '--yes']);
+      expect(process.exitCode).toBe(1);
+    });
+
+    // --yes promises a non-interactive delete, so with no uuid it must fail
+    // rather than open the picker a script can't answer.
+    it('rejects --yes without a uuid instead of opening the picker', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { select } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', '--yes']);
+
+      expect(select).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--yes requires a uuid'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Without a TTY the prompt can't be answered and inquirer's abort is
+    // swallowed as Ctrl+C, so a bare non-interactive delete must fail loud
+    // rather than silently delete nothing and exit 0.
+    it('fails loudly on a non-TTY delete when --yes is absent', async () => {
+      process.stdin.isTTY = false;
+      const { deleteSource } = await import('@/libs/sources.js');
+      const { confirm } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('needs an interactive terminal'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // The scripting path: --yes with a uuid deletes on a non-TTY, no prompt.
+    it('deletes on a non-TTY when a uuid and --yes are given', async () => {
+      process.stdin.isTTY = false;
+      const { deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { confirm } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123', '--yes']);
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(deleteSource).toHaveBeenCalledWith('abc-123');
     });
 
     it('does nothing when there are no sources to pick from', async () => {

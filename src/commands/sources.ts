@@ -25,7 +25,7 @@ export const USAGE = `Usage: markpost sources <list|create|update|delete> [uuid]
   list           List all sources (pass --json for machine-readable output)
   create         Create a new source (prompts for details)
   update [uuid]  Update a source's route folder; prompts to pick one if uuid is omitted
-  delete [uuid]  Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass --yes to skip the prompt (for scripts)`;
+  delete [uuid]  Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)`;
 
 export const buildEndpointUrl = (
   sourceType: SourceType,
@@ -113,6 +113,34 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     if (skipConfirm && subcommand !== DELETE_SUBCOMMAND) {
       failWithUsage(
         `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\`.`,
+        USAGE,
+        json,
+      );
+      return;
+    }
+
+    // `--yes` promises a non-interactive delete, so it needs an explicit uuid —
+    // without one the picker still opens and a script blocks on it forever.
+    if (skipConfirm && !uuid) {
+      failWithUsage(
+        `--yes requires a uuid: \`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`.`,
+        USAGE,
+        json,
+      );
+      return;
+    }
+
+    // The confirmation prompt can't be answered without a TTY: inquirer aborts
+    // on stdin EOF and that abort is swallowed as a Ctrl+C below, so a
+    // non-interactive `sources delete` would delete nothing yet still exit 0.
+    // Fail loud instead and point scripts at --yes.
+    if (
+      subcommand === DELETE_SUBCOMMAND &&
+      !skipConfirm &&
+      !process.stdin.isTTY
+    ) {
+      failWithUsage(
+        '`sources delete` needs an interactive terminal to confirm; pass --yes to delete without a prompt.',
         USAGE,
         json,
       );
@@ -361,15 +389,15 @@ const updateSourceCommand = async (uuid?: string): Promise<void> => {
 };
 
 // Deleting a source is irreversible: it drops the ingest config and the
-// one-time signing secret, which can never be retrieved again. The uuid is
+// one-time signing secret, which can never be retrieved again. The label is
 // sanitized because it may have come from an untrusted API response via the
 // interactive picker. Defaults to "no" so a bare Enter cancels rather than
 // deletes. Isolated here so the delete flow stays unit-testable by mocking the
 // prompt.
-const confirmDeletion = async (targetUuid: string): Promise<boolean> =>
+const confirmDeletion = async (label: string): Promise<boolean> =>
   confirm({
     message: `Delete source ${sanitizeForTerminal(
-      targetUuid,
+      label,
     )}? This drops its ingest config and one-time signing secret and cannot be undone.`,
     default: false,
   });
@@ -378,13 +406,20 @@ const deleteSourceCommand = async (
   uuid: string | undefined,
   skipConfirm: boolean,
 ): Promise<void> => {
-  const targetUuid = uuid ?? (await promptForSource('delete'))?.uuid;
+  // Only the interactive path yields a full Source; the direct-uuid path
+  // deletes by uuid without a lookup, so it can only name the uuid.
+  const picked = uuid ? undefined : await promptForSource('delete');
+  const targetUuid = uuid ?? picked?.uuid;
 
   if (!targetUuid) {
     return;
   }
 
-  if (!skipConfirm && !(await confirmDeletion(targetUuid))) {
+  // Name the source the user picked ("name (uuid)") so the confirmation is
+  // recognizable; a bare-uuid delete only has the uuid to show.
+  const label = picked ? `${picked.name} (${targetUuid})` : targetUuid;
+
+  if (!skipConfirm && !(await confirmDeletion(label))) {
     console.log('Deletion cancelled.');
     return;
   }
