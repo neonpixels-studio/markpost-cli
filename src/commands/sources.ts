@@ -75,6 +75,7 @@ const usageErrorFor = (
   uuid: string | undefined,
   json: boolean,
   skipConfirm: boolean,
+  isInteractive: boolean,
 ): string | null => {
   // Reject --json where it does nothing rather than silently ignoring it:
   // `sources create --json | jq` would otherwise "succeed" with human text on
@@ -99,12 +100,10 @@ const usageErrorFor = (
   // inquirer renders to stdout and reads stdin, and its EOF abort is swallowed
   // as a Ctrl+C below — so a redirected/non-interactive `sources delete` would
   // hang or delete nothing yet still exit 0. Fail loud and point scripts at
-  // --yes.
-  if (
-    subcommand === DELETE_SUBCOMMAND &&
-    !skipConfirm &&
-    (!process.stdin.isTTY || !process.stdout.isTTY)
-  ) {
+  // --yes. Only delete is guarded here because it's the irreversible one;
+  // `create`/`update` also prompt, but that predates this change and their
+  // non-TTY behavior is out of scope for the delete-confirmation work.
+  if (subcommand === DELETE_SUBCOMMAND && !skipConfirm && !isInteractive) {
     return '`sources delete` needs an interactive terminal to confirm; pass --yes to delete without a prompt.';
   }
 
@@ -141,7 +140,17 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    const usageError = usageErrorFor(subcommand, uuid, json, skipConfirm);
+    // A prompt needs both streams to be a terminal: inquirer reads stdin and
+    // renders to stdout, so a redirect on either makes the confirmation
+    // unanswerable.
+    const isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    const usageError = usageErrorFor(
+      subcommand,
+      uuid,
+      json,
+      skipConfirm,
+      isInteractive,
+    );
 
     if (usageError) {
       failWithUsage(usageError, USAGE, json);
@@ -326,17 +335,23 @@ const promptForSource = async (action: string): Promise<Source | null> => {
   return sources.find((source) => source.uuid === selectedUuid) ?? null;
 };
 
-const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
+// Fetch the source list and pick one out by uuid, or null if none matches.
+// fetchSources() swallows transport errors (except a timeout, which
+// propagates) into [], so a missing uuid is indistinguishable here from a
+// failed load. Shared by the reporting `findSourceByUuid` and the best-effort
+// delete label so the fetch+find isn't written three ways.
+const lookupSourceByUuid = async (uuid: string): Promise<Source | null> => {
   const sources = await fetchSources();
-  const source = sources.find((candidate) => candidate.uuid === uuid);
+  return sources.find((candidate) => candidate.uuid === uuid) ?? null;
+};
+
+const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
+  const source = await lookupSourceByUuid(uuid);
 
   if (source) {
     return source;
   }
 
-  // fetchSources() swallows transport errors (except a timeout, which
-  // propagates) and returns [], so a uuid that doesn't match is
-  // indistinguishable here from a failed lookup.
   console.error(
     chalk.redBright(
       'Source not found, or the source list could not be loaded.',
@@ -403,13 +418,16 @@ const confirmDeletion = async (label: string): Promise<boolean> =>
     default: false,
   });
 
+const NO_SOURCE_FOUND_NOTE = 'no source found with this uuid';
+
 // Build the confirmation label. The interactive pick already carries the
-// Source; a bare-uuid delete looks the source up (read-only, best-effort) so
-// the prompt names it — surfacing a wrong-but-valid copy-pasted uuid before it
-// destroys the source rather than echoing back the exact string the user
-// typed. Falls back to the raw uuid when the list can't be loaded
-// (fetchSources swallows transport errors into []), so a lookup miss never
-// blocks a delete that would otherwise succeed.
+// Source; a bare-uuid delete looks the source up so the prompt names it —
+// surfacing a wrong-but-valid (or non-existent) copy-pasted uuid before it
+// destroys anything, rather than echoing back the exact string the user typed.
+// The lookup is purely cosmetic, so it's best-effort: any failure (including a
+// timeout, which fetchSources re-throws) falls back to the bare uuid rather
+// than blocking a delete that would otherwise succeed. A miss is called out in
+// the label so it isn't mistaken for a successful match.
 const deleteConfirmationLabel = async (
   picked: Source | null | undefined,
   targetUuid: string,
@@ -418,11 +436,20 @@ const deleteConfirmationLabel = async (
     return `${picked.name} (${targetUuid})`;
   }
 
-  const sources = await fetchSources();
-  const source = sources.find((candidate) => candidate.uuid === targetUuid);
+  const source = await lookupSourceByUuid(targetUuid).catch(() => null);
 
-  return source ? `${source.name} (${targetUuid})` : targetUuid;
+  return source
+    ? `${source.name} (${targetUuid})`
+    : `${targetUuid} (${NO_SOURCE_FOUND_NOTE})`;
 };
+
+// Build the label, then prompt. Kept separate from the runner so the `--yes`
+// short-circuit skips the label lookup (and its fetch) entirely.
+const confirmSourceDeletion = async (
+  picked: Source | null | undefined,
+  targetUuid: string,
+): Promise<boolean> =>
+  confirmDeletion(await deleteConfirmationLabel(picked, targetUuid));
 
 const deleteSourceCommand = async (
   uuid: string | undefined,
@@ -435,10 +462,10 @@ const deleteSourceCommand = async (
     return;
   }
 
-  if (
-    !skipConfirm &&
-    !(await confirmDeletion(await deleteConfirmationLabel(picked, targetUuid)))
-  ) {
+  const confirmed =
+    skipConfirm || (await confirmSourceDeletion(picked, targetUuid));
+
+  if (!confirmed) {
     console.log('Deletion cancelled.');
     return;
   }

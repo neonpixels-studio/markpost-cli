@@ -791,9 +791,9 @@ describe('runSourcesCommand', () => {
     });
 
     // A lookup that can't resolve the uuid (e.g. fetchSources swallowed a
-    // transport error into []) must still confirm on the bare uuid, never block
-    // the delete.
-    it('falls back to the bare uuid when the source lookup misses', async () => {
+    // transport error into []) must still confirm on the bare uuid — and flag
+    // the miss so it isn't mistaken for a matched source — never block delete.
+    it('flags the miss in the label when the source lookup finds nothing', async () => {
       const { fetchSources, deleteSource } = await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
@@ -803,8 +803,32 @@ describe('runSourcesCommand', () => {
 
       await runSourcesCommand(['delete', 'abc-123']);
 
+      const message = vi.mocked(confirm).mock.calls[0][0].message;
+      expect(message).toContain('abc-123');
+      expect(message).toContain('no source found with this uuid');
+      expect(deleteSource).toHaveBeenCalledWith('abc-123');
+    });
+
+    // The label lookup is cosmetic: a timeout (which fetchSources re-throws, not
+    // swallows) must not abort a delete that issued no such read before this
+    // change. It falls back to the bare uuid and still confirms + deletes.
+    it('still confirms and deletes when the label lookup times out', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const timeoutError = Object.assign(new Error('timed out'), {
+        name: 'ApiTimeoutError',
+      });
+      vi.mocked(fetchSources).mockRejectedValue(timeoutError);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { confirm } = await import('@inquirer/prompts');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(confirm).toHaveBeenCalledTimes(1);
       expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('abc-123');
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
+      expect(process.exitCode).toBeUndefined();
     });
 
     // A hostile source name/uuid surfaced through the picker must be stripped
@@ -829,9 +853,10 @@ describe('runSourcesCommand', () => {
       expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('abc 123');
     });
 
-    // The scripting escape hatch: --yes deletes straight away with no prompt.
-    it('skips the confirmation and deletes when --yes is passed', async () => {
-      const { deleteSource } = await import('@/libs/sources.js');
+    // The scripting escape hatch: --yes deletes straight away with no prompt
+    // and no label lookup (the short-circuit must skip fetchSources entirely).
+    it('skips the confirmation and the label lookup when --yes is passed', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
       const { runSourcesCommand } = await import('@/commands/sources.js');
@@ -839,6 +864,7 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['delete', 'abc-123', '--yes']);
 
       expect(confirm).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
     });
 
