@@ -418,16 +418,23 @@ const confirmDeletion = async (label: string): Promise<boolean> =>
     default: false,
   });
 
-const NO_SOURCE_FOUND_NOTE = 'no source found with this uuid';
+// The list loaded but held no source with this uuid. True whether the uuid is
+// wrong or the list was legitimately empty — never asserts more than that.
+const NO_MATCH_NOTE = 'no matching source in the source list';
+// The lookup itself failed (e.g. a timeout, which fetchSources re-throws), so
+// the name is simply unknown — distinct from a confirmed non-match, and never
+// claiming the source doesn't exist.
+const LOOKUP_FAILED_NOTE = 'source name unavailable — could not load the list';
 
 // Build the confirmation label. The interactive pick already carries the
 // Source; a bare-uuid delete looks the source up so the prompt names it —
 // surfacing a wrong-but-valid (or non-existent) copy-pasted uuid before it
 // destroys anything, rather than echoing back the exact string the user typed.
-// The lookup is purely cosmetic, so it's best-effort: any failure (including a
-// timeout, which fetchSources re-throws) falls back to the bare uuid rather
-// than blocking a delete that would otherwise succeed. A miss is called out in
-// the label so it isn't mistaken for a successful match.
+// The lookup is purely cosmetic, so it's best-effort: any failure falls back to
+// the bare uuid rather than blocking a delete that would otherwise succeed. The
+// three outcomes stay distinct in the label so a failed load is never
+// mis-reported as a confirmed non-match. `undefined` marks a thrown lookup,
+// `null` a loaded-but-missing one.
 const deleteConfirmationLabel = async (
   picked: Source | null | undefined,
   targetUuid: string,
@@ -436,15 +443,20 @@ const deleteConfirmationLabel = async (
     return `${picked.name} (${targetUuid})`;
   }
 
-  const source = await lookupSourceByUuid(targetUuid).catch(() => null);
+  const source = await lookupSourceByUuid(targetUuid).catch(() => undefined);
+
+  if (source === undefined) {
+    return `${targetUuid} (${LOOKUP_FAILED_NOTE})`;
+  }
 
   return source
     ? `${source.name} (${targetUuid})`
-    : `${targetUuid} (${NO_SOURCE_FOUND_NOTE})`;
+    : `${targetUuid} (${NO_MATCH_NOTE})`;
 };
 
-// Build the label, then prompt. Kept separate from the runner so the `--yes`
-// short-circuit skips the label lookup (and its fetch) entirely.
+// Compose label-building with the prompt into one named step so the call site
+// reads as a sentence; the `||` at the call site is what short-circuits this
+// away (label lookup included) under `--yes`.
 const confirmSourceDeletion = async (
   picked: Source | null | undefined,
   targetUuid: string,

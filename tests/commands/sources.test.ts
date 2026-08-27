@@ -747,6 +747,8 @@ describe('runSourcesCommand', () => {
 
       expect(deleteSource).not.toHaveBeenCalled();
       expect(console.log).toHaveBeenCalledWith('Deletion cancelled.');
+      // A user "no" is a clean abort, not a failure — must not exit non-zero.
+      expect(process.exitCode).toBeUndefined();
     });
 
     // The confirm message must name the source being deleted so the user knows
@@ -805,13 +807,14 @@ describe('runSourcesCommand', () => {
 
       const message = vi.mocked(confirm).mock.calls[0][0].message;
       expect(message).toContain('abc-123');
-      expect(message).toContain('no source found with this uuid');
+      expect(message).toContain('no matching source in the source list');
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
     });
 
     // The label lookup is cosmetic: a timeout (which fetchSources re-throws, not
     // swallows) must not abort a delete that issued no such read before this
-    // change. It falls back to the bare uuid and still confirms + deletes.
+    // change. It falls back to the bare uuid, says the name is unavailable (not
+    // that the source is missing), and still confirms + deletes.
     it('still confirms and deletes when the label lookup times out', async () => {
       const { fetchSources, deleteSource } = await import('@/libs/sources.js');
       const timeoutError = Object.assign(new Error('timed out'), {
@@ -826,7 +829,11 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['delete', 'abc-123']);
 
       expect(confirm).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('abc-123');
+      const message = vi.mocked(confirm).mock.calls[0][0].message;
+      expect(message).toContain('abc-123');
+      // A failed load must not be reported as a confirmed non-match.
+      expect(message).not.toContain('no matching source in the source list');
+      expect(message).toContain('could not load the list');
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
       expect(process.exitCode).toBeUndefined();
     });
