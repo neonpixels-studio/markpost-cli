@@ -39,6 +39,23 @@ const mockWriteFileSyncRejectingExistingPaths = (
   existingPaths: Iterable<string> = [],
 ): void => {
   const takenPaths = new Set(existingPaths);
+  // Each path carries its own identity, assigned fresh on every write so a
+  // rewrite (rmSync + writeFileSync, the overwrite/refresh path) models a new
+  // file with a new inode — distinct identities let a bug that stats or compares
+  // the wrong path fail loudly instead of matching by accident. One shared device
+  // id models a single-filesystem vault (the common case).
+  const MODEL_DEVICE_ID = 1n;
+  const identities = new Map<string, { dev: bigint; ino: bigint }>();
+  let nextInode = 1n;
+
+  const assignIdentity = (path: string): void => {
+    identities.set(path, { dev: MODEL_DEVICE_ID, ino: nextInode });
+    nextInode += 1n;
+  };
+
+  for (const path of takenPaths) {
+    assignIdentity(path);
+  }
 
   vi.mocked(writeFileSync).mockImplementation((path, _content, options) => {
     const flag =
@@ -49,19 +66,28 @@ const mockWriteFileSyncRejectingExistingPaths = (
     }
 
     takenPaths.add(path as string);
+    assignIdentity(path as string);
   });
 
   vi.mocked(rmSync).mockImplementation((path) => {
     takenPaths.delete(path as string);
+    identities.delete(path as string);
   });
 
   // Back lstat from the same simulated disk: a taken path is an existing regular
-  // file, everything else is missing (undefined). This is what makes the reuse
-  // path actually run in these tests — without it lstat returns undefined and
-  // reuse never triggers, so the eviction/ownership guards would go untested.
-  vi.mocked(lstatSync).mockImplementation((path) =>
-    takenPaths.has(path as string) ? regularFileStats : undefined,
-  );
+  // file carrying its assigned identity, everything else is missing (undefined).
+  // This is what makes the reuse path actually run in these tests — without it
+  // lstat returns undefined and reuse never triggers, so the eviction/ownership
+  // and identity guards would go untested.
+  vi.mocked(lstatSync).mockImplementation((path) => {
+    const identity = identities.get(path as string);
+
+    if (!identity) {
+      return undefined;
+    }
+
+    return identityStats(identity.dev, identity.ino);
+  });
 };
 
 vi.mock('node:fs', () => ({
@@ -74,14 +100,25 @@ vi.mock('node:fs', () => ({
 }));
 
 // lstatSync(path, { throwIfNoEntry: false }) returns undefined for a missing
-// entry, a Stats-like object otherwise. These stand-ins expose just isFile(),
-// the only method resolveReusableWrittenState calls.
-const regularFileStats = { isFile: () => true } as unknown as ReturnType<
-  typeof lstatSync
->;
+// entry, a Stats-like object otherwise. `nonFileStats` models a directory or
+// symlink (isFile() false); `identityStats` models a regular file carrying the
+// `dev`/`ino` the reuse-identity check reads.
 const nonFileStats = { isFile: () => false } as unknown as ReturnType<
   typeof lstatSync
 >;
+
+// A regular-file stat carrying an explicit identity, for tests that swap the file
+// at a tracked path between passes: a new inode (or device) models the different
+// file a replacement drops there.
+const identityStats = (deviceId: bigint, inode: bigint): ReturnType<
+  typeof lstatSync
+> => {
+  return {
+    isFile: () => true,
+    dev: deviceId,
+    ino: inode,
+  } as unknown as ReturnType<typeof lstatSync>;
+};
 
 vi.mock('@/libs/config.js', () => ({
   config: { get: vi.fn() },
@@ -752,6 +789,310 @@ describe('writeMarkdown', () => {
       // basePath is still taken on disk, so the record lands on a real suffixed
       // file instead of being silently settled against the non-file.
       expect(secondPath).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    });
+
+    it('writes a fresh file when a different regular file was dropped at the tracked path, then recovers onto it', () => {
+      // Issue #124: the record's own file is deleted and an unrelated regular
+      // file is dropped at the same path between passes (a new inode). Reusing it
+      // would settle — and under autoDelete, delete server-side — the record
+      // against a file that is not its content: silent data loss. The identity
+      // mismatch must refuse reuse so the record is written fresh first.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const suffixedPath = resolve(outputDirectory, 'test-title-2.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      vi.mocked(writeFileSync).mockClear();
+      // basePath now holds a foreign file (same device, new inode); the fresh
+      // suffixed file the record lands on gets its own identity so the record can
+      // be tracked and reused next pass rather than silently untracked.
+      vi.mocked(lstatSync).mockImplementation((path) => {
+        if (path === basePath) {
+          return identityStats(1n, 4242n);
+        }
+
+        if (path === suffixedPath) {
+          return identityStats(1n, 7n);
+        }
+
+        return undefined;
+      });
+      const secondPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      // The record lands on a real suffixed file (basePath is still taken on
+      // disk) rather than being settled against the foreign file, its own content
+      // is written out, and it is now tracked against that new file.
+      expect(secondPath).toBe(suffixedPath);
+      expect(writeFileSync).toHaveBeenCalledWith(
+        suffixedPath,
+        mockRecord.content,
+        EXCLUSIVE_WRITE_OPTIONS,
+      );
+      expect(writtenState.get(mockRecord.uuid)?.path).toBe(suffixedPath);
+
+      // Third pass: the suffixed file is untouched, so the record reuses it rather
+      // than dropping yet another test-title-3.md duplicate.
+      const thirdPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+      expect(thirdPath).toBe(suffixedPath);
+    });
+
+    it('refuses reuse when the inode matches but the device id differs', () => {
+      // Inode numbers are unique only within one filesystem. If the vault sits on
+      // (or contains) a mount that is remounted, or a replacement file arrives
+      // from a different device, the inode number can collide with the tracked
+      // one. The device id disambiguates: the record wrote {deviceId: 1n, inode: 1n}
+      // (the first assigned identity); a same-inode file on device 2 is a
+      // different file, so reuse must be refused.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      vi.mocked(lstatSync).mockImplementation((path) =>
+        path === basePath ? identityStats(2n, 1n) : undefined,
+      );
+      const secondPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(secondPath).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    });
+
+    it('still reuses the file after an in-place vault edit, which moves mtime but not device or inode', () => {
+      // The regression guard for the whole design: an in-place edit (vim, echo >>)
+      // changes the bytes and the mtime but keeps the same device and inode. That
+      // must NOT count as a different file — matching on mtime (or on birthtime,
+      // which libuv aliases to the edit-moving ctime on Linux) would wrongly refuse
+      // reuse and drop a suffixed duplicate every pass. The edit itself is
+      // preserved by the existing content-hash check (server unchanged here, so no
+      // rewrite).
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+      vi.mocked(writeFileSync).mockClear();
+      // Same device + inode as the first write (mtime is irrelevant to the check
+      // and not modelled); the user edited the bytes on disk.
+      vi.mocked(lstatSync).mockImplementation((path) =>
+        path === basePath ? identityStats(1n, 1n) : undefined,
+      );
+      vi.mocked(readFileSync).mockReturnValue('user edited this in Obsidian');
+      const secondPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      // Reused (no suffixed duplicate) and the user's edit is left untouched.
+      expect(secondPath).toBe(basePath);
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('reuses the file when its identity is unchanged between passes', () => {
+      // The complement of the rejection cases: an untouched file keeps its device
+      // and inode, so reuse proceeds and no suffixed duplicate is dropped.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      const firstPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+      const secondPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(firstPath).toBe(basePath);
+      expect(secondPath).toBe(basePath);
+      expect(writeFileSync).not.toHaveBeenCalledWith(
+        resolve(outputDirectory, 'test-title-2.md'),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('stores the on-disk identity for a written record so a later pass can verify it', () => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
+
+      expect(writtenState.get(mockRecord.uuid)?.identity).toEqual({
+        deviceId: 1n,
+        inode: 1n,
+      });
+    });
+
+    it('tracks a written record without an identity when the post-write stat fails, then reuses it via the existence fallback', () => {
+      // A transient stat failure right after the write (a backup/indexing tool
+      // briefly holding the path, a slow mount) means the identity can't be read.
+      // The record is still tracked, just without an identity, so the reuse check
+      // degrades to the existing-regular-file test next pass rather than dropping
+      // tracking — which would spawn a suffixed duplicate.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      // The disk model is installed (so the base path exists as a regular file),
+      // but the post-write identity read is forced to fail once.
+      vi.mocked(lstatSync).mockReturnValueOnce(undefined);
+      const firstPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(firstPath).toBe(basePath);
+      expect(writtenState.get(mockRecord.uuid)?.path).toBe(basePath);
+      expect(writtenState.get(mockRecord.uuid)?.identity).toBeUndefined();
+
+      // Next pass: identity is unverified, so eligibility falls back to "is the
+      // tracked path still a regular file?" — it is, so the record reuses it
+      // instead of dropping test-title-2.md.
+      vi.mocked(writeFileSync).mockClear();
+      const secondPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(secondPath).toBe(basePath);
+      expect(writeFileSync).not.toHaveBeenCalled();
+
+      // The reuse pass re-armed the guard by adopting the now-readable identity,
+      // so it no longer stays open for this record's lifetime.
+      expect(writtenState.get(mockRecord.uuid)?.identity).toEqual({
+        deviceId: 1n,
+        inode: 1n,
+      });
+
+      // Third pass: a foreign file (new inode) is now at the tracked path. With the
+      // guard re-armed, reuse is refused and the record lands on a suffixed file
+      // rather than being settled against the foreign file.
+      vi.mocked(lstatSync).mockImplementation((path) =>
+        path === basePath ? identityStats(1n, 8888n) : undefined,
+      );
+      const thirdPath = writeMarkdown(
+        mockRecord,
+        'suffix',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(thirdPath).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    });
+
+    it('refuses to settle a skip-strategy record against a foreign file at the tracked path', () => {
+      // Under `skip` a foreign file now occupies the base path. Reuse is refused
+      // (identity mismatch), and `skip` will not clobber an existing file, so the
+      // write is a no-op (null) and the record is left unsettled — safely still
+      // pending on the server — rather than deleted server-side against a file
+      // that is not its content (issue #124). This is `skip`'s normal
+      // occupied-slug contract, not a new stall: the record recovers once the
+      // foreign file is gone.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState);
+      vi.mocked(rmSync).mockClear();
+      vi.mocked(lstatSync).mockImplementation((path) =>
+        path === basePath ? identityStats(1n, 4242n) : undefined,
+      );
+      const secondPath = writeMarkdown(
+        mockRecord,
+        'skip',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      // No path returned, so the caller does not settle the record; the foreign
+      // file is left untouched — `skip` only ever attempts an exclusive create
+      // (which fails EEXIST on the taken path) and never unlinks, so `rmSync` is
+      // not called.
+      expect(secondPath).toBeNull();
+      expect(rmSync).not.toHaveBeenCalled();
+
+      // Recovery: the user removes the foreign file, freeing the path. Next pass
+      // the record writes fresh there and is tracked again — proving the refusal
+      // was a transient occupied-slot skip, not a permanent stall.
+      rmSync(basePath, { force: true });
+      vi.mocked(lstatSync).mockReturnValue(undefined);
+      const thirdPath = writeMarkdown(
+        mockRecord,
+        'skip',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(thirdPath).toBe(basePath);
+      expect(writtenState.get(mockRecord.uuid)?.path).toBe(basePath);
+    });
+
+    it('clobbers a foreign file at the tracked path under the overwrite strategy, persisting the record', () => {
+      // `overwrite` opts into the newest record winning the path. Reuse is refused
+      // by the identity mismatch, but the fresh overwrite write still lands on the
+      // base path and replaces the foreign file with the record's own content, so
+      // the record is persisted before it settles — no data loss, consistent with
+      // the strategy the user chose.
+      mockWriteFileSyncRejectingExistingPaths();
+      const basePath = resolve(outputDirectory, 'test-title.md');
+      const writtenState = new Map<string, WrittenRecordState>();
+
+      writeMarkdown(mockRecord, 'overwrite', new Map(), true, writtenState);
+      vi.mocked(writeFileSync).mockClear();
+      vi.mocked(lstatSync).mockImplementation((path) =>
+        path === basePath ? identityStats(1n, 4242n) : undefined,
+      );
+      const secondPath = writeMarkdown(
+        mockRecord,
+        'overwrite',
+        new Map(),
+        true,
+        writtenState,
+      );
+
+      expect(secondPath).toBe(basePath);
+      expect(writeFileSync).toHaveBeenLastCalledWith(
+        basePath,
+        mockRecord.content,
+        EXCLUSIVE_WRITE_OPTIONS,
+      );
     });
 
     it('falls through to a fresh write when a different record claimed the tracked path after this record\'s file moved', () => {
