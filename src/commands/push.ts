@@ -23,6 +23,10 @@ export const USAGE = `Usage: markpost push [--dry-run] <path...>
 // the one literal, mirroring sync's --dry-run.
 const DRY_RUN_FLAG = '--dry-run';
 
+// Any leading-dash token is a flag, not a path — used to reject a stray or
+// mistyped flag before it's mistaken for a file to push.
+const FLAG_PREFIX = '-';
+
 // `systemicError` is set only when this file failed for a reason that will
 // recur for every other file (auth/5xx). Carrying it on the result rather than
 // throwing lets `pushFiles` decide to abort with a flat check instead of a
@@ -164,6 +168,24 @@ const reportSummary = (run: PushRun, unresolvedCount: number): void => {
 export const runPushCommand = async (args: string[]): Promise<void> => {
   try {
     const dryRun = args.includes(DRY_RUN_FLAG);
+
+    // Reject a stray or mistyped flag (`--dryrun`, `--dry-run=1`) rather than
+    // letting it fall through as a bogus path: push creates server records, so a
+    // fat-fingered --dry-run must fail loud, never silently run the real push
+    // when the user asked for a preview — the guard sync gives its one
+    // destructive command.
+    const unexpectedFlags = args.filter(
+      (arg) => arg.startsWith(FLAG_PREFIX) && arg !== DRY_RUN_FLAG,
+    );
+
+    if (unexpectedFlags.length > 0) {
+      failWithUsage(
+        `Unexpected arguments: ${unexpectedFlags.join(' ')}`,
+        USAGE,
+      );
+      return;
+    }
+
     const paths = args.filter((arg) => arg.length > 0 && arg !== DRY_RUN_FLAG);
 
     if (paths.length === 0) {
@@ -171,7 +193,10 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    if (!(await checkConfig())) {
+    // A dry run makes no network calls, so it doesn't need a configured token or
+    // output directory — let a user confirm which files a glob matches before
+    // setting up auth. The real push still requires config.
+    if (!dryRun && !(await checkConfig())) {
       return;
     }
 

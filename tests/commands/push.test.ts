@@ -606,6 +606,45 @@ describe('runPushCommand', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  // A mistyped --dry-run must fail loud, never fall through to the real push and
+  // create records the user only meant to preview.
+  it('rejects a mistyped dry-run flag without resolving inputs or pushing', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    const { createRecord } = await import('@/libs/records.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', '--dryrun']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Unexpected arguments: --dryrun'),
+    );
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(resolveMarkdownInputs).not.toHaveBeenCalled();
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A dry run makes no network calls, so it must not gate on a configured token.
+  it('does not check config on a dry run', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md'],
+      missing: [],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', '--dry-run']);
+
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push 1 file(s):'),
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it('excludes the --dry-run flag from the resolved input paths', async () => {
     const { resolveMarkdownInputs } = await import('@/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({

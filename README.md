@@ -20,7 +20,7 @@ server-side records.
 | Command | Description |
 |---|---|
 | `markpost sync [--dry-run]` | Fetch all pending records, write each to a markdown file, and (when `autoDelete` is enabled) delete the written records from the server. `--dry-run` reports the exact write/delete plan without writing or mutating anything |
-| `markpost push <path...>` | Create records from one or more markdown files, directories, or glob patterns |
+| `markpost push [--dry-run] <path...>` | Create records from one or more markdown files, directories, or glob patterns. `--dry-run` reports which files would be pushed, plus any missing or unreadable inputs, without creating any records |
 | `markpost get <uuid> [--json]` | Fetch and display a single record; pass `--json` for machine-readable output |
 | `markpost sources <list\|create\|update\|delete> [uuid]` | Manage sources; `sources list --json` prints machine-readable output |
 | `markpost records list [--source <type>] [--status <status>] [--search <text>] [--json]` | List records without deleting them, optionally filtered by source, status, or search text; pass `--json` for machine-readable output |
