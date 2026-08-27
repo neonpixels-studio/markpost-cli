@@ -25,9 +25,14 @@ export const USAGE = `Usage: markpost push [--dry-run] <path...>
 const DRY_RUN_FLAG = '--dry-run';
 
 // A leading `--` marks a long flag, not a path — used to reject a stray or
-// mistyped long flag before it's mistaken for a file to push. Kept to `--` (not
-// a bare `-`) so a legitimate dash-leading filename from a glob still pushes.
+// mistyped long flag before it's mistaken for a file to push. A genuine
+// dash-leading filename is still pushable after the OPTIONS_END separator below.
 const FLAG_PREFIX = '--';
+
+// POSIX end-of-options separator: everything after the first bare `--` is a
+// literal path, even if it starts with dashes — the standard escape hatch for a
+// file whose name would otherwise look like a flag (e.g. `push -- --notes.md`).
+const OPTIONS_END = '--';
 
 // `systemicError` is set only when this file failed for a reason that will
 // recur for every other file (auth/5xx). Carrying it on the result rather than
@@ -66,11 +71,21 @@ const pushFile = async (filePath: string): Promise<PushResult> => {
     const record = await createRecord(title, content);
 
     if (!record) {
-      console.error(chalk.redBright(`Failed to push "${filePath}".`));
+      console.error(
+        chalk.redBright(sanitizeForTerminal(`Failed to push "${filePath}".`)),
+      );
       return { filePath, pushed: false };
     }
 
-    console.log(chalk.greenBright(`Pushed "${record.title}" (${record.uuid})`));
+    // record.title/uuid come from the API response (untrusted, see terminal.ts),
+    // and filePath can be a directory-walk name the user never typed — sanitize
+    // every push output line so a crafted title or filename can't inject a live
+    // escape into the terminal.
+    console.log(
+      chalk.greenBright(
+        sanitizeForTerminal(`Pushed "${record.title}" (${record.uuid})`),
+      ),
+    );
     return { filePath, pushed: true };
   } catch (error) {
     // A timeout must abort the whole batch, not be logged per-file and
@@ -87,7 +102,11 @@ const pushFile = async (filePath: string): Promise<PushResult> => {
     }
 
     console.error(
-      chalk.redBright(`Failed to push "${filePath}": ${toMessage(error)}`),
+      chalk.redBright(
+        sanitizeForTerminal(
+          `Failed to push "${filePath}": ${toMessage(error)}`,
+        ),
+      ),
     );
     return { filePath, pushed: false };
   }
@@ -171,7 +190,9 @@ const reportSummary = (run: PushRun, unresolvedCount: number): void => {
   console.log(chalk.dim(`Pushed ${succeeded}/${total} file(s) successfully.`));
 
   if (abort) {
-    console.error(chalk.redBright(abortLine(abort)));
+    // abort.filePath and abort.reason (a server-classified failure) are both
+    // untrusted, so sanitize the composed line like the per-file output above.
+    console.error(chalk.redBright(sanitizeForTerminal(abortLine(abort))));
   }
 
   // `abort` always leaves a `pushed: false` result behind, so `failed` already
@@ -186,12 +207,21 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
   try {
     const dryRun = args.includes(DRY_RUN_FLAG);
 
+    // Split on the first `--`: args before it are flag-checked, args after it
+    // are literal paths (so a dash-leading filename stays pushable). The
+    // separator itself belongs to neither slice.
+    const separatorIndex = args.indexOf(OPTIONS_END);
+    const optionArgs =
+      separatorIndex === -1 ? args : args.slice(0, separatorIndex);
+    const literalPaths =
+      separatorIndex === -1 ? [] : args.slice(separatorIndex + 1);
+
     // Reject a stray or mistyped flag (`--dryrun`, `--dry-run=1`) rather than
     // letting it fall through as a bogus path: push creates server records, so a
     // fat-fingered --dry-run must fail loud, never silently run the real push
     // when the user asked for a preview — the guard sync gives its one
     // destructive command.
-    const unexpectedFlags = args.filter(
+    const unexpectedFlags = optionArgs.filter(
       (arg) => arg.startsWith(FLAG_PREFIX) && arg !== DRY_RUN_FLAG,
     );
 
@@ -203,7 +233,10 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    const paths = args.filter((arg) => arg.length > 0 && arg !== DRY_RUN_FLAG);
+    const paths = [
+      ...optionArgs.filter((arg) => arg.length > 0 && arg !== DRY_RUN_FLAG),
+      ...literalPaths.filter((arg) => arg.length > 0),
+    ];
 
     if (paths.length === 0) {
       failWithUsage('No path given.', USAGE);
