@@ -207,6 +207,96 @@ describe('resolveMarkdownInputs', () => {
     expect(missing).toEqual([join(workspace, 'does-not-exist.md')]);
   });
 
+  describe('home directory expansion', () => {
+    let originalHome: string | undefined;
+
+    beforeEach(() => {
+      originalHome = process.env.HOME;
+      process.env.HOME = workspace;
+    });
+
+    afterEach(() => {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+        return;
+      }
+
+      process.env.HOME = originalHome;
+    });
+
+    it('expands a leading ~ so a quoted glob matches under home', () => {
+      const note = createFile('vault/note.md');
+
+      const { files, missing } = resolveMarkdownInputs(['~/vault/**']);
+
+      expect(files).toEqual([note]);
+      expect(missing).toEqual([]);
+    });
+
+    it('expands a leading $HOME so a quoted glob matches under home', () => {
+      const note = createFile('vault/note.md');
+
+      const { files, missing } = resolveMarkdownInputs(['$HOME/vault/**']);
+
+      expect(files).toEqual([note]);
+      expect(missing).toEqual([]);
+    });
+
+    it('expands a leading ${HOME} so a quoted glob matches under home', () => {
+      const note = createFile('vault/note.md');
+
+      const { files, missing } = resolveMarkdownInputs(['${HOME}/vault/**']);
+
+      expect(files).toEqual([note]);
+      expect(missing).toEqual([]);
+    });
+
+    it('expands a bare ~ to the home directory itself', () => {
+      const note = createFile('note.md');
+
+      const { files } = resolveMarkdownInputs(['~']);
+
+      expect(files).toContain(note);
+    });
+
+    it('expands a bare $HOME to the home directory itself', () => {
+      const note = createFile('note.md');
+
+      const { files } = resolveMarkdownInputs(['$HOME']);
+
+      expect(files).toContain(note);
+    });
+
+    it('leaves a path without a home reference untouched', () => {
+      const note = createFile('vault/note.md');
+
+      const { files } = resolveMarkdownInputs([join(workspace, 'vault')]);
+
+      expect(files).toEqual([note]);
+    });
+
+    it('does not expand a ~ that is not a home reference', () => {
+      const { files, missing } = resolveMarkdownInputs(['~backup/note.md']);
+
+      expect(files).toEqual([]);
+      expect(missing).toEqual(['~backup/note.md']);
+    });
+
+    it('does not expand a $HOME prefix that is not a home reference', () => {
+      const { files, missing } = resolveMarkdownInputs(['$HOMEBREW/note.md']);
+
+      expect(files).toEqual([]);
+      expect(missing).toEqual(['$HOMEBREW/note.md']);
+    });
+
+    it('reports an unmatched home reference as the raw input, not expanded', () => {
+      const { files, missing } = resolveMarkdownInputs(['~/nope.md']);
+
+      expect(files).toEqual([]);
+      expect(missing).toEqual(['~/nope.md']);
+    });
+  });
+
   it('returns no files when nothing resolves', () => {
     const { files, missing } = resolveMarkdownInputs([
       join(workspace, 'nope.md'),
