@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
-import { input, select } from '@inquirer/prompts';
+import { confirm, input, select } from '@inquirer/prompts';
 import {
   createSource,
   deleteSource,
@@ -25,7 +25,7 @@ export const USAGE = `Usage: markpost sources <list|create|update|delete> [uuid]
   list           List all sources (pass --json for machine-readable output)
   create         Create a new source (prompts for details)
   update [uuid]  Update a source's route folder; prompts to pick one if uuid is omitted
-  delete [uuid]  Delete a source; prompts to pick one if uuid is omitted`;
+  delete [uuid]  Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass --yes to skip the prompt (for scripts)`;
 
 export const buildEndpointUrl = (
   sourceType: SourceType,
@@ -45,15 +45,25 @@ export const buildEndpointUrl = (
 // Only `list` renders JSON; the other subcommands are interactive or emit a
 // one-off result, so --json means nothing to them.
 const LIST_SUBCOMMAND = 'list';
+// `delete` is the only subcommand `--yes` applies to, so it's named for the
+// guard that rejects the flag elsewhere as well as its handler-map key.
+const DELETE_SUBCOMMAND = 'delete';
 
 const SOURCES_HANDLERS = new Map<
   string,
-  (uuid: string | undefined, json: boolean) => Promise<void>
+  (
+    uuid: string | undefined,
+    json: boolean,
+    skipConfirm: boolean,
+  ) => Promise<void>
 >([
   [LIST_SUBCOMMAND, (_uuid, json) => listSources(json)],
   ['create', () => createSourceCommand()],
   ['update', (uuid) => updateSourceCommand(uuid)],
-  ['delete', (uuid) => deleteSourceCommand(uuid)],
+  [
+    DELETE_SUBCOMMAND,
+    (uuid, _json, skipConfirm) => deleteSourceCommand(uuid, skipConfirm),
+  ],
 ]);
 
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
@@ -65,14 +75,16 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
     // still prompts rather than trying to delete a source named "--json") and
     // rejects an unknown/mistyped flag. Only `list` reads json.
-    const { positionals } = parseArgs({
+    const { positionals, values } = parseArgs({
       args,
       allowPositionals: true,
       options: {
         json: { type: 'boolean' },
+        yes: { type: 'boolean' },
       },
     });
     const [subcommand, uuid] = positionals;
+    const skipConfirm = Boolean(values.yes);
     const handler = SOURCES_HANDLERS.get(subcommand);
 
     // Validate before the config check so a bad subcommand fails on usage
@@ -95,11 +107,23 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
+    // `--yes` only skips the delete confirmation; reject it anywhere else
+    // rather than silently ignoring it, mirroring the --json guard above so a
+    // misplaced flag fails loudly instead of appearing to take effect.
+    if (skipConfirm && subcommand !== DELETE_SUBCOMMAND) {
+      failWithUsage(
+        `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\`.`,
+        USAGE,
+        json,
+      );
+      return;
+    }
+
     if (!(await checkConfig(json))) {
       return;
     }
 
-    await handler(uuid, json);
+    await handler(uuid, json, skipConfirm);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
     // that's a user abort, not a command failure, so don't flag it non-zero.
@@ -336,10 +360,32 @@ const updateSourceCommand = async (uuid?: string): Promise<void> => {
   await promptAndApplyRouteFolder(target);
 };
 
-const deleteSourceCommand = async (uuid?: string): Promise<void> => {
+// Deleting a source is irreversible: it drops the ingest config and the
+// one-time signing secret, which can never be retrieved again. The uuid is
+// sanitized because it may have come from an untrusted API response via the
+// interactive picker. Defaults to "no" so a bare Enter cancels rather than
+// deletes. Isolated here so the delete flow stays unit-testable by mocking the
+// prompt.
+const confirmDeletion = async (targetUuid: string): Promise<boolean> =>
+  confirm({
+    message: `Delete source ${sanitizeForTerminal(
+      targetUuid,
+    )}? This drops its ingest config and one-time signing secret and cannot be undone.`,
+    default: false,
+  });
+
+const deleteSourceCommand = async (
+  uuid: string | undefined,
+  skipConfirm: boolean,
+): Promise<void> => {
   const targetUuid = uuid ?? (await promptForSource('delete'))?.uuid;
 
   if (!targetUuid) {
+    return;
+  }
+
+  if (!skipConfirm && !(await confirmDeletion(targetUuid))) {
+    console.log('Deletion cancelled.');
     return;
   }
 
