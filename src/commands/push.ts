@@ -11,10 +11,17 @@ import { resolveMarkdownInputs } from '@/libs/files.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithUsage } from '@/libs/usage.js';
 
-export const USAGE = `Usage: markpost push <path...>
+export const USAGE = `Usage: markpost push [--dry-run] <path...>
 
-  path  One or more markdown files, directories (recursed for .md files),
-        or glob patterns to create records from`;
+  path       One or more markdown files, directories (recursed for .md files),
+             or glob patterns to create records from
+  --dry-run  Preview the resolved files (and any missing/unreadable inputs)
+             without creating any records`;
+
+// Preview flag: resolve the inputs and print the exact push plan without
+// creating any server records. Named so the parse check and usage text share
+// the one literal, mirroring sync's --dry-run.
+const DRY_RUN_FLAG = '--dry-run';
 
 // `systemicError` is set only when this file failed for a reason that will
 // recur for every other file (auth/5xx). Carrying it on the result rather than
@@ -116,6 +123,25 @@ const abortLine = (abort: PushAbort): string => {
   return `${head} ${abort.unattempted} file(s) not attempted.`;
 };
 
+// The push dry run mirrors sync's --dry-run output style (a yellow preview
+// header over a dim "would" list). It can't reuse sync's reportDryRunPlan:
+// that previews server records being written to local files, whereas push
+// previews local files being sent to the server — disjoint inputs, so only the
+// visual style is shared, not the code. File paths are the user's own local
+// inputs (not untrusted API data), so they're printed unsanitized like the rest
+// of push's file output.
+const reportPushDryRun = (filePaths: string[]): void => {
+  console.log(
+    chalk.yellow(
+      `Dry run — previewing ${filePaths.length} file(s); nothing will be pushed.`,
+    ),
+  );
+  console.log(chalk.dim(`Would push ${filePaths.length} file(s):`));
+  filePaths.forEach((filePath) => {
+    console.log(chalk.dim(`  -> ${filePath}`));
+  });
+};
+
 const reportSummary = (run: PushRun, unresolvedCount: number): void => {
   const { results, abort, total } = run;
   const succeeded = results.filter((result) => result.pushed).length;
@@ -137,7 +163,8 @@ const reportSummary = (run: PushRun, unresolvedCount: number): void => {
 
 export const runPushCommand = async (args: string[]): Promise<void> => {
   try {
-    const paths = args.filter((arg) => arg.length > 0);
+    const dryRun = args.includes(DRY_RUN_FLAG);
+    const paths = args.filter((arg) => arg.length > 0 && arg !== DRY_RUN_FLAG);
 
     if (paths.length === 0) {
       failWithUsage('No path given.', USAGE);
@@ -164,8 +191,25 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
+    const unresolvedCount = missing.length + skipped.length;
+
+    // A dry run stops before any createRecord call: report the resolved plan,
+    // then mirror the real run's honesty by exiting non-zero when inputs went
+    // unresolved (a wrong glob, an unreadable path) — the exact mistake the
+    // preview exists to catch — minus the per-file push failures a dry run
+    // can't produce.
+    if (dryRun) {
+      reportPushDryRun(files);
+
+      if (unresolvedCount > 0) {
+        process.exitCode = 1;
+      }
+
+      return;
+    }
+
     const run = await pushFiles(files);
-    reportSummary(run, missing.length + skipped.length);
+    reportSummary(run, unresolvedCount);
   } catch (error) {
     console.error(chalk.redBright(toMessage(error)));
     process.exitCode = 1;
