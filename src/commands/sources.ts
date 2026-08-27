@@ -66,6 +66,51 @@ const SOURCES_HANDLERS = new Map<
   ],
 ]);
 
+// The invocation-level usage checks that all fail the same way (one usage
+// message, non-zero exit). Returns the message to show, or null when the
+// invocation is valid. Kept in one place so their ordering is a single unit
+// rather than four near-identical guard blocks in the runner.
+const usageErrorFor = (
+  subcommand: string,
+  uuid: string | undefined,
+  json: boolean,
+  skipConfirm: boolean,
+): string | null => {
+  // Reject --json where it does nothing rather than silently ignoring it:
+  // `sources create --json | jq` would otherwise "succeed" with human text on
+  // stdout, losing the one-time signing secret it was trying to capture.
+  if (json && subcommand !== LIST_SUBCOMMAND) {
+    return `--json is only supported by \`sources ${LIST_SUBCOMMAND}\`.`;
+  }
+
+  // --yes only skips the delete confirmation; reject it elsewhere so a
+  // misplaced flag fails loudly instead of appearing to take effect.
+  if (skipConfirm && subcommand !== DELETE_SUBCOMMAND) {
+    return `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\`.`;
+  }
+
+  // --yes promises a non-interactive delete, so it needs an explicit uuid —
+  // without one the picker still opens and a script blocks on it forever.
+  if (skipConfirm && !uuid) {
+    return `--yes requires a uuid: \`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`.`;
+  }
+
+  // The confirmation prompt can't be answered without an interactive terminal:
+  // inquirer renders to stdout and reads stdin, and its EOF abort is swallowed
+  // as a Ctrl+C below — so a redirected/non-interactive `sources delete` would
+  // hang or delete nothing yet still exit 0. Fail loud and point scripts at
+  // --yes.
+  if (
+    subcommand === DELETE_SUBCOMMAND &&
+    !skipConfirm &&
+    (!process.stdin.isTTY || !process.stdout.isTTY)
+  ) {
+    return '`sources delete` needs an interactive terminal to confirm; pass --yes to delete without a prompt.';
+  }
+
+  return null;
+};
+
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
   // whichever contract the caller asked for, even one thrown before parsing.
@@ -88,62 +133,18 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     const handler = SOURCES_HANDLERS.get(subcommand);
 
     // Validate before the config check so a bad subcommand fails on usage
-    // alone, without needing a configured account.
+    // alone, without needing a configured account. The bad-subcommand case
+    // fails differently (it prints the subcommand), so it stays here; the rest
+    // share one usage-error shape and live in `usageErrorFor`.
     if (!handler) {
       failWithSubcommandUsage(subcommand, USAGE, json);
       return;
     }
 
-    // Reject --json where it does nothing rather than silently ignoring it:
-    // `sources create --json | jq` would otherwise "succeed" with human text on
-    // stdout, and the one-time signing secret it was trying to capture would be
-    // lost (see createSourceCommand's unrecoverable-secret warning).
-    if (json && subcommand !== LIST_SUBCOMMAND) {
-      failWithUsage(
-        `--json is only supported by \`sources ${LIST_SUBCOMMAND}\`.`,
-        USAGE,
-        json,
-      );
-      return;
-    }
+    const usageError = usageErrorFor(subcommand, uuid, json, skipConfirm);
 
-    // `--yes` only skips the delete confirmation; reject it anywhere else
-    // rather than silently ignoring it, mirroring the --json guard above so a
-    // misplaced flag fails loudly instead of appearing to take effect.
-    if (skipConfirm && subcommand !== DELETE_SUBCOMMAND) {
-      failWithUsage(
-        `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\`.`,
-        USAGE,
-        json,
-      );
-      return;
-    }
-
-    // `--yes` promises a non-interactive delete, so it needs an explicit uuid —
-    // without one the picker still opens and a script blocks on it forever.
-    if (skipConfirm && !uuid) {
-      failWithUsage(
-        `--yes requires a uuid: \`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`.`,
-        USAGE,
-        json,
-      );
-      return;
-    }
-
-    // The confirmation prompt can't be answered without a TTY: inquirer aborts
-    // on stdin EOF and that abort is swallowed as a Ctrl+C below, so a
-    // non-interactive `sources delete` would delete nothing yet still exit 0.
-    // Fail loud instead and point scripts at --yes.
-    if (
-      subcommand === DELETE_SUBCOMMAND &&
-      !skipConfirm &&
-      !process.stdin.isTTY
-    ) {
-      failWithUsage(
-        '`sources delete` needs an interactive terminal to confirm; pass --yes to delete without a prompt.',
-        USAGE,
-        json,
-      );
+    if (usageError) {
+      failWithUsage(usageError, USAGE, json);
       return;
     }
 
@@ -402,12 +403,31 @@ const confirmDeletion = async (label: string): Promise<boolean> =>
     default: false,
   });
 
+// Build the confirmation label. The interactive pick already carries the
+// Source; a bare-uuid delete looks the source up (read-only, best-effort) so
+// the prompt names it — surfacing a wrong-but-valid copy-pasted uuid before it
+// destroys the source rather than echoing back the exact string the user
+// typed. Falls back to the raw uuid when the list can't be loaded
+// (fetchSources swallows transport errors into []), so a lookup miss never
+// blocks a delete that would otherwise succeed.
+const deleteConfirmationLabel = async (
+  picked: Source | null | undefined,
+  targetUuid: string,
+): Promise<string> => {
+  if (picked) {
+    return `${picked.name} (${targetUuid})`;
+  }
+
+  const sources = await fetchSources();
+  const source = sources.find((candidate) => candidate.uuid === targetUuid);
+
+  return source ? `${source.name} (${targetUuid})` : targetUuid;
+};
+
 const deleteSourceCommand = async (
   uuid: string | undefined,
   skipConfirm: boolean,
 ): Promise<void> => {
-  // Only the interactive path yields a full Source; the direct-uuid path
-  // deletes by uuid without a lookup, so it can only name the uuid.
   const picked = uuid ? undefined : await promptForSource('delete');
   const targetUuid = uuid ?? picked?.uuid;
 
@@ -415,11 +435,10 @@ const deleteSourceCommand = async (
     return;
   }
 
-  // Name the source the user picked ("name (uuid)") so the confirmation is
-  // recognizable; a bare-uuid delete only has the uuid to show.
-  const label = picked ? `${picked.name} (${targetUuid})` : targetUuid;
-
-  if (!skipConfirm && !(await confirmDeletion(label))) {
+  if (
+    !skipConfirm &&
+    !(await confirmDeletion(await deleteConfirmationLabel(picked, targetUuid)))
+  ) {
     console.log('Deletion cancelled.');
     return;
   }
