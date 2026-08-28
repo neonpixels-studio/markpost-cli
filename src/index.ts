@@ -594,7 +594,11 @@ async function markWrittenRecordsSynced(
   }
 
   spinner.success(`Marked ${writtenRecords.length} records synced!`);
-  return false;
+  // Return the same stop signal from both exits so the daemon-stop decision has a
+  // single source. With zero pending this is always false (a permanent abort maps
+  // its chunk to MARK_FAILED, so it can't reach here), but deriving it rather than
+  // hardcoding keeps the two paths from drifting.
+  return stoppingAutoSync;
 }
 
 // Ends a truncated sync on the truncation warning, never on a green success

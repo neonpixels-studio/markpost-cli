@@ -470,14 +470,14 @@ const outcomesFromResponse = (
 // The result of PATCHing one chunk: a per-item outcome list plus whether the
 // run should stop. `abort` is set when the failure dooms every remaining chunk
 // too (a hung server or a systemic auth/rate-limit/5xx failure), so the caller
-// stops rather than firing a burst it already knows will fail. `abortReason`
-// carries WHY up to the run level — `'timeout'` and `'permanent'` distinguish the
-// hung-server and dead-token cases (the latter also stops the daemon); a transient
-// systemic abort keeps `null` (aborts this run, daemon lives). `null` with
-// `abort: false` is the plain success/per-chunk-failure case.
+// stops rather than firing a burst it already knows will fail. A non-null
+// `abortReason` IS the abort signal (the run stops on it) and carries WHY:
+// `'timeout'` and `'permanent'` distinguish the hung-server and dead-token cases
+// (the latter also stops the daemon), and `'transient'` a systemic 429/5xx (aborts
+// this run, daemon lives). `null` is the plain success/per-chunk-failure case that
+// doesn't abort. One field, so "aborted" and "why" can never disagree.
 type MarkSyncedChunkResult = {
   outcomes: MarkSyncedOutcome[];
-  abort: boolean;
   abortReason: MarkAbortReason;
 };
 
@@ -525,7 +525,6 @@ const markSyncedChunk = async (
 
     return {
       outcomes: outcomesFromResponse(items, body),
-      abort: false,
       abortReason: null,
     };
   } catch (error) {
@@ -544,38 +543,30 @@ const markSyncedChunk = async (
     if (error instanceof ApiTimeoutError) {
       return {
         outcomes: items.map(() => MARK_TIMED_OUT),
-        abort: true,
         abortReason: 'timeout',
       };
     }
 
-    // Every failed record in the chunk stays `MARK_FAILED` (pending, retried
-    // next run). Permanence is classified ONCE and folded into `abort`, so
-    // `abort` and `abortReason` can't disagree even if `isPermanent` is ever
-    // widened beyond `isSystemic`: a permanent failure always aborts AND stops
-    // the daemon; a transient systemic failure (auth/rate-limit/5xx that may be a
-    // blip) aborts to back off — a sustained 429 stops after the first chunk
+    // Every failed record in the chunk stays `MARK_FAILED` (pending, retried next
+    // run). A non-null `abortReason` is what stops the run, so classification is
+    // the single source of the abort decision: a PERMANENT failure (dead token /
+    // forbidden account: 401/403) reports `'permanent'` and also stops the daemon;
+    // a transient systemic failure (auth/rate-limit/5xx that may be a blip) reports
+    // `'transient'` to back off — a sustained 429 stops after the first chunk
     // rather than firing the whole burst — but keeps the daemon alive; a plain
-    // per-chunk failure doesn't abort, since a later chunk may still succeed.
+    // per-chunk failure is `null` and doesn't abort, since a later chunk may
+    // still succeed.
     const failedOutcomes: MarkSyncedOutcome[] = items.map(() => MARK_FAILED);
 
     if (isPermanentApiFailure(error)) {
-      return {
-        outcomes: failedOutcomes,
-        abort: true,
-        abortReason: 'permanent',
-      };
+      return { outcomes: failedOutcomes, abortReason: 'permanent' };
     }
 
     if (isSystemicApiFailure(error)) {
-      return {
-        outcomes: failedOutcomes,
-        abort: true,
-        abortReason: 'transient',
-      };
+      return { outcomes: failedOutcomes, abortReason: 'transient' };
     }
 
-    return { outcomes: failedOutcomes, abort: false, abortReason: null };
+    return { outcomes: failedOutcomes, abortReason: null };
   }
 };
 
@@ -617,7 +608,9 @@ export const markRecordsSynced = async (
 
     outcomes.push(...chunkResult.outcomes);
 
-    if (chunkResult.abort) {
+    // A non-null reason is the abort signal: stop here and surface why, leaving
+    // the trailing chunks unsent (their records get no outcome, read as pending).
+    if (chunkResult.abortReason !== null) {
       return { outcomes, abortReason: chunkResult.abortReason };
     }
   }
