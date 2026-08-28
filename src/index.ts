@@ -435,6 +435,15 @@ function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   }));
 }
 
+// How a mark-synced run ended, for the failure report: the stop reason plus how
+// many pending records the run never reached. Bundled because they're only ever
+// meaningful together (the abort description), so the headline can't be handed a
+// count that belongs to a different reason.
+type MarkStopReport = {
+  reason: MarkSyncedStop;
+  unattemptedCount: number;
+};
+
 // Headline for the mark-synced failure report. An abort reads differently from a
 // scatter of per-record failures: it stopped the run early, so the pending count
 // can fold in records never attempted after the abort. `unattemptedCount` is how
@@ -444,16 +453,15 @@ function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
 // listed records pending on the server.
 function markFailureHeadline(
   pendingCount: number,
-  stoppedBy: MarkSyncedStop,
-  unattemptedCount: number,
+  stop: MarkStopReport,
 ): string {
-  if (stoppedBy === MARK_TIMED_OUT) {
+  if (stop.reason === MARK_TIMED_OUT) {
     return `Timed out marking records synced — stopped after the first timeout; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
-  if (stoppedBy === MARK_ABORTED) {
+  if (stop.reason === MARK_ABORTED) {
     const notAttemptedClause =
-      unattemptedCount > 0 ? ' and the rest were not attempted' : '';
+      stop.unattemptedCount > 0 ? ' and the rest were not attempted' : '';
     return `Aborted marking records synced — the server rejected the request wholesale (a 400/422), so every record would fail the same way${notAttemptedClause}; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
@@ -467,13 +475,10 @@ function markFailureHeadline(
 function reportMarkFailures(
   failures: WrittenRecord[],
   markedCount: number,
-  stoppedBy: MarkSyncedStop,
-  unattemptedCount: number,
+  stop: MarkStopReport,
   spinner: Spinner,
 ): void {
-  spinner.error(
-    markFailureHeadline(failures.length, stoppedBy, unattemptedCount),
-  );
+  spinner.error(markFailureHeadline(failures.length, stop));
   failures.forEach(({ record, filePath }) => {
     // Sanitize the composed line: record.uuid comes from the same untrusted API
     // response as a title, and filePath embeds the user-configured output path —
@@ -549,8 +554,7 @@ async function markWrittenRecordsSynced(
     reportMarkFailures(
       pending,
       writtenRecords.length - pending.length,
-      stoppedBy,
-      unattemptedCount,
+      { reason: stoppedBy, unattemptedCount },
       spinner,
     );
     return;

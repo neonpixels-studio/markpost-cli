@@ -1588,11 +1588,14 @@ describe('markRecordsSynced', () => {
     // Only two requests fire — the third chunk is never attempted.
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(result.stoppedBy).toBe(MARK_ABORTED);
-    // Both attempted chunks are MARK_ABORTED (200); chunk 3 has no outcome.
+    // Chunk 1 was run past (MARK_FAILED); only the stopping chunk 2 is MARK_ABORTED.
     expect(result.outcomes).toHaveLength(200);
-    expect(result.outcomes.every((outcome) => outcome === MARK_ABORTED)).toBe(
-      true,
-    );
+    expect(
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
+    ).toBe(true);
+    expect(
+      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+    ).toBe(true);
   });
 
   it('aborts after two malformed-payload 400 rejections with nothing synced', async () => {
@@ -1602,9 +1605,12 @@ describe('markRecordsSynced', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(result.stoppedBy).toBe(MARK_ABORTED);
     expect(result.outcomes).toHaveLength(200);
-    expect(result.outcomes.every((outcome) => outcome === MARK_ABORTED)).toBe(
-      true,
-    );
+    expect(
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
+    ).toBe(true);
+    expect(
+      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+    ).toBe(true);
   });
 
   // Two 4xx rejections with DIFFERENT messages look like two isolated per-record
@@ -1627,11 +1633,43 @@ describe('markRecordsSynced', () => {
     });
 
     const result = await markRecordsSynced(items(250));
-    // Messages differ per chunk, so no abort — all three chunks are attempted.
+    // Messages differ per chunk, so no abort — all three chunks are attempted and
+    // rejected as plain per-chunk failures.
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(result.stoppedBy).toBeNull();
     expect(result.outcomes).toHaveLength(250);
-    expect(result.outcomes.every((outcome) => outcome === MARK_ABORTED)).toBe(
+    expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
+      true,
+    );
+  });
+
+  // Two identical rejections with a non-request-shape chunk BETWEEN them are not
+  // consecutive, so they don't confirm an envelope fault — the run keeps going.
+  it('does not abort on two matching rejections split by a plain failure', async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 2) {
+        return Promise.reject(new Error('Network error'));
+      }
+
+      return Promise.resolve({
+        ok: false,
+        status: 422,
+        json: () =>
+          Promise.resolve({
+            data: { errors: [{ title: 'Rejected', detail: 'nope' }] },
+          }),
+      });
+    });
+
+    const result = await markRecordsSynced(items(250));
+    // Chunk 2 (network error) resets the consecutiveness, so chunk 3 doesn't
+    // confirm chunk 1 — all three fire and nothing aborts.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result.stoppedBy).toBeNull();
+    expect(result.outcomes).toHaveLength(250);
+    expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
       true,
     );
   });
@@ -1658,11 +1696,12 @@ describe('markRecordsSynced', () => {
     });
 
     const result = await markRecordsSynced(items(250));
-    // All three chunks are attempted — one rejection doesn't abort.
+    // All three chunks are attempted — one rejection doesn't abort, and the run
+    // completes, so chunk 1 stays a plain MARK_FAILED (never MARK_ABORTED).
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(result.stoppedBy).toBeNull();
     expect(
-      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
       result.outcomes.slice(100).every((outcome) => outcome === MARK_SYNCED),
@@ -1691,14 +1730,15 @@ describe('markRecordsSynced', () => {
     });
 
     const result = await markRecordsSynced(items(250));
-    // Chunk 1 synced, so chunks 2 and 3 both fire despite being rejected.
+    // Chunk 1 synced, so chunks 2 and 3 both fire despite being rejected, and the
+    // run completes — the rejected chunks stay plain MARK_FAILED.
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(result.stoppedBy).toBeNull();
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_SYNCED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes.slice(100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
   });
 
