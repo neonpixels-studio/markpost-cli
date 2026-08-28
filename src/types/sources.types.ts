@@ -15,6 +15,43 @@ export const SOURCE_TYPES = [
 
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
+// Providers whose signing secret the user pastes in (the provider issues it),
+// so rotation collects a new value rather than revealing a generated one.
+// Mirrors markpost's MANUAL_SECRET_PROVIDER_IDS
+// (shared/utils/webhookSecrets.ts); keep in lockstep — see
+// tests/types/sources.types.test.ts.
+export const MANUAL_SECRET_PROVIDERS = ['stripe'] as const;
+
+// Providers whose secret markpost generates and reveals exactly once on
+// rotation. Mirrors markpost's SECRET_BACKED_PROVIDER_IDS
+// (shared/utils/webhookSecrets.ts); keep in lockstep.
+export const SECRET_BACKED_PROVIDERS = [
+  'github',
+  'zapier',
+  'shortcuts',
+] as const;
+
+// Every provider a source can rotate a secret for — the union of the manual
+// and generated sets, mirroring markpost's ROTATABLE_PROVIDER_IDS. A source
+// with any other provider (or none, e.g. a plain webhook/email source) has no
+// rotatable secret.
+export const ROTATABLE_PROVIDERS = [
+  ...MANUAL_SECRET_PROVIDERS,
+  ...SECRET_BACKED_PROVIDERS,
+] as const;
+
+export const isManualSecretProvider = (
+  provider: string | null,
+): provider is (typeof MANUAL_SECRET_PROVIDERS)[number] =>
+  provider !== null &&
+  (MANUAL_SECRET_PROVIDERS as readonly string[]).includes(provider);
+
+export const isRotatableProvider = (
+  provider: string | null,
+): provider is (typeof ROTATABLE_PROVIDERS)[number] =>
+  provider !== null &&
+  (ROTATABLE_PROVIDERS as readonly string[]).includes(provider);
+
 export type Source = {
   uuid: string;
   createdAt: string;
@@ -53,6 +90,14 @@ export type UpdateSourceInput = {
   fieldMapping?: unknown;
 };
 
+// Mirrors markpost's POST /api/sources/[uuid]/rotate-secret payload. Only a
+// manual-secret provider (stripe) supplies `providerSecret`; for a generated
+// provider (github/zapier/shortcuts) it is omitted and markpost mints a fresh
+// secret it reveals once. See markpost server/api/sources/[uuid]/rotate-secret.post.ts.
+export type RotateSourceSecretInput = {
+  providerSecret?: string;
+};
+
 // The JSON:API resource object markpost's `sourceSerializer`
 // (`server/utils/response.ts`) actually produces for a source: `attributes`
 // plus the `type`/`id`/`links` envelope fields the old `ApiData` type dropped.
@@ -61,15 +106,12 @@ export type SourceResource = ApiResourceObject & {
   attributes: Source;
 };
 
-export type SourceApiResponse = ApiResponse<SourceResource | null>;
-
 export type SourceListApiResponse = ApiResponse<SourceResource[]>;
 
-// The create response is the one place the serializer reveals `providerSecret`,
-// so its resource attributes are `CreatedSource`, not the base `Source`.
+// The create and rotate-secret responses are the only places the serializer
+// reveals `providerSecret`, so their resource attributes are `CreatedSource`,
+// not the base `Source`.
 export type CreatedSourceResource = ApiResourceObject & {
   type: 'sources';
   attributes: CreatedSource;
 };
-
-export type CreateSourceApiResponse = ApiResponse<CreatedSourceResource | null>;

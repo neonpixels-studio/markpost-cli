@@ -1,10 +1,11 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
-import { confirm, input, select } from '@inquirer/prompts';
+import { confirm, input, password, select } from '@inquirer/prompts';
 import {
   createSource,
   deleteSource,
   fetchSources,
+  rotateSourceSecret,
   updateSource,
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
@@ -12,7 +13,15 @@ import { failWithMessage } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
-import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
+import {
+  isManualSecretProvider,
+  isRotatableProvider,
+  ROTATABLE_PROVIDERS,
+  RotateSourceSecretInput,
+  Source,
+  SOURCE_TYPES,
+  SourceType,
+} from '@/types/sources.types.js';
 
 // Mirror the endpoint constants markpost's web app uses in
 // app/composables/useSources.ts so the CLI shows the same URL a user would
@@ -20,12 +29,13 @@ import { Source, SOURCE_TYPES, SourceType } from '@/types/sources.types.js';
 const WEBHOOK_INGEST_BASE = 'https://ingest.markpost.io/v1/hooks';
 const EMAIL_DOMAIN = 'in.markpost.io';
 
-export const USAGE = `Usage: markpost sources <list|create|update|delete> [uuid]
+export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret> [uuid]
 
-  list           List all sources (pass --json for machine-readable output)
-  create         Create a new source (prompts for details)
-  update [uuid]  Update a source's route folder; prompts to pick one if uuid is omitted
-  delete [uuid]  Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)`;
+  list                  List all sources (pass --json for machine-readable output)
+  create                Create a new source (prompts for details)
+  update [uuid]         Update a source's route folder; prompts to pick one if uuid is omitted
+  delete [uuid]         Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
+  rotate-secret [uuid]  Rotate a provider source's signing secret; prompts to pick one if uuid is omitted`;
 
 export const buildEndpointUrl = (
   sourceType: SourceType,
@@ -64,6 +74,7 @@ const SOURCES_HANDLERS = new Map<
     DELETE_SUBCOMMAND,
     (uuid, _json, skipConfirm) => deleteSourceCommand(uuid, skipConfirm),
   ],
+  ['rotate-secret', (uuid) => rotateSecretCommand(uuid)],
 ]);
 
 // The invocation-level usage checks that all fail the same way (one usage
@@ -104,7 +115,7 @@ const usageErrorFor = (
   // `create`/`update` also prompt, but that predates this change and their
   // non-TTY behavior is out of scope for the delete-confirmation work.
   if (subcommand === DELETE_SUBCOMMAND && !skipConfirm && !isInteractive) {
-    return '`sources delete` needs an interactive terminal to confirm; pass --yes to delete without a prompt.';
+    return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
   }
 
   return null;
@@ -314,13 +325,29 @@ const createSourceCommand = async (): Promise<void> => {
   printProviderSecret(providerSecret);
 };
 
-// Shared by update and delete: list existing sources and let the user pick
-// one, or report there's nothing to act on.
-const promptForSource = async (action: string): Promise<Source | null> => {
-  const sources = await fetchSources();
+// Shared by update, delete, and rotate-secret: list existing sources and let
+// the user pick one, or report there's nothing to act on. `filter` narrows the
+// choices to the sources an action can apply to (rotate-secret only offers
+// provider-backed sources); it defaults to every source for update/delete.
+// `emptyFilteredMessage` replaces the generic "no sources" line when sources
+// exist but the filter removed all of them — so a user with only webhook/email
+// sources learns rotate-secret needs a provider source, instead of being told
+// they have none at all.
+const promptForSource = async (
+  action: string,
+  filter: (source: Source) => boolean = () => true,
+  emptyFilteredMessage?: string,
+): Promise<Source | null> => {
+  const allSources = await fetchSources();
+  const sources = allSources.filter(filter);
 
   if (sources.length === 0) {
-    console.log(`No sources to ${action}.`);
+    const filteredOutSome = allSources.length > 0;
+    console.log(
+      filteredOutSome && emptyFilteredMessage
+        ? emptyFilteredMessage
+        : `No sources to ${action}.`,
+    );
     return null;
   }
 
@@ -418,9 +445,12 @@ const confirmDeletion = async (label: string): Promise<boolean> =>
     default: false,
   });
 
-// The list loaded but held no source with this uuid. True whether the uuid is
-// wrong or the list was legitimately empty — never asserts more than that.
-const NO_MATCH_NOTE = 'no matching source in the source list';
+// An empty list from lookupSourceByUuid can't tell a genuine non-match from a
+// swallowed load failure — fetchSources() folds transport errors (all but a
+// timeout) into []. So this can't claim the source is absent; it mirrors
+// findSourceByUuid's wording and leaves both possibilities open.
+const NO_MATCH_NOTE =
+  'no matching source found, or the list could not be loaded';
 // The lookup itself failed (e.g. a timeout, which fetchSources re-throws), so
 // the name is simply unknown — distinct from a confirmed non-match, and never
 // claiming the source doesn't exist.
@@ -468,7 +498,10 @@ const deleteSourceCommand = async (
   skipConfirm: boolean,
 ): Promise<void> => {
   const picked = uuid ? undefined : await promptForSource('delete');
-  const targetUuid = uuid ?? picked?.uuid;
+  // `||` (not `??`) so an empty-string uuid falls through to the picked source,
+  // matching the truthiness branch above — otherwise `delete ""` would open the
+  // picker, take a selection, then silently discard it on the `!targetUuid` guard.
+  const targetUuid = uuid || picked?.uuid;
 
   if (!targetUuid) {
     return;
@@ -485,9 +518,121 @@ const deleteSourceCommand = async (
   const meta = await deleteSource(targetUuid);
 
   if (!meta) {
-    console.error(chalk.redBright('Failed to delete source.'));
+    // Exit non-zero (not a bare console.error) so a scripted `delete <uuid>
+    // --yes || notify` catches a failed delete instead of reading it as done —
+    // delete now carries a documented --yes contract, like rotate-secret below.
+    failWithMessage('Failed to delete source.');
     return;
   }
 
   console.log(chalk.greenBright(`Deleted ${meta.deleted} source(s).`));
+};
+
+// A manual-secret provider (stripe) issues its own secret, so rotation collects
+// the new value from the user; a generated provider (github/zapier/shortcuts)
+// sends no attributes and lets markpost mint one. Returns null when the user
+// leaves a required secret blank, so the caller aborts without a doomed request
+// (mirrors updateSource's empty-route-folder guard).
+const collectRotateInput = async (
+  target: Source,
+): Promise<RotateSourceSecretInput | null> => {
+  if (!isManualSecretProvider(target.provider)) {
+    return {};
+  }
+
+  // Masked: this is the one place the CLI accepts a signing secret, so it must
+  // not echo it into terminal scrollback, `script`/tmux captures, or CI logs.
+  const providerSecret = (
+    await password({
+      message: `New signing secret from ${sanitizeForTerminal(target.provider)}`,
+      mask: true,
+    })
+  ).trim();
+
+  if (!providerSecret) {
+    console.error(chalk.redBright('Signing secret cannot be empty.'));
+    return null;
+  }
+
+  return { providerSecret };
+};
+
+const rotateSecretForSource = async (target: Source): Promise<void> => {
+  if (!isRotatableProvider(target.provider)) {
+    console.error(
+      chalk.redBright(
+        `Source "${sanitizeForTerminal(target.name)}" has no rotatable secret — only ${ROTATABLE_PROVIDERS.join(', ')} sources do.`,
+      ),
+    );
+    return;
+  }
+
+  const rotateInput = await collectRotateInput(target);
+
+  if (!rotateInput) {
+    return;
+  }
+
+  const rotated = await rotateSourceSecret(target.uuid, rotateInput);
+
+  if (!rotated) {
+    // Exit non-zero (via failWithMessage) so a wrapper script/cron never reads
+    // a failed rotation as success. Unlike a failed create (nothing depended on
+    // the source yet), a failed rotate may already have committed server-side —
+    // a 5xx or unparseable body after the secret was replaced — leaving the old
+    // secret dead, so warn conditionally rather than implying nothing changed.
+    failWithMessage(
+      'Failed to rotate source secret. If the rotation was applied server-side the previous secret no longer works — run `markpost sources rotate-secret <uuid>` again to mint a secret you can copy.',
+    );
+    return;
+  }
+
+  // Peel the one-time secret off before the shared `printSource`, exactly as
+  // `createSourceCommand` does, so no printer that receives the source ever
+  // sees it. It is null for a manual-secret provider (the user already has it).
+  const { providerSecret, ...source } = rotated;
+  const isManual = isManualSecretProvider(target.provider);
+
+  // A generated provider's whole point is the one-time reveal; a response that
+  // omits it means the secret was rotated but is now unrecoverable, so the live
+  // integration is broken. Fail before printing any success line, so stdout
+  // never ends on "Rotated ..." for a broken integration.
+  if (!isManual && !providerSecret) {
+    failWithMessage(
+      'The secret was rotated but the server did not return it — the previous secret no longer works. Run `markpost sources rotate-secret <uuid>` again to mint one you can copy.',
+    );
+    return;
+  }
+
+  console.log(
+    chalk.greenBright(
+      `Rotated signing secret for "${sanitizeForTerminal(source.name)}"`,
+    ),
+  );
+  printSource(source);
+
+  // Reveal only for a generated provider. A manual provider (stripe) issues its
+  // own secret — the user already has it — and an off-contract echo of it must
+  // never be printed, so suppress the reveal entirely here.
+  if (isManual) {
+    return;
+  }
+
+  printProviderSecret(providerSecret);
+};
+
+const rotateSecretCommand = async (uuid?: string): Promise<void> => {
+  const target = uuid
+    ? await findSourceByUuid(uuid)
+    : await promptForSource(
+        'rotate the secret for',
+        (source) => isRotatableProvider(source.provider),
+        `None of your sources have a rotatable secret — only ${ROTATABLE_PROVIDERS.join(', ')} sources do.`,
+      );
+
+  if (!target) {
+    return;
+  }
+
+  await rotateSecretForSource(target);
 };

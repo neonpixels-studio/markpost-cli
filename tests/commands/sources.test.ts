@@ -10,9 +10,11 @@ vi.mock('@/libs/sources.js', () => ({
   createSource: vi.fn(),
   updateSource: vi.fn(),
   deleteSource: vi.fn(),
+  rotateSourceSecret: vi.fn(),
 }));
 vi.mock('@inquirer/prompts', () => ({
   input: vi.fn(),
+  password: vi.fn(),
   select: vi.fn(),
   confirm: vi.fn(),
 }));
@@ -61,6 +63,20 @@ const githubSource: CreatedSource = {
   providerSecret: 'whsec_one_time_plaintext',
   endpointSlug: 'gh_789xyz',
   routeFolder: '97-incoming/',
+  lastHitAt: null,
+  recordCount: 0,
+};
+
+// A manual-secret provider (stripe): markpost issues the secret, so rotation
+// prompts the user to paste the new value and the response reveals nothing.
+const stripeSource: Source = {
+  uuid: 'str-123',
+  createdAt: '2024-01-04T00:00:00Z',
+  type: 'stripe',
+  name: 'Stripe Source',
+  provider: 'stripe',
+  endpointSlug: 'st_123abc',
+  routeFolder: '96-incoming/',
   lastHitAt: null,
   recordCount: 0,
 };
@@ -734,6 +750,24 @@ describe('runSourcesCommand', () => {
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
     });
 
+    // An empty-string uuid is falsy like an absent one, so it must open the
+    // picker and honor the selection — not open the picker and then silently
+    // discard the pick on the `!targetUuid` guard (the `??`-vs-`||` trap).
+    it('falls through to the picker for an empty-string uuid and deletes the pick', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { select, confirm } = await import('@inquirer/prompts');
+      vi.mocked(select).mockResolvedValue('abc-123');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', '']);
+
+      expect(select).toHaveBeenCalledTimes(1);
+      expect(deleteSource).toHaveBeenCalledWith('abc-123');
+    });
+
     // The confirmation is the whole point of the feature: a "no" answer must
     // abort before any DELETE reaches the server.
     it('aborts without deleting when the confirmation is declined', async () => {
@@ -807,7 +841,7 @@ describe('runSourcesCommand', () => {
 
       const message = vi.mocked(confirm).mock.calls[0][0].message;
       expect(message).toContain('abc-123');
-      expect(message).toContain('no matching source in the source list');
+      expect(message).toContain('no matching source found');
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
     });
 
@@ -832,7 +866,7 @@ describe('runSourcesCommand', () => {
       const message = vi.mocked(confirm).mock.calls[0][0].message;
       expect(message).toContain('abc-123');
       // A failed load must not be reported as a confirmed non-match.
-      expect(message).not.toContain('no matching source in the source list');
+      expect(message).not.toContain('no matching source found');
       expect(message).toContain('could not load the list');
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
       expect(process.exitCode).toBeUndefined();
@@ -1053,6 +1087,284 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['delete', 'abc-123']);
 
       expect(console.error).toHaveBeenCalledWith('Failed to delete source.');
+      // A failed delete must exit non-zero so a scripted `delete --yes || …`
+      // catches it instead of reading the non-delete as success.
+      expect(process.exitCode).toBe(1);
+    });
+  });
+
+  describe('rotate-secret', () => {
+    it('rotates by uuid for a generated provider and reveals the new secret once', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      vi.mocked(rotateSourceSecret).mockResolvedValue({
+        ...githubSource,
+        providerSecret: 'whsec_rotated_value',
+      });
+      const { select, password } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'ghi-789']);
+
+      // Generated providers send no attributes; markpost mints the secret.
+      expect(rotateSourceSecret).toHaveBeenCalledWith('ghi-789', {});
+      // No picker and no secret prompt for a generated provider.
+      expect(select).not.toHaveBeenCalled();
+      expect(password).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Rotated signing secret for "GitHub Source"'),
+      );
+      const secretMentions = loggedText()
+        .split('\n')
+        .filter((line) => line.includes('whsec_rotated_value'));
+      expect(secretMentions).toHaveLength(1);
+    });
+
+    it('prompts (masked) for the new secret and sends it for a manual-secret provider', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      const { password } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
+      vi.mocked(password).mockResolvedValueOnce('whsec_pasted_stripe');
+      // A hostile/off-contract server that echoes the pasted secret back must
+      // still never have it printed — the manual-provider early return skips the
+      // reveal entirely, and the secret is peeled off before printSource.
+      vi.mocked(rotateSourceSecret).mockResolvedValue({
+        ...stripeSource,
+        providerSecret: 'whsec_echoed_by_server',
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'str-123']);
+
+      // A masked prompt keeps the pasted secret out of terminal scrollback.
+      expect(password).toHaveBeenCalledWith(
+        expect.objectContaining({ mask: true }),
+      );
+      expect(rotateSourceSecret).toHaveBeenCalledWith('str-123', {
+        providerSecret: 'whsec_pasted_stripe',
+      });
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Rotated signing secret for "Stripe Source"'),
+      );
+      // Nothing to reveal for a manual provider — the user already has it — and
+      // an echoed value must not surface anywhere on stdout/stderr.
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('shown once'),
+      );
+      expect(loggedText()).not.toContain('whsec_echoed_by_server');
+    });
+
+    it('does not raise the missing-secret alarm for a manual provider (its response has none)', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      const { password } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
+      vi.mocked(password).mockResolvedValueOnce('whsec_pasted_stripe');
+      // markpost never echoes a manual secret back, so the response omits it —
+      // and that omission must not be treated as the "server did not return it"
+      // failure that applies only to generated providers.
+      vi.mocked(rotateSourceSecret).mockResolvedValue({
+        ...stripeSource,
+        providerSecret: null,
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'str-123']);
+
+      expect(console.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('did not return it'),
+      );
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('aborts without calling the API when a manual secret is left blank', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      const { password } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
+      vi.mocked(password).mockResolvedValueOnce('   ');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'str-123']);
+
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        'Signing secret cannot be empty.',
+      );
+    });
+
+    it('refuses a source with no rotatable secret and skips the API call', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'abc-123']);
+
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('has no rotatable secret'),
+      );
+    });
+
+    it('reports not-found when the uuid does not match any source', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'unknown-uuid']);
+
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        'Source not found, or the source list could not be loaded.',
+      );
+    });
+
+    it('offers only rotatable sources in the interactive picker', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      const { select } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([
+        webhookSource,
+        emailSource,
+        githubSource,
+      ]);
+      vi.mocked(select).mockResolvedValue('ghi-789');
+      vi.mocked(rotateSourceSecret).mockResolvedValue({
+        ...githubSource,
+        providerSecret: 'whsec_rotated_value',
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret']);
+
+      expect(select).toHaveBeenCalledWith(
+        expect.objectContaining({
+          choices: [
+            expect.objectContaining({ value: 'ghi-789' }),
+          ],
+        }),
+      );
+      expect(rotateSourceSecret).toHaveBeenCalledWith('ghi-789', {});
+    });
+
+    it('explains rotate-secret needs a provider source when only non-rotatable sources exist', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource, emailSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret']);
+
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      // Not the bare "No sources..." line: the user has sources, just none
+      // with a rotatable secret.
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('None of your sources have a rotatable secret'),
+      );
+    });
+
+    it('falls back to the plain empty message when there are no sources at all', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret']);
+
+      expect(console.log).toHaveBeenCalledWith(
+        'No sources to rotate the secret for.',
+      );
+    });
+
+    it('warns when a generated rotation succeeds but the response omits the secret', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      // Server rotated the secret (old one now dead) but returned no plaintext.
+      vi.mocked(rotateSourceSecret).mockResolvedValue({
+        ...githubSource,
+        providerSecret: null,
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'ghi-789']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('did not return it'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('reports an error when the rotation fails', async () => {
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      vi.mocked(rotateSourceSecret).mockResolvedValue(null);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'ghi-789']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to rotate source secret.'),
+      );
+      // A failed rotation must exit non-zero so a wrapper never reads it as
+      // success (the previous secret may already be dead).
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('strips control characters from a hostile rotated secret before printing', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      vi.mocked(rotateSourceSecret).mockResolvedValue({
+        ...githubSource,
+        providerSecret: `whsec_${control}[2J`,
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'ghi-789']);
+
+      const printedControl = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('whsec_ [2J'),
+      );
+    });
+
+    // rotate-secret reveals a one-time secret, so like `create` it must reject
+    // --json before doing anything — a `| jq` pipeline would lose the secret.
+    it('rejects --json on rotate-secret before prompting or calling the API', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources, rotateSourceSecret } = await import(
+        '@/libs/sources.js'
+      );
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', '--json']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     });
   });
 

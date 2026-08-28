@@ -4,7 +4,13 @@ import type { Spinner } from 'yocto-spinner';
 import { Record } from '@/types/records.types.js';
 import { UserSettings, ConflictStrategy } from '@/types/settings.types.js';
 import { SettingsReadResult } from '@/libs/settings.js';
-import { MARK_FAILED, MARK_SYNCED, MARK_TIMED_OUT } from '@/libs/records.js';
+import {
+  MARK_FAILED,
+  MARK_SYNCED,
+  MARK_TIMED_OUT,
+  MarkSyncedOutcome,
+  MarkSyncedResult,
+} from '@/libs/records.js';
 import type { WrittenRecordState } from '@/libs/markdown.js';
 
 vi.mock('@/libs/config.js', () => ({
@@ -17,7 +23,7 @@ vi.mock('@/libs/records.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/libs/records.js')>()),
   fetchAllRecords: vi.fn(),
   deleteRecords: vi.fn(),
-  markRecordSynced: vi.fn(),
+  markRecordsSynced: vi.fn(),
 }));
 vi.mock('@/libs/markdown.js', () => ({
   writeMarkdown: vi.fn(),
@@ -68,6 +74,27 @@ const mockRecord: Record = {
   content: 'Test Content',
   createdAt: '2024-01-01T00:00:00Z',
 };
+
+// The bulk mark-synced call resolves one outcome per input record in order.
+// These build that `MarkSyncedResult` for the mocked `markRecordsSynced` so
+// index-level tests drive the settle/report logic without re-deriving chunking
+// (chunk boundaries and the timeout abort are covered in tests/libs/records.test.ts).
+// `markResultBy` maps each item's uuid to an outcome; `markResultAll` is the
+// common "every record shares one outcome" shorthand. Both always report every
+// record attempted (`timedOut: false`, full-length outcomes) — an abort produces
+// a SHORTER outcomes array, so timeout/abort cases use an explicit
+// `mockResolvedValue({ outcomes: [...], timedOut: true })` instead of these.
+const markResultBy =
+  (outcomeFor: (uuid: string) => MarkSyncedOutcome) =>
+  async (
+    items: { uuid: string; filePath: string }[],
+  ): Promise<MarkSyncedResult> => ({
+    outcomes: items.map((item) => outcomeFor(item.uuid)),
+    timedOut: false,
+  });
+
+const markResultAll = (outcome: MarkSyncedOutcome) =>
+  markResultBy(() => outcome);
 
 describe('index', () => {
   // The production code only calls start/success/error on the spinner, so the
@@ -525,7 +552,7 @@ describe('index', () => {
       content: 'x',
       createdAt: '2024-01-03T00:00:00Z',
     };
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -548,17 +575,17 @@ describe('index', () => {
         return `/mock/output/${record.uuid}.md`;
       },
     );
-    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
     await import('@/index.js');
 
-    // Only the clean record is marked synced; the dropped one stays pending so a
-    // later run can re-surface the unreconciled server revision.
-    expect(markRecordSynced).toHaveBeenCalledTimes(1);
-    expect(markRecordSynced).toHaveBeenCalledWith(
-      'abc-123',
-      '/mock/output/abc-123.md',
-    );
+    // Only the clean record is marked synced; the dropped one is held back from
+    // the bulk call so it stays pending and a later run can re-surface the
+    // unreconciled server revision.
+    expect(markRecordsSynced).toHaveBeenCalledTimes(1);
+    expect(markRecordsSynced).toHaveBeenCalledWith([
+      { uuid: 'abc-123', filePath: '/mock/output/abc-123.md' },
+    ]);
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Deferred 1 record(s)'),
     );
@@ -878,7 +905,7 @@ describe('index', () => {
   });
 
   it('writes but mutates nothing on the server (no delete, no mark) when settings cannot be read', async () => {
-    const { fetchAllRecords, deleteRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, deleteRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -906,7 +933,7 @@ describe('index', () => {
     expect(mockSpinner.start).not.toHaveBeenCalledWith(
       'Marking records synced...',
     );
-    expect(markRecordSynced).not.toHaveBeenCalled();
+    expect(markRecordsSynced).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Settings unreadable'),
     );
@@ -996,7 +1023,7 @@ describe('index', () => {
   });
 
   it('marks records synced (not deleted) when autoDelete is false', async () => {
-    const { fetchAllRecords, deleteRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, deleteRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1009,7 +1036,7 @@ describe('index', () => {
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
     await import('@/index.js');
 
@@ -1019,16 +1046,15 @@ describe('index', () => {
     // The whole fix for #50: written records must be marked synced so the next
     // pending-only fetch skips them instead of re-writing duplicates.
     expect(mockSpinner.start).toHaveBeenCalledWith('Marking records synced...');
-    expect(markRecordSynced).toHaveBeenCalledWith(
-      'abc-123',
-      '/mock/output/test-title.md',
-    );
+    expect(markRecordsSynced).toHaveBeenCalledWith([
+      { uuid: 'abc-123', filePath: '/mock/output/test-title.md' },
+    ]);
     expect(mockSpinner.success).toHaveBeenCalledWith('Marked 1 records synced!');
   });
 
   it('marks every written record synced, not just the first', async () => {
     const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1047,25 +1073,22 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce('/mock/output/title-2.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
     await import('@/index.js');
 
-    expect(markRecordSynced).toHaveBeenCalledTimes(2);
-    expect(markRecordSynced).toHaveBeenCalledWith(
-      'abc-123',
-      '/mock/output/test-title.md',
-    );
-    expect(markRecordSynced).toHaveBeenCalledWith(
-      'def-456',
-      '/mock/output/title-2.md',
-    );
+    // Both written records go up in a single bulk call, in write order.
+    expect(markRecordsSynced).toHaveBeenCalledTimes(1);
+    expect(markRecordsSynced).toHaveBeenCalledWith([
+      { uuid: 'abc-123', filePath: '/mock/output/test-title.md' },
+      { uuid: 'def-456', filePath: '/mock/output/title-2.md' },
+    ]);
     expect(mockSpinner.success).toHaveBeenCalledWith('Marked 2 records synced!');
   });
 
   it('excludes skipped records (null write result) from the mark-synced calls', async () => {
     const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1084,20 +1107,21 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce(null);
-    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
     await import('@/index.js');
 
-    expect(markRecordSynced).toHaveBeenCalledTimes(1);
-    expect(markRecordSynced).toHaveBeenCalledWith(
-      'abc-123',
-      '/mock/output/test-title.md',
-    );
+    // The skipped record never lands on disk, so it must not appear in the bulk
+    // payload — only the one written record is sent.
+    expect(markRecordsSynced).toHaveBeenCalledTimes(1);
+    expect(markRecordsSynced).toHaveBeenCalledWith([
+      { uuid: 'abc-123', filePath: '/mock/output/test-title.md' },
+    ]);
   });
 
   it('does not mark synced when every record was skipped', async () => {
     const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1120,11 +1144,11 @@ describe('index', () => {
     expect(mockSpinner.start).not.toHaveBeenCalledWith(
       'Marking records synced...',
     );
-    expect(markRecordSynced).not.toHaveBeenCalled();
+    expect(markRecordsSynced).not.toHaveBeenCalled();
   });
 
   it('reports a mark-synced failure loudly instead of claiming success', async () => {
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1141,7 +1165,7 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(MARK_FAILED);
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_FAILED));
 
     await import('@/index.js');
 
@@ -1156,7 +1180,7 @@ describe('index', () => {
 
   it('reports only the records whose mark-synced failed, not the whole batch', async () => {
     const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1175,11 +1199,12 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce('/mock/output/title-2.md');
-    // First record succeeds, second fails — the count and the listed path must
-    // reflect exactly the one failure, guarding against an off-by-one.
-    vi.mocked(markRecordSynced)
-      .mockResolvedValueOnce(MARK_SYNCED)
-      .mockResolvedValueOnce(MARK_FAILED);
+    // First record succeeds, second fails — the bulk response reports only
+    // def-456 as unmatched, so the count and listed path must reflect exactly
+    // the one failure, guarding against an off-by-one in the settle partition.
+    vi.mocked(markRecordsSynced).mockImplementation(
+      markResultBy((uuid) => (uuid === 'abc-123' ? MARK_SYNCED : MARK_FAILED)),
+    );
 
     await import('@/index.js');
 
@@ -1198,14 +1223,14 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('marks records across multiple concurrency batches and pinpoints a failure in a later batch', async () => {
+  it('sends every written record in one bulk call and pinpoints a single failure', async () => {
     const records: Record[] = Array.from({ length: 11 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
       createdAt: '2024-01-01T00:00:00Z',
     }));
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1224,15 +1249,21 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(
       (record: Record) => `/mock/output/${record.uuid}.md`,
     );
-    // Only the 11th record (in the second batch, since concurrency is 10)
-    // fails, exercising the slice/order arithmetic across batches.
-    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
-      Promise.resolve(uuid === 'uuid-10' ? MARK_FAILED : MARK_SYNCED),
+    // Every record goes up in a single bulk request; only uuid-10 comes back
+    // unmatched, exercising the per-record settle/report over one bulk response.
+    vi.mocked(markRecordsSynced).mockImplementation(
+      markResultBy((uuid) => (uuid === 'uuid-10' ? MARK_FAILED : MARK_SYNCED)),
     );
 
     await import('@/index.js');
 
-    expect(markRecordSynced).toHaveBeenCalledTimes(11);
+    expect(markRecordsSynced).toHaveBeenCalledTimes(1);
+    expect(markRecordsSynced).toHaveBeenCalledWith(
+      records.map((record) => ({
+        uuid: record.uuid,
+        filePath: `/mock/output/${record.uuid}.md`,
+      })),
+    );
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining('Failed to mark 1 record(s) synced'),
     );
@@ -1245,14 +1276,18 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('stops marking on the first timeout and reports the unattempted records as still pending', async () => {
-    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+  // A timeout aborts inside markRecordsSynced (chunk boundaries + the abort are
+  // covered in tests/libs/records.test.ts); here the bulk call resolves a short
+  // outcomes array — a timed-out record plus a trailing record with no outcome
+  // because its chunk was never sent. Both must be reported pending.
+  it('reports timed-out and never-attempted records as pending after an abort', async () => {
+    const records: Record[] = Array.from({ length: 3 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
       createdAt: '2024-01-01T00:00:00Z',
     }));
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1271,46 +1306,42 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(
       (record: Record) => `/mock/output/${record.uuid}.md`,
     );
-    // One record in the first batch (concurrency 10) times out; the second
-    // batch of five must never be attempted — those records stay pending.
-    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
-      Promise.resolve(uuid === 'uuid-3' ? MARK_TIMED_OUT : MARK_SYNCED),
-    );
+    // uuid-0 synced, uuid-1 timed out (abort), uuid-2 never attempted (no
+    // outcome). The short outcomes array models the real timeout abort.
+    vi.mocked(markRecordsSynced).mockResolvedValue({
+      outcomes: [MARK_SYNCED, MARK_TIMED_OUT],
+      timedOut: true,
+    });
 
     await import('@/index.js');
 
-    expect(markRecordSynced).toHaveBeenCalledTimes(10);
-    expect(markRecordSynced).not.toHaveBeenCalledWith(
-      'uuid-10',
-      expect.anything(),
-    );
-    // Timed-out record (uuid-3) plus the five never attempted = six pending.
+    // Timed-out (uuid-1) plus the never-attempted uuid-2 = two pending.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('6 record(s) still pending'),
+      expect.stringContaining('2 record(s) still pending'),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining('Timed out marking records synced'),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-3 -> /mock/output/uuid-3.md'),
+      expect.stringContaining('! uuid-1 -> /mock/output/uuid-1.md'),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-14 -> /mock/output/uuid-14.md'),
+      expect.stringContaining('! uuid-2 -> /mock/output/uuid-2.md'),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 9 record(s) synced despite'),
+      expect.stringContaining('Marked 1 record(s) synced despite'),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('does not abort on a plain failure — a first-batch failure still marks every record', async () => {
-    const records: Record[] = Array.from({ length: 15 }, (_item, index) => ({
+  it('does not use the timeout wording for a plain (non-timeout) failure', async () => {
+    const records: Record[] = Array.from({ length: 4 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
       createdAt: '2024-01-01T00:00:00Z',
     }));
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1329,16 +1360,15 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(
       (record: Record) => `/mock/output/${record.uuid}.md`,
     );
-    // uuid-3 fails in the first batch. A plain failure must NOT stop the run —
-    // every record is still attempted, and the report uses the failure wording,
-    // not the timeout wording. Guards against widening the abort to any failure.
-    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
-      Promise.resolve(uuid === 'uuid-3' ? MARK_FAILED : MARK_SYNCED),
+    // uuid-3 comes back unmatched (a plain failure, not a timeout). The report
+    // must use the failure wording, never the timeout wording, and every record
+    // still had an outcome — nothing was aborted.
+    vi.mocked(markRecordsSynced).mockImplementation(
+      markResultBy((uuid) => (uuid === 'uuid-3' ? MARK_FAILED : MARK_SYNCED)),
     );
 
     await import('@/index.js');
 
-    expect(markRecordSynced).toHaveBeenCalledTimes(15);
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining('Failed to mark 1 record(s) synced'),
     );
@@ -1349,19 +1379,19 @@ describe('index', () => {
       expect.stringContaining('! uuid-3 -> /mock/output/uuid-3.md'),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 14 record(s) synced despite'),
+      expect.stringContaining('Marked 3 record(s) synced despite'),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('reports only the timed-out record when the timeout lands in the final batch', async () => {
-    const records: Record[] = Array.from({ length: 10 }, (_item, index) => ({
+  it('reports only the timed-out record when nothing was left unattempted', async () => {
+    const records: Record[] = Array.from({ length: 2 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
       createdAt: '2024-01-01T00:00:00Z',
     }));
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1380,15 +1410,15 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(
       (record: Record) => `/mock/output/${record.uuid}.md`,
     );
-    // The ten records fill exactly one batch, so uuid-9's timeout leaves nothing
-    // unattempted — only the timed-out record itself is pending.
-    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
-      Promise.resolve(uuid === 'uuid-9' ? MARK_TIMED_OUT : MARK_SYNCED),
-    );
+    // The abort lands on the last record, so every record has an outcome and
+    // only the timed-out one is pending — no never-attempted tail.
+    vi.mocked(markRecordsSynced).mockResolvedValue({
+      outcomes: [MARK_SYNCED, MARK_TIMED_OUT],
+      timedOut: true,
+    });
 
     await import('@/index.js');
 
-    expect(markRecordSynced).toHaveBeenCalledTimes(10);
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining('1 record(s) still pending'),
     );
@@ -1396,19 +1426,19 @@ describe('index', () => {
       expect.stringContaining('Timed out marking records synced'),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 9 record(s) synced despite'),
+      expect.stringContaining('Marked 1 record(s) synced despite'),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('aborts on a timeout in a later batch, not just the first', async () => {
-    const records: Record[] = Array.from({ length: 25 }, (_item, index) => ({
+  it('counts both a failed and a timed-out record as pending in one run', async () => {
+    const records: Record[] = Array.from({ length: 4 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
       createdAt: '2024-01-01T00:00:00Z',
     }));
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1427,72 +1457,18 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(
       (record: Record) => `/mock/output/${record.uuid}.md`,
     );
-    // uuid-12 sits in the second batch (concurrency 10); the third batch of
-    // five must never be attempted, proving the abort check runs per batch.
-    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
-      Promise.resolve(uuid === 'uuid-12' ? MARK_TIMED_OUT : MARK_SYNCED),
-    );
-
-    await import('@/index.js');
-
-    expect(markRecordSynced).toHaveBeenCalledTimes(20);
-    expect(markRecordSynced).not.toHaveBeenCalledWith(
-      'uuid-20',
-      expect.anything(),
-    );
-    // uuid-12 timed out plus the five never attempted (uuid-20..24) = six.
-    expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('6 record(s) still pending'),
-    );
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('counts a plain failure alongside a timeout in the same batch as pending', async () => {
-    const records: Record[] = Array.from({ length: 12 }, (_item, index) => ({
-      uuid: `uuid-${index}`,
-      title: `Title ${index}`,
-      content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
-    }));
-    const { fetchAllRecords, markRecordSynced } = await import(
-      '@/libs/records.js'
-    );
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoDelete: false }),
-    );
-    vi.mocked(fetchAllRecords).mockResolvedValue({
-      ok: true,
-      records,
-      partial: false,
-    });
-    vi.mocked(writeMarkdown).mockImplementation(
-      (record: Record) => `/mock/output/${record.uuid}.md`,
-    );
-    // uuid-1 fails and uuid-4 times out — both in the first batch. The abort
-    // still fires, and both records (plus the two never attempted) are pending.
-    vi.mocked(markRecordSynced).mockImplementation((uuid: string) => {
-      if (uuid === 'uuid-4') {
-        return Promise.resolve(MARK_TIMED_OUT);
-      }
-
-      if (uuid === 'uuid-1') {
-        return Promise.resolve(MARK_FAILED);
-      }
-
-      return Promise.resolve(MARK_SYNCED);
+    // uuid-1 failed and uuid-2 timed out (abort), so uuid-3 was never attempted.
+    // All three non-synced records are pending and the run uses timeout wording.
+    vi.mocked(markRecordsSynced).mockResolvedValue({
+      outcomes: [MARK_SYNCED, MARK_FAILED, MARK_TIMED_OUT],
+      timedOut: true,
     });
 
     await import('@/index.js');
 
-    expect(markRecordSynced).toHaveBeenCalledTimes(10);
-    // uuid-1 failed, uuid-4 timed out, uuid-10 and uuid-11 never attempted = four.
+    // uuid-1 failed, uuid-2 timed out, uuid-3 never attempted = three pending.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('4 record(s) still pending'),
+      expect.stringContaining('3 record(s) still pending'),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining('Timed out marking records synced'),
@@ -1504,7 +1480,7 @@ describe('index', () => {
   });
 
   it('warns the sync was incomplete on the mark-synced path when a page failed', async () => {
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1522,7 +1498,7 @@ describe('index', () => {
       partial: true,
     });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(MARK_SYNCED);
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
     await import('@/index.js');
 
@@ -1544,7 +1520,7 @@ describe('index', () => {
       content: 'c',
       createdAt: '2024-01-07T00:00:00Z',
     };
-    const { fetchAllRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1561,7 +1537,7 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/evil.md');
-    vi.mocked(markRecordSynced).mockResolvedValue(MARK_FAILED);
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_FAILED));
 
     await import('@/index.js');
 
@@ -1609,7 +1585,7 @@ describe('index', () => {
   });
 
   it('deletes records (never marks synced) when autoDelete is true', async () => {
-    const { fetchAllRecords, deleteRecords, markRecordSynced } = await import(
+    const { fetchAllRecords, deleteRecords, markRecordsSynced } = await import(
       '@/libs/records.js'
     );
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -1628,7 +1604,7 @@ describe('index', () => {
 
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
     // The delete path must not also PATCH records that are about to be removed.
-    expect(markRecordSynced).not.toHaveBeenCalled();
+    expect(markRecordsSynced).not.toHaveBeenCalled();
     expect(mockSpinner.start).not.toHaveBeenCalledWith(
       'Marking records synced...',
     );
@@ -2119,7 +2095,11 @@ describe('index', () => {
   ): string | null => {
     const filePath = `/mock/output/${record.uuid}.md`;
     snapshots.push(new Map(writtenState));
-    writtenState?.set(record.uuid, { path: filePath, contentHash: 'hash' });
+    writtenState?.set(record.uuid, {
+      path: filePath,
+      contentHash: 'hash',
+      identity: { deviceId: 1n, inode: 1n },
+    });
     return filePath;
   };
 
@@ -2185,7 +2165,7 @@ describe('index', () => {
   });
 
   it('keeps an unsettled record in the written-path map so a later pass reuses its file', async () => {
-    const { fetchAllRecords, markRecordSynced } = await import('@/libs/records.js');
+    const { fetchAllRecords, markRecordsSynced } = await import('@/libs/records.js');
     const { writeMarkdown } = await import('@/libs/markdown.js');
     const { fetchSettings } = await import('@/libs/settings.js');
     const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
@@ -2197,7 +2177,7 @@ describe('index', () => {
     // The mark-synced step fails both passes, so the record stays pending and is
     // re-fetched — exactly the case that used to drop a suffixed duplicate.
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
-    vi.mocked(markRecordSynced).mockResolvedValue(MARK_FAILED);
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_FAILED));
     vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
       await runSync();
@@ -2211,14 +2191,18 @@ describe('index', () => {
     expect(snapshots[1].get('abc-123')?.path).toBe('/mock/output/abc-123.md');
     // The reused record must still flow through to the settle step each pass —
     // reuse that dropped it from writtenRecords would never converge.
-    expect(markRecordSynced).toHaveBeenCalledTimes(2);
-    expect(markRecordSynced).toHaveBeenNthCalledWith(1, 'abc-123', '/mock/output/abc-123.md');
-    expect(markRecordSynced).toHaveBeenNthCalledWith(2, 'abc-123', '/mock/output/abc-123.md');
+    expect(markRecordsSynced).toHaveBeenCalledTimes(2);
+    expect(markRecordsSynced).toHaveBeenNthCalledWith(1, [
+      { uuid: 'abc-123', filePath: '/mock/output/abc-123.md' },
+    ]);
+    expect(markRecordsSynced).toHaveBeenNthCalledWith(2, [
+      { uuid: 'abc-123', filePath: '/mock/output/abc-123.md' },
+    ]);
   });
 
   it('forgets only the mark-synced record that succeeded, keeping the failed one for reuse', async () => {
     const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
-    const { fetchAllRecords, markRecordSynced } = await import('@/libs/records.js');
+    const { fetchAllRecords, markRecordsSynced } = await import('@/libs/records.js');
     const { writeMarkdown } = await import('@/libs/markdown.js');
     const { fetchSettings } = await import('@/libs/settings.js');
     const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
@@ -2229,10 +2213,10 @@ describe('index', () => {
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: false }));
     // Both records are fetched again next pass; only def-456's mark fails, so it
     // must stay in the map while abc-123 is forgotten — pins the index alignment
-    // between the settled and failed filters.
+    // between the settled and failed filters over the bulk response.
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, secondRecord], partial: false });
-    vi.mocked(markRecordSynced).mockImplementation((uuid: string) =>
-      Promise.resolve(uuid === 'abc-123' ? MARK_SYNCED : MARK_FAILED),
+    vi.mocked(markRecordsSynced).mockImplementation(
+      markResultBy((uuid) => (uuid === 'abc-123' ? MARK_SYNCED : MARK_FAILED)),
     );
     vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
@@ -2299,7 +2283,7 @@ describe('index', () => {
 
     it('writes nothing, deletes nothing, and marks nothing under --dry-run', async () => {
       process.argv = ['node', 'index.js', 'sync', '--dry-run'];
-      const { fetchAllRecords, deleteRecords, markRecordSynced } = await import('@/libs/records.js');
+      const { fetchAllRecords, deleteRecords, markRecordsSynced } = await import('@/libs/records.js');
       const { writeMarkdown, ensureOutputDirectory, buildWritePreview } = await import('@/libs/markdown.js');
       await arrangeDryRun();
 
@@ -2312,7 +2296,7 @@ describe('index', () => {
       expect(writeMarkdown).not.toHaveBeenCalled();
       expect(ensureOutputDirectory).not.toHaveBeenCalled();
       expect(deleteRecords).not.toHaveBeenCalled();
-      expect(markRecordSynced).not.toHaveBeenCalled();
+      expect(markRecordsSynced).not.toHaveBeenCalled();
       expect(mockSpinner.start).not.toHaveBeenCalledWith('Writing records...');
       expect(mockSpinner.start).not.toHaveBeenCalledWith('Deleting records...');
       // A successful preview exits 0.

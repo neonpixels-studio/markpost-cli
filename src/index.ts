@@ -3,10 +3,9 @@
 import {
   deleteRecords,
   fetchAllRecords,
-  markRecordSynced,
+  markRecordsSynced,
   MARK_SYNCED,
-  MARK_TIMED_OUT,
-  MarkSyncedOutcome,
+  MarkSyncedItem,
   PENDING_STATUS,
 } from '@/libs/records.js';
 import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
@@ -49,14 +48,6 @@ import {
 } from '@/types/settings.types.js';
 
 type Spinner = ReturnType<typeof yoctoSpinner>;
-
-// Cap how many mark-synced PATCHes are in flight at once. A large first sync
-// can write hundreds of records; firing one unbounded `Promise.all` over all
-// of them risks rate-limit/connection failures exactly when the batch is
-// biggest — and every failed mark stays pending and re-duplicates next run.
-// Declared here (above the top-level `dispatch()` call) so the hoisted helpers
-// don't hit its temporal dead zone when the default sync runs.
-const MARK_SYNCED_CONCURRENCY = 10;
 
 // Slug ownership (resolved `<slug>.md` path -> the uuid that wrote it), shared
 // across every autoSync pass in this process rather than rebuilt per pass.
@@ -430,46 +421,15 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
   });
 }
 
-// Outcome of a whole mark-synced run. `outcomes` holds one entry per *attempted*
-// record in the original order; on a timeout abort it's shorter than the input
-// because the remaining batches were never sent. `timedOut` records whether a
-// timeout stopped the run early so the caller can report the abort explicitly.
-interface MarkSyncedRun {
-  outcomes: MarkSyncedOutcome[];
-  timedOut: boolean;
-}
-
-// PATCHes the written records synced in bounded-concurrency batches, stopping on
-// the first timeout. A timeout means the server is hung, so firing the remaining
-// batches would burn the full request timeout on each one before reporting;
-// aborting leaves those records pending to retry next run, mirroring the push
-// command's batch-abort. Non-timeout failures don't abort — the next record may
-// still succeed.
-async function markRecordsInBatches(
-  writtenRecords: WrittenRecord[],
-): Promise<MarkSyncedRun> {
-  const outcomes: MarkSyncedOutcome[] = [];
-
-  for (
-    let start = 0;
-    start < writtenRecords.length;
-    start += MARK_SYNCED_CONCURRENCY
-  ) {
-    const batch = writtenRecords.slice(start, start + MARK_SYNCED_CONCURRENCY);
-    const batchOutcomes = await Promise.all(
-      batch.map(({ record, filePath }) =>
-        markRecordSynced(record.uuid, filePath),
-      ),
-    );
-
-    outcomes.push(...batchOutcomes);
-
-    if (batchOutcomes.includes(MARK_TIMED_OUT)) {
-      return { outcomes, timedOut: true };
-    }
-  }
-
-  return { outcomes, timedOut: false };
+// Projects each written record down to the `{ uuid, filePath }` shape the bulk
+// mark-synced call needs, preserving order so the returned outcomes stay aligned
+// to `writtenRecords` by index. Chunking and the stop-on-timeout abort live in
+// `markRecordsSynced` (the records lib), keeping the API surface isolated there.
+function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
+  return writtenRecords.map(({ record, filePath }) => ({
+    uuid: record.uuid,
+    filePath,
+  }));
 }
 
 // Headline for the mark-synced failure report. A timeout abort reads
@@ -542,7 +502,9 @@ async function markWrittenRecordsSynced(
 
   spinner.start('Marking records synced...');
 
-  const { outcomes, timedOut } = await markRecordsInBatches(writtenRecords);
+  const { outcomes, timedOut } = await markRecordsSynced(
+    toMarkSyncedItems(writtenRecords),
+  );
   // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
   // pending if its mark failed or was never attempted (its outcome is undefined
   // because a timeout aborted the run before its batch). Evict settled records

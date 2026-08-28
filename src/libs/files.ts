@@ -6,12 +6,18 @@ import {
   statSync,
 } from 'node:fs';
 import type { Stats } from 'node:fs';
+import { homedir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
 // Leading dot marks entries the directory walk skips (`.git`, `.obsidian`,
 // dotfiles), matching globSync's default of not matching dot entries.
 const HIDDEN_ENTRY_PREFIX = '.';
+// Leading references to the home directory the shell would normally expand.
+// A user quotes a glob (`markpost push '~/vault/**'`) precisely to stop the
+// shell touching it, which also stops the shell expanding the `~`/`$HOME`, so
+// the literal reference reaches us and must be expanded here instead.
+const HOME_REFERENCE_PREFIXES = ['~', '$HOME', '${HOME}'];
 
 // The outcome of expanding the raw push arguments:
 // - `files`: every markdown file resolved (deduplicated, order preserved)
@@ -38,6 +44,38 @@ interface WalkAccumulator {
 
 const isMarkdownFile = (filePath: string): boolean => {
   return MARKDOWN_EXTENSIONS.includes(extname(filePath).toLowerCase());
+};
+
+// Expand one leading home reference against the current home directory. The
+// reference on its own becomes the home directory; a `~/…` / `$HOME/…` prefix
+// has the reference swapped for the home path by string splice (not `join`, so
+// glob metacharacters and separators in the remainder survive untouched).
+// Returns null when the prefix doesn't apply so the caller can try the next.
+const expandHomeReference = (input: string, prefix: string): string | null => {
+  if (input === prefix) {
+    return homedir();
+  }
+
+  if (input.startsWith(`${prefix}/`)) {
+    return `${homedir()}${input.slice(prefix.length)}`;
+  }
+
+  return null;
+};
+
+// Swap a leading `~`/`$HOME` for the home directory so a quoted input resolves
+// to the same target the shell would have produced unquoted. Anything without
+// a home reference is returned untouched.
+const expandHomeDirectory = (input: string): string => {
+  for (const prefix of HOME_REFERENCE_PREFIXES) {
+    const expanded = expandHomeReference(input, prefix);
+
+    if (expanded !== null) {
+      return expanded;
+    }
+  }
+
+  return input;
 };
 
 // Resolve symlinks and normalize casing so a symlink and its target, or the
@@ -194,7 +232,7 @@ export const resolveMarkdownInputs = (
       skipped: [],
       visitedDirectories: new Set(),
     };
-    resolveInput(input, accumulator);
+    resolveInput(expandHomeDirectory(input), accumulator);
 
     skipped.push(...accumulator.skipped);
 
