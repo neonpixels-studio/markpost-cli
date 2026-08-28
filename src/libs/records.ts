@@ -551,7 +551,7 @@ const markSyncedChunk = async (
     // run). A non-null `abortReason` is what stops the run, so classification is
     // the single source of the abort decision: a PERMANENT failure (dead token /
     // forbidden account: 401/403) reports `'permanent'` and also stops the daemon;
-    // a transient systemic failure (auth/rate-limit/5xx that may be a blip) reports
+    // a transient systemic failure (rate-limit/5xx that may be a blip) reports
     // `'transient'` to back off — a sustained 429 stops after the first chunk
     // rather than firing the whole burst — but keeps the daemon alive; a plain
     // per-chunk failure is `null` and doesn't abort, since a later chunk may

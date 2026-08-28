@@ -1999,7 +1999,8 @@ describe('index', () => {
       expect.stringContaining('Marked 19 record(s) synced despite the above.'),
     );
     // The failed record is listed pending; a settled record (uuid-0) is not —
-    // proving the outcome/index alignment holds across chunks.
+    // proving the outcome/index alignment holds when the outcomes array is
+    // truncated by an abort.
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('! uuid-13 -> /mock/output/uuid-13.md'),
     );

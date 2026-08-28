@@ -460,10 +460,13 @@ function markFailureHeadline(
 ): string {
   if (abortReason === 'permanent') {
     const daemonClause = autoSyncEnabled ? ', so auto-sync was stopped;' : ';';
+    // Note the unattempted tail like the transient branch does — the abort left
+    // later chunks unsent, so the count is more than just the records that failed.
+    const skipped = hasUnattempted ? ' (some were never attempted)' : '';
     // Don't prescribe `markpost config` — a 403 (plan limit / sign-ups disabled)
     // isn't a token problem. markRecordsSynced already logged the failing chunk's
     // case-specific reason to stderr; point the user at that.
-    return `Failed to mark ${pendingCount} record(s) synced — a permanent error (authentication or a forbidden account) will recur every pass${daemonClause} the record(s) remain pending on the server. Fix the cause reported above and sync again.`;
+    return `Failed to mark ${pendingCount} record(s) synced${skipped} — a permanent error (authentication or a forbidden account) will recur every pass${daemonClause} the record(s) remain pending on the server. Fix the cause reported above and sync again.`;
   }
 
   if (abortReason === 'timeout') {
