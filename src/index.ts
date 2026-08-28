@@ -465,7 +465,14 @@ function markFailureHeadline(
     return `Aborted marking records synced — the server rejected the request wholesale (a 400/422), so every record would fail the same way${notAttemptedClause}; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
-  return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
+  // The generic branch also covers a systemic abort (auth/rate-limit/5xx), which
+  // stops the run early with no distinct stop reason — so surface how many of the
+  // pending records were never sent rather than implying all N were attempted.
+  const neverAttemptedClause =
+    stop.unattemptedCount > 0
+      ? ` (${stop.unattemptedCount} never attempted — the run stopped early)`
+      : '';
+  return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server${neverAttemptedClause}; they may be re-written next run.`;
 }
 
 // Surfaces mark-synced failures loudly (never as success): an unmarked record

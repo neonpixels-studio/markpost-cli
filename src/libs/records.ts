@@ -564,16 +564,21 @@ const markSyncedChunk = async (
       };
     }
 
+    // A request-shape 4xx and any other (per-chunk/systemic) failure both leave
+    // the whole chunk pending, so they share this outcome list; only the stop
+    // classification differs.
+    const failedOutcomes: MarkSyncedOutcome[] = items.map(() => MARK_FAILED);
+
     if (isFatalRequestError(error)) {
       return {
-        outcomes: items.map(() => MARK_FAILED),
+        outcomes: failedOutcomes,
         stop: STOP_REQUEST_SHAPE,
         message: error.message,
       };
     }
 
     return {
-      outcomes: items.map(() => MARK_FAILED),
+      outcomes: failedOutcomes,
       stop: isSystemicApiFailure(error) ? STOP_SYSTEMIC : null,
       message: null,
     };

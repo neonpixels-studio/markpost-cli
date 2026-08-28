@@ -1443,6 +1443,51 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('notes never-attempted records when a systemic stop ends the run early', async () => {
+    const records: Record[] = Array.from({ length: 3 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordsSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // A systemic abort (auth/rate-limit/5xx) has no distinct stop reason
+    // (stoppedBy null) but stops early: only uuid-0 was attempted, so uuid-1 and
+    // uuid-2 were never sent and the generic headline must say so.
+    vi.mocked(markRecordsSynced).mockResolvedValue({
+      outcomes: [MARK_FAILED],
+      stoppedBy: null,
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 3 record(s) synced'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('2 never attempted'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it('does not use the timeout wording for a plain (non-timeout) failure', async () => {
     const records: Record[] = Array.from({ length: 4 }, (_item, index) => ({
       uuid: `uuid-${index}`,
