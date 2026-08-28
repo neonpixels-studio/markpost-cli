@@ -3,13 +3,11 @@
 import {
   deleteRecords,
   fetchAllRecords,
-  markRecordSynced,
-  markSyncedStopReason,
-  probeStopReason,
+  markRecordsSynced,
   MARK_ABORTED,
   MARK_SYNCED,
   MARK_TIMED_OUT,
-  MarkSyncedOutcome,
+  MarkSyncedItem,
   MarkSyncedStop,
   PENDING_STATUS,
 } from '@/libs/records.js';
@@ -53,14 +51,6 @@ import {
 } from '@/types/settings.types.js';
 
 type Spinner = ReturnType<typeof yoctoSpinner>;
-
-// Cap how many mark-synced PATCHes are in flight at once. A large first sync
-// can write hundreds of records; firing one unbounded `Promise.all` over all
-// of them risks rate-limit/connection failures exactly when the batch is
-// biggest — and every failed mark stays pending and re-duplicates next run.
-// Declared here (above the top-level `dispatch()` call) so the hoisted helpers
-// don't hit its temporal dead zone when the default sync runs.
-const MARK_SYNCED_CONCURRENCY = 10;
 
 // Slug ownership (resolved `<slug>.md` path -> the uuid that wrote it), shared
 // across every autoSync pass in this process rather than rebuilt per pass.
@@ -434,111 +424,15 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
   });
 }
 
-// Outcome of a whole mark-synced run. `outcomes` holds one entry per *attempted*
-// record in the original order; on an abort it's shorter than the input because
-// the remaining batches were never sent. `stoppedBy` records which abort reason
-// stopped the run early (or null). `probeSyncedIndex` is the index of the last
-// record IF a confirmation probe synced it (else null): the probe runs
-// out-of-order and isn't in `outcomes`, so the caller must count that index as
-// settled even when a later batch stopped the run before re-marking it.
-interface MarkSyncedRun {
-  outcomes: MarkSyncedOutcome[];
-  stoppedBy: MarkSyncedStop;
-  probeSyncedIndex: number | null;
-}
-
-// PATCHes the written records synced in bounded-concurrency batches, stopping
-// early on a hung server (a timeout) or a request the server rejects wholesale.
-// A suspected request-shape abort is CONFIRMED with a probe before stranding the
-// records behind it: the LAST written record is attempted, and the run only
-// aborts if that fails the same way. Probing the far end (not the record next to
-// the rejected block) means a categorically wrong request still fails the probe,
-// while a contiguous run of per-record 4xx at the FRONT of the queue does not —
-// the valid records behind the bad block keep syncing instead of being stranded
-// on every future run (the pending set is re-fetched in the same order each run).
-// At most ONE probe runs per invocation: an inconclusive (transient) probe is
-// enough evidence to keep going, and re-probing would only hammer one record. An
-// abort leaves the unattempted records pending to retry next run, mirroring the
-// push command's batch-abort.
-async function markRecordsInBatches(
-  writtenRecords: WrittenRecord[],
-): Promise<MarkSyncedRun> {
-  const outcomes: MarkSyncedOutcome[] = [];
-  let anyRecordSynced = false;
-  let probeUsed = false;
-  let probeSyncedIndex: number | null = null;
-  let cursor = 0;
-
-  while (cursor < writtenRecords.length) {
-    const batch = writtenRecords.slice(
-      cursor,
-      cursor + MARK_SYNCED_CONCURRENCY,
-    );
-    const batchOutcomes = await Promise.all(
-      batch.map(({ record, filePath }) =>
-        markRecordSynced(record.uuid, filePath),
-      ),
-    );
-    outcomes.push(...batchOutcomes);
-    cursor += batch.length;
-
-    const stoppedBy = markSyncedStopReason(batchOutcomes, anyRecordSynced);
-    anyRecordSynced = anyRecordSynced || batchOutcomes.includes(MARK_SYNCED);
-
-    if (stoppedBy === MARK_TIMED_OUT) {
-      return { outcomes, stoppedBy, probeSyncedIndex };
-    }
-
-    if (stoppedBy !== MARK_ABORTED) {
-      continue;
-    }
-
-    // The rejected batch was the last one: every record was already attempted, so
-    // an abort would save no work and only assert an unverified cause. Report as
-    // plain per-record failures instead. Also skip if a probe already ran this
-    // invocation — one inconclusive probe is enough to keep going.
-    if (cursor >= writtenRecords.length || probeUsed) {
-      continue;
-    }
-
-    probeUsed = true;
-    const probeOutcome = await probeLastRecord(writtenRecords);
-    // A synced probe proves the request shape is valid, so record it as settled
-    // (it isn't in `outcomes`) and let no later all-rejected batch abort.
-    if (probeOutcome === MARK_SYNCED) {
-      anyRecordSynced = true;
-      probeSyncedIndex = writtenRecords.length - 1;
-    }
-
-    const probeStop = probeStopReason(probeOutcome);
-
-    if (probeStop === MARK_TIMED_OUT) {
-      return { outcomes, stoppedBy: MARK_TIMED_OUT, probeSyncedIndex };
-    }
-
-    // Confirm the abort only when skipping the rest still saves un-attempted work
-    // — records other than the probed last one remain. Otherwise everything was
-    // attempted, so fall through to plain per-record failures.
-    const savedWorkRemains = cursor < writtenRecords.length - 1;
-
-    if (probeStop === MARK_ABORTED && savedWorkRemains) {
-      return { outcomes, stoppedBy: MARK_ABORTED, probeSyncedIndex };
-    }
-  }
-
-  return { outcomes, stoppedBy: null, probeSyncedIndex };
-}
-
-// Attempts the LAST written record and returns its raw outcome (see
-// markRecordsInBatches). Isolated so the probe target lives in one place; the
-// caller classifies the outcome so it can also learn a synced probe proved the
-// shape valid.
-async function probeLastRecord(
-  writtenRecords: WrittenRecord[],
-): Promise<MarkSyncedOutcome> {
-  const probe = writtenRecords[writtenRecords.length - 1];
-
-  return markRecordSynced(probe.record.uuid, probe.filePath);
+// Projects each written record down to the `{ uuid, filePath }` shape the bulk
+// mark-synced call needs, preserving order so the returned outcomes stay aligned
+// to `writtenRecords` by index. Chunking and the stop-on-abort logic live in
+// `markRecordsSynced` (the records lib), keeping the API surface isolated there.
+function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
+  return writtenRecords.map(({ record, filePath }) => ({
+    uuid: record.uuid,
+    filePath,
+  }));
 }
 
 // Headline for the mark-synced failure report. An abort reads differently from a
@@ -554,7 +448,7 @@ function markFailureHeadline(
   }
 
   if (stoppedBy === MARK_ABORTED) {
-    return `Aborted marking records synced — a whole batch was rejected the same way and a confirmation request failed too, so the rest were not attempted; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+    return `Aborted marking records synced — the server rejected the request wholesale (a 400/422), so every remaining record would fail the same way and the rest were not attempted; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
   return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
@@ -618,19 +512,21 @@ async function markWrittenRecordsSynced(
 
   spinner.start('Marking records synced...');
 
-  const { outcomes, stoppedBy, probeSyncedIndex } =
-    await markRecordsInBatches(writtenRecords);
-  // A record is settled when its mark-synced outcome is MARK_SYNCED, OR it is the
-  // record a confirmation probe synced out-of-order (not in `outcomes`, but the
-  // server already accepted it, so it must not be reported as still pending). It
-  // is pending if its mark failed or was never attempted (its outcome is
-  // undefined because an abort stopped the run before its batch). Evict settled
-  // records from the written-path map so a long-running autoSync daemon doesn't
-  // leak memory — the "settled" half of the written-vs-settled split.
-  const isSettled = (index: number): boolean =>
-    outcomes[index] === MARK_SYNCED || index === probeSyncedIndex;
-  const settled = writtenRecords.filter((_written, index) => isSettled(index));
-  const pending = writtenRecords.filter((_written, index) => !isSettled(index));
+  const { outcomes, stoppedBy } = await markRecordsSynced(
+    toMarkSyncedItems(writtenRecords),
+  );
+  // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
+  // pending if its mark failed or was never attempted (its outcome is undefined
+  // because an abort — a timeout, a systemic failure, or a request-shape 4xx —
+  // stopped the run before its chunk). Evict settled records from the written-
+  // path map so a long-running autoSync daemon doesn't leak memory — the
+  // "settled" half of the written-vs-settled split.
+  const settled = writtenRecords.filter(
+    (_written, index) => outcomes[index] === MARK_SYNCED,
+  );
+  const pending = writtenRecords.filter(
+    (_written, index) => outcomes[index] !== MARK_SYNCED,
+  );
 
   forgetSettledRecords(
     writtenState,

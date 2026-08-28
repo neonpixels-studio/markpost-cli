@@ -6,13 +6,12 @@ import {
   fetchAllRecords,
   fetchPaginatedRecords,
   fetchRecord,
-  markRecordSynced,
-  markSyncedStopReason,
-  probeStopReason,
+  markRecordsSynced,
   MARK_ABORTED,
   MARK_FAILED,
   MARK_SYNCED,
   MARK_TIMED_OUT,
+  MAX_MARK_SYNCED_BATCH_SIZE,
 } from '@/libs/records.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
@@ -1206,35 +1205,67 @@ describe('records API timeout propagation', () => {
   });
 });
 
-describe('markRecordSynced', () => {
+describe('markRecordsSynced', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  // Unlike the other record calls, a mark-synced timeout is non-fatal: the file
-  // is already written, so a stalled PATCH is logged and reported as its own
-  // `MARK_TIMED_OUT` outcome (leaving the record to re-sync next run) rather than
-  // re-thrown to abort the whole sync. The distinct outcome lets the batch runner
-  // stop on the first timeout instead of paying it on every remaining record. The
-  // AbortSignal still bounds the wait so it can't hang forever.
-  it('returns the timed-out outcome on a request timeout instead of re-throwing', async () => {
+  // Build `count` items with predictable uuids/paths so a test can assert
+  // per-record outcomes and chunk boundaries without hand-listing records.
+  const items = (count: number) =>
+    Array.from({ length: count }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      filePath: `/vault/note-${index}.md`,
+    }));
+
+  // Builds markpost's real bulk-PATCH success body from a request: it echoes
+  // back every requested uuid it "updated" as a resource, with a `meta.updated`
+  // count. `wasUpdated` decides which uuids the server matched — the default
+  // matches all; a partial-success test narrows it. Reading this `data`
+  // collection is what gives the CLI per-record outcomes rather than a bare 2xx.
+  const echoBulkPatch = (
+    init: RequestInit,
+    wasUpdated: (uuid: string) => boolean = () => true,
+  ) => {
+    const body = JSON.parse(String(init.body));
+    const records = body.data.attributes.records as { uuid: string }[];
+    const updated = records.filter((record) => wasUpdated(record.uuid));
+
+    return Promise.resolve({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          data: updated.map((record) => ({
+            type: 'records',
+            attributes: { uuid: record.uuid },
+          })),
+          meta: { updated: updated.length },
+        }),
+    });
+  };
+
+  // Every chunk resolves MARK_SYNCED for all its items.
+  const mockBulkPatchEcho = () => {
     global.fetch = vi
       .fn()
-      .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_TIMED_OUT,
-    );
-  });
+      .mockImplementation((_url, init) => echoBulkPatch(init));
+  };
 
-  it('PATCHes the record uuid with status=synced, syncedAt, and filePath', async () => {
-    mockFetch({ data: { attributes: mockRecord } });
-    await markRecordSynced(
-      'abc-123',
-      '/vault/test-title.md',
+  // The number of records in each chunk request, in call order.
+  const chunkSizes = () =>
+    vi.mocked(global.fetch).mock.calls.map((call) => {
+      const body = JSON.parse(String(call[1]?.body));
+      return body.data.attributes.records.length as number;
+    });
+
+  it('sends one bulk PATCH per record chunk with the synced attributes', async () => {
+    mockBulkPatchEcho();
+    await markRecordsSynced(
+      [{ uuid: 'abc-123', filePath: '/vault/test-title.md' }],
       '2024-01-01T00:00:00.000Z',
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records/abc-123',
+      'https://example.com/api/records',
       expect.objectContaining({
         method: 'PATCH',
         headers: {
@@ -1245,9 +1276,14 @@ describe('markRecordSynced', () => {
           data: {
             type: 'records',
             attributes: {
-              status: 'synced',
-              syncedAt: '2024-01-01T00:00:00.000Z',
-              filePath: '/vault/test-title.md',
+              records: [
+                {
+                  uuid: 'abc-123',
+                  status: 'synced',
+                  syncedAt: '2024-01-01T00:00:00.000Z',
+                  filePath: '/vault/test-title.md',
+                },
+              ],
             },
           },
         }),
@@ -1256,85 +1292,324 @@ describe('markRecordSynced', () => {
   });
 
   it('defaults syncedAt to the current time when not supplied', async () => {
-    mockFetch({ data: { attributes: mockRecord } });
-    await markRecordSynced('abc-123', '/vault/test-title.md');
+    mockBulkPatchEcho();
+    await markRecordsSynced([{ uuid: 'abc-123', filePath: '/vault/note.md' }]);
     const requestInit = vi.mocked(global.fetch).mock.calls[0]?.[1];
     const sentBody = JSON.parse(String(requestInit?.body));
-    expect(sentBody.data.attributes.syncedAt).toEqual(expect.any(String));
+    const sentRecord = sentBody.data.attributes.records[0];
+    expect(sentRecord.syncedAt).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse(sentRecord.syncedAt))).toBe(false);
+  });
+
+  it('sends nothing and reports no outcomes for an empty input', async () => {
+    global.fetch = vi.fn();
+    const result = await markRecordsSynced([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result).toEqual({ outcomes: [], stoppedBy: null });
+  });
+
+  it('marks every record synced in a single request at exactly the batch size', async () => {
+    mockBulkPatchEcho();
+    const result = await markRecordsSynced(items(MAX_MARK_SYNCED_BATCH_SIZE));
+    // A full-but-not-over chunk is one request — the off-by-one boundary.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(chunkSizes()).toEqual([MAX_MARK_SYNCED_BATCH_SIZE]);
+    expect(result.outcomes).toHaveLength(MAX_MARK_SYNCED_BATCH_SIZE);
+    expect(result.outcomes.every((outcome) => outcome === MARK_SYNCED)).toBe(
+      true,
+    );
+    expect(result.stoppedBy).toBeNull();
+  });
+
+  it('splits one-over-the-batch-size into two requests (ceil(N/100))', async () => {
+    mockBulkPatchEcho();
+    const result = await markRecordsSynced(
+      items(MAX_MARK_SYNCED_BATCH_SIZE + 1),
+    );
+    // 101 records must not go in one over-cap request markpost would 422.
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(chunkSizes()).toEqual([MAX_MARK_SYNCED_BATCH_SIZE, 1]);
+    expect(result.outcomes).toHaveLength(MAX_MARK_SYNCED_BATCH_SIZE + 1);
+    expect(result.outcomes.every((outcome) => outcome === MARK_SYNCED)).toBe(
+      true,
+    );
+  });
+
+  it('chunks 250 records into 100/100/50 requests, each within the cap', async () => {
+    mockBulkPatchEcho();
+    const result = await markRecordsSynced(items(250));
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(chunkSizes()).toEqual([100, 100, 50]);
+    // No chunk may ever exceed the server cap.
+    expect(chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE)).toBe(
+      true,
+    );
+    expect(result.outcomes).toHaveLength(250);
+    expect(result.stoppedBy).toBeNull();
+  });
+
+  it('pairs each record its own uuid, filePath, and syncedAt across chunks', async () => {
+    mockBulkPatchEcho();
+    await markRecordsSynced(items(250), '2024-05-01T00:00:00.000Z');
+    // Inspect the SECOND chunk's body: a mis-pairing (e.g. every record getting
+    // items[0].filePath) would still pass the size/uuid-echo assertions above.
+    const secondBody = JSON.parse(
+      String(vi.mocked(global.fetch).mock.calls[1]?.[1]?.body),
+    );
+    const secondRecords = secondBody.data.attributes.records;
+    expect(secondRecords[0]).toEqual({
+      uuid: 'uuid-100',
+      status: 'synced',
+      syncedAt: '2024-05-01T00:00:00.000Z',
+      filePath: '/vault/note-100.md',
+    });
+    expect(secondRecords[49]).toEqual({
+      uuid: 'uuid-149',
+      status: 'synced',
+      syncedAt: '2024-05-01T00:00:00.000Z',
+      filePath: '/vault/note-149.md',
+    });
+  });
+
+  it('reports MARK_FAILED for a uuid the server did not return (partial success)', async () => {
+    // The server updates every record except uuid-2 (e.g. it no longer exists);
+    // an absent uuid in the response means that record stays pending.
+    global.fetch = vi
+      .fn()
+      .mockImplementation((_url, init) =>
+        echoBulkPatch(init, (uuid) => uuid !== 'uuid-2'),
+      );
+
+    const result = await markRecordsSynced(items(5));
+    expect(result.outcomes).toEqual([
+      MARK_SYNCED,
+      MARK_SYNCED,
+      MARK_FAILED,
+      MARK_SYNCED,
+      MARK_SYNCED,
+    ]);
+    expect(result.stoppedBy).toBeNull();
+  });
+
+  it('aligns a per-record failure to its index when it lands in a later chunk', async () => {
+    // uuid-120 sits in the second chunk (records 100-149). The accumulated
+    // outcomes array must map it to index 120 — pins cross-chunk index
+    // alignment, which a uniform-outcome multi-chunk test can't catch.
+    global.fetch = vi
+      .fn()
+      .mockImplementation((_url, init) =>
+        echoBulkPatch(init, (uuid) => uuid !== 'uuid-120'),
+      );
+
+    const result = await markRecordsSynced(items(150));
+    expect(result.outcomes).toHaveLength(150);
+    expect(result.outcomes[120]).toBe(MARK_FAILED);
     expect(
-      Number.isNaN(Date.parse(sentBody.data.attributes.syncedAt)),
-    ).toBe(false);
+      result.outcomes.every((outcome, index) =>
+        index === 120 ? outcome === MARK_FAILED : outcome === MARK_SYNCED,
+      ),
+    ).toBe(true);
+    expect(result.stoppedBy).toBeNull();
   });
 
-  it('returns the synced outcome on success', async () => {
-    mockFetch({ data: { attributes: mockRecord } });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_SYNCED,
-    );
+  it('aborts remaining chunks on a timeout and marks the timed-out chunk pending', async () => {
+    // First chunk succeeds; the second times out. The third chunk must never be
+    // sent — a hung server would otherwise burn the full timeout on every chunk.
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      callCount += 1;
+      if (callCount === 2) {
+        return Promise.reject(new DOMException('timed out', 'TimeoutError'));
+      }
+
+      return echoBulkPatch(init);
+    });
+
+    const result = await markRecordsSynced(items(250));
+    // Only two requests fire — the third chunk is never attempted.
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result.stoppedBy).toBe(MARK_TIMED_OUT);
+    // Chunk 1 synced (100), chunk 2 all timed out (100); chunk 3 has no outcome.
+    expect(result.outcomes).toHaveLength(200);
+    expect(
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_SYNCED),
+    ).toBe(true);
+    expect(
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_TIMED_OUT),
+    ).toBe(true);
   });
 
-  // A 2xx that carries no resource body must count as success, not a spurious
-  // failure that warns the user of duplicates that never appear.
-  it('returns the synced outcome for a 2xx response with a null data body', async () => {
+  it('does not abort remaining chunks on a plain (non-timeout) failure', async () => {
+    // Chunk 1 rejects with a plain network error; unlike a timeout, that must NOT
+    // stop the run — chunks 2 and 3 still fire and settle their records.
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.reject(new Error('Network error'));
+      }
+
+      return echoBulkPatch(init);
+    });
+
+    const result = await markRecordsSynced(items(250));
+    // All three chunks are attempted — no abort.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result.stoppedBy).toBeNull();
+    expect(result.outcomes).toHaveLength(250);
+    expect(
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
+    ).toBe(true);
+    expect(
+      result.outcomes.slice(100).every((outcome) => outcome === MARK_SYNCED),
+    ).toBe(true);
+  });
+
+  // markpost's bulk PATCH always returns the records it actually updated as the
+  // `data` collection (server/api/records/index.patch.ts), so an empty `data` is
+  // the authoritative "nothing matched" signal, not a shape to treat as success.
+  // Reporting those records MARK_FAILED (fail loud) is deliberate — it leaves
+  // them pending to retry rather than falsely claiming a sync that didn't happen.
+  it('marks every record MARK_FAILED when the server returns an empty data set', async () => {
+    mockFetch({ data: [], meta: { updated: 0 } });
+    const result = await markRecordsSynced(items(3));
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
+    expect(result.stoppedBy).toBeNull();
+  });
+
+  // Off-contract safety net: the declared contract always sends `data` as an
+  // array, but a proxy or future shape could send a meta-only body. Fall back to
+  // `meta.updated` rather than crashing or spuriously failing the chunk.
+  it('accepts the chunk via meta.updated when the response omits the data array', async () => {
+    mockFetch({ meta: { updated: 3 } });
+    const result = await markRecordsSynced(items(3));
+    expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED, MARK_SYNCED]);
+    expect(result.stoppedBy).toBeNull();
+  });
+
+  // `data: null` is off-contract (markpost always sends the updated array), so
+  // with no `meta.updated` to confirm it, fail the chunk loud rather than
+  // guessing success — the records retry next run.
+  it('fails the chunk when data is null and no meta.updated confirms it', async () => {
     mockFetch({ data: null });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_SYNCED,
+    const result = await markRecordsSynced(items(2));
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED]);
+  });
+
+  it('does not crash on a non-array data object, falling back to meta.updated', async () => {
+    // A single resource object (the old per-uuid shape) must not throw a
+    // TypeError through the catch; meta.updated confirms the whole chunk.
+    mockFetch({ data: { attributes: { uuid: 'uuid-0' } }, meta: { updated: 2 } });
+    const result = await markRecordsSynced(items(2));
+    expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED]);
+  });
+
+  it('fails the chunk when data is unreadable and meta.updated does not confirm all', async () => {
+    // No data array and a short/absent updated count — fail loud so the records
+    // retry next run rather than being falsely reported synced.
+    mockFetch({ meta: { updated: 1 } });
+    const result = await markRecordsSynced(items(3));
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
+  });
+
+  it('aborts remaining chunks on a systemic failure (e.g. 401) without a timeout flag', async () => {
+    // A 401 (or any auth/rate-limit/5xx) will recur for every remaining chunk,
+    // so the run backs off after the first rather than hammering the server.
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({}),
+    });
+
+    const result = await markRecordsSynced(items(250));
+    // Only the first chunk is attempted — the other two are never sent.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // A systemic abort is not a timeout, so the caller uses the failure wording.
+    expect(result.stoppedBy).toBeNull();
+    // The attempted chunk is all pending; the unsent chunks have no outcome.
+    expect(result.outcomes).toHaveLength(100);
+    expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
+      true,
     );
   });
 
-  // A 200 carrying an unparseable body (e.g. an HTML page from a proxy) must
-  // fail rather than be reported as a silent success that leaves the record
-  // pending and re-duplicated next run.
-  it('returns the failed outcome for a 2xx response whose body is not valid JSON', async () => {
+  it('marks a whole chunk MARK_FAILED when the request rejects with an error response', async () => {
+    mockFetch(
+      { data: { errors: [{ title: 'Unprocessable', detail: 'bad batch' }] } },
+      false,
+    );
+    const result = await markRecordsSynced(items(3));
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
+    expect(result.stoppedBy).toBeNull();
+  });
+
+  it('marks a whole chunk MARK_FAILED on a network failure', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    const result = await markRecordsSynced(items(2));
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED]);
+  });
+
+  it('marks the chunk MARK_FAILED for a 2xx response whose body is not valid JSON', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.reject(new Error('Unexpected token < in JSON')),
     });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_FAILED,
-    );
-  });
-
-  it('returns the failed outcome when the response contains errors', async () => {
-    mockFetch(
-      { data: { errors: [{ title: 'Not Found', detail: 'Record missing' }] } },
-      false,
-    );
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_FAILED,
-    );
-  });
-
-  it('returns the failed outcome on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_FAILED,
-    );
+    const result = await markRecordsSynced(items(1));
+    expect(result.outcomes).toEqual([MARK_FAILED]);
   });
 
   // A request-shape 4xx (a contract-validation 422 or a malformed-payload 400)
-  // means the request the CLI built may be wrong for every record. Return the
-  // abort outcome so the batch runner can stop once it sees a whole batch fail
-  // this way instead of retrying each doomed record.
-  it('returns the aborted outcome on a 422 the request payload caused', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 422,
-      json: () =>
-        Promise.resolve({
-          data: {
-            errors: [
-              { title: 'Unprocessable', detail: 'Unknown attribute: filePath' },
-            ],
-          },
-        }),
+  // means the payload envelope the CLI built is wrong. Every chunk is built the
+  // same way, so a rejected chunk dooms every remaining chunk too — abort with
+  // MARK_ABORTED rather than fire the same doomed request again. markpost's bulk
+  // handler validates the whole envelope and 422s before any write (foreign
+  // uuids are dropped, not 4xx'd), so a 400/422 is never per-record here.
+  it('aborts remaining chunks on a 422, marking the rejected chunk MARK_ABORTED', async () => {
+    // Chunk 1 succeeds; chunk 2 is rejected with a 422. Chunk 3 must never be
+    // sent — the same envelope would be rejected identically.
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      callCount += 1;
+      if (callCount === 2) {
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              data: {
+                errors: [
+                  {
+                    title: 'Invalid Attribute',
+                    detail: 'Unknown attribute: filePath',
+                  },
+                ],
+              },
+            }),
+        });
+      }
+
+      return echoBulkPatch(init);
     });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_ABORTED,
-    );
+
+    const result = await markRecordsSynced(items(250));
+    // Only two requests fire — the third chunk is never attempted.
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result.stoppedBy).toBe(MARK_ABORTED);
+    // Chunk 1 synced (100), chunk 2 all aborted (100); chunk 3 has no outcome.
+    expect(result.outcomes).toHaveLength(200);
+    expect(
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_SYNCED),
+    ).toBe(true);
+    expect(
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
+    ).toBe(true);
   });
 
-  it('returns the aborted outcome on a malformed-payload 400', async () => {
+  it('aborts with MARK_ABORTED on a malformed-payload 400', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -1343,47 +1618,51 @@ describe('markRecordSynced', () => {
           data: { errors: [{ title: 'Bad Request', detail: 'Invalid body' }] },
         }),
     });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_ABORTED,
-    );
+    const result = await markRecordsSynced(items(2));
+    expect(result.outcomes).toEqual([MARK_ABORTED, MARK_ABORTED]);
+    expect(result.stoppedBy).toBe(MARK_ABORTED);
   });
 
-  // A 404 means THIS record is gone server-side (deleted in the UI between the
-  // fetch and the PATCH), not that the request shape is wrong — the rest of the
-  // batch can still be marked. Guards the 4xx-abort against catching a per-record
-  // 404.
-  it('returns the failed outcome on a 404 instead of aborting', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      json: () =>
-        Promise.resolve({
-          data: { errors: [{ title: 'Not Found', detail: 'No such record' }] },
-        }),
+  // A 404 is neither a request-shape 4xx nor systemic, so it stays a plain chunk
+  // failure that does NOT abort — a later chunk may still succeed. Guards the
+  // fatal-request abort against widening beyond 400/422.
+  it('does not abort on a 404 — the chunk is MARK_FAILED and the run continues', async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () =>
+            Promise.resolve({
+              data: {
+                errors: [{ title: 'Not Found', detail: 'No such record' }],
+              },
+            }),
+        });
+      }
+
+      return echoBulkPatch(init);
     });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_FAILED,
-    );
+
+    const result = await markRecordsSynced(items(250));
+    // All three chunks are attempted — a 404 is not a categorical abort.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result.stoppedBy).toBeNull();
+    expect(
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
+    ).toBe(true);
+    expect(
+      result.outcomes.slice(100).every((outcome) => outcome === MARK_SYNCED),
+    ).toBe(true);
   });
 
-  // An auth 401/403 is systemic but out of this abort's scope — mark-synced
-  // treats it as a plain per-record failure (the file is already on disk), same
-  // as before. Guards the 4xx-abort against widening to auth codes.
-  it('returns the failed outcome on a 401 instead of aborting', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: () => Promise.resolve({ data: { errors: [] } }),
-    });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_FAILED,
-    );
-  });
-
-  // A 429 is transient (back off and retry), NOT a doomed payload — it must stay
-  // a plain failure so the run doesn't abort the rest of the batch on a
-  // rate-limit blip. Guards the 4xx-abort against catching 429.
-  it('returns the failed outcome on a 429 rate-limit instead of aborting', async () => {
+  // A 429 is systemic (rate-limit): it aborts the run to back off, but is NOT a
+  // request-shape rejection — it maps to MARK_FAILED with a null stop reason (the
+  // plain-failure wording), never MARK_ABORTED. Guards the fatal-request abort
+  // against catching a transient rate-limit.
+  it('treats a 429 as a systemic abort (MARK_FAILED, not MARK_ABORTED)', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 429,
@@ -1394,112 +1673,41 @@ describe('markRecordSynced', () => {
           },
         }),
     });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_FAILED,
+
+    const result = await markRecordsSynced(items(250));
+    // Systemic abort after the first chunk — the other two never fire.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(result.stoppedBy).toBeNull();
+    expect(result.outcomes).toHaveLength(100);
+    expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
+      true,
     );
   });
 
   // A 4xx delivered as a non-JSON body (an HTML WAF/proxy interstitial) throws
   // while parsing before it can be classified as request-shape, so it must
   // degrade to a plain failure — never an abort — failing in the safe direction.
-  it('returns the failed outcome on a 422 whose body is not JSON', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 422,
-      json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+  it('does not abort on a 422 whose body is not JSON — the chunk is MARK_FAILED', async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+        });
+      }
+
+      return echoBulkPatch(init);
     });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_FAILED,
-    );
-  });
 
-  // A 5xx is a server-side fault the payload can't fix and may clear on retry, so
-  // it stays a plain failure rather than aborting the batch.
-  it('returns the failed outcome on a 500 instead of aborting', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: () =>
-        Promise.resolve({
-          data: { errors: [{ title: 'Server Error', detail: 'Boom' }] },
-        }),
-    });
-    expect(await markRecordSynced('abc-123', '/vault/test-title.md')).toBe(
-      MARK_FAILED,
-    );
-  });
-});
-
-describe('markSyncedStopReason', () => {
-  it('stops on a timeout anywhere in the batch, regardless of prior success', () => {
-    expect(markSyncedStopReason([MARK_SYNCED, MARK_TIMED_OUT], false)).toBe(
-      MARK_TIMED_OUT,
-    );
-    expect(markSyncedStopReason([MARK_TIMED_OUT, MARK_ABORTED], true)).toBe(
-      MARK_TIMED_OUT,
-    );
-  });
-
-  it('aborts when a multi-record batch is unanimously rejected and nothing has synced yet', () => {
-    expect(markSyncedStopReason([MARK_ABORTED, MARK_ABORTED], false)).toBe(
-      MARK_ABORTED,
-    );
-  });
-
-  // A one-record tail batch trivially satisfies `every`, so a lone 4xx there is
-  // NOT proof the shape is categorically wrong — it's a per-record rejection and
-  // must not strand whatever follows.
-  it('does NOT abort a single-record batch — a lone 4xx there is per-record', () => {
-    expect(markSyncedStopReason([MARK_ABORTED], false)).toBeNull();
-  });
-
-  // An empty batch is unreachable from the batch runner, but the exported policy
-  // must not treat a vacuous `every` as evidence to abort.
-  it('does NOT abort an empty batch', () => {
-    expect(markSyncedStopReason([], false)).toBeNull();
-  });
-
-  // The core guard against stranding: once any record has synced, the request
-  // shape is proven valid, so a later whole-batch 4xx is per-record and must not
-  // abort the run.
-  it('does NOT abort a whole-rejected batch once a record has already synced', () => {
-    expect(markSyncedStopReason([MARK_ABORTED, MARK_ABORTED], true)).toBeNull();
-  });
-
-  it('does NOT abort a mixed batch — a lone 4xx alongside a success is per-record', () => {
-    expect(markSyncedStopReason([MARK_SYNCED, MARK_ABORTED], true)).toBeNull();
-  });
-
-  // Deliberately conservative: unanimity is required, so one transient blip (a
-  // 429/5xx surfaced as MARK_FAILED) among the rejections keeps the run going.
-  // Erring toward a few extra doomed requests is safer than aborting on what may
-  // be a lone per-record 4xx and stranding syncable records.
-  it('does NOT abort a batch of rejections mixed with a transient failure', () => {
+    const result = await markRecordsSynced(items(250));
+    // The unparseable body degrades to a plain failure, so the run continues.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result.stoppedBy).toBeNull();
     expect(
-      markSyncedStopReason([MARK_ABORTED, MARK_FAILED], false),
-    ).toBeNull();
-  });
-
-  it('does NOT abort when the batch failed but not as a request-shape 4xx', () => {
-    expect(markSyncedStopReason([MARK_FAILED, MARK_FAILED], false)).toBeNull();
-  });
-});
-
-describe('probeStopReason', () => {
-  // A probe is a DIFFERENT record than the rejected batch, so a lone reject here
-  // is decisive — it confirms the request shape itself is wrong.
-  it('confirms an abort when the probe is also rejected', () => {
-    expect(probeStopReason(MARK_ABORTED)).toBe(MARK_ABORTED);
-  });
-
-  it('stops as a timeout when the probe times out', () => {
-    expect(probeStopReason(MARK_TIMED_OUT)).toBe(MARK_TIMED_OUT);
-  });
-
-  // A surviving probe (synced) or an inconclusive one (transient failure) does
-  // not confirm a bad shape, so the run continues.
-  it('does not stop when the probe succeeds or fails transiently', () => {
-    expect(probeStopReason(MARK_SYNCED)).toBeNull();
-    expect(probeStopReason(MARK_FAILED)).toBeNull();
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
+    ).toBe(true);
   });
 });
