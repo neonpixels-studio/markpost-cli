@@ -467,11 +467,10 @@ const outcomesFromResponse = (
   );
 };
 
-// The result of PATCHing one chunk: a per-item outcome list plus whether the
-// run should stop. `abort` is set when the failure dooms every remaining chunk
-// too (a hung server or a systemic auth/rate-limit/5xx failure), so the caller
-// stops rather than firing a burst it already knows will fail. A non-null
-// `abortReason` IS the abort signal (the run stops on it) and carries WHY:
+// The result of PATCHing one chunk: a per-item outcome list plus whether (and
+// why) the run should stop. A non-null `abortReason` IS the abort signal (the
+// run stops on it, backing off rather than firing a burst it knows will fail)
+// and carries WHY:
 // `'timeout'` and `'permanent'` distinguish the hung-server and dead-token cases
 // (the latter also stops the daemon), and `'transient'` a systemic 429/5xx (aborts
 // this run, daemon lives). `null` is the plain success/per-chunk-failure case that
@@ -498,8 +497,9 @@ type MarkSyncedChunkResult = {
 // PERMANENT systemic failure (dead token / forbidden account: 401/403) aborts
 // with `abortReason: 'permanent'` so the caller additionally stops the autoSync
 // daemon, which can't clear it on retry (matching the delete path); a transient
-// systemic failure aborts with `null` (daemon lives). Any other (per-chunk)
-// failure maps to `MARK_FAILED` without aborting — a later chunk may still
+// systemic failure aborts with `'transient'` (the run stops to back off, but the
+// daemon lives). Any other (per-chunk) failure maps to `MARK_FAILED` without
+// aborting (`abortReason: null`) — a later chunk may still
 // succeed.
 const markSyncedChunk = async (
   items: MarkSyncedItem[],

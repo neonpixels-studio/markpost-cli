@@ -1917,24 +1917,21 @@ describe('index', () => {
       .find((message) => message.includes('a systemic error stopped the run early'));
     expect(headline).toBeDefined();
     expect(headline).toContain('2 record(s)');
-    // A trailing chunk was unsent and a daemon is alive, so both conditional
-    // clauses appear.
+    // A trailing chunk was unsent, so the "never attempted" clause appears.
     expect(headline).toContain('so some were never attempted');
-    expect(headline).toContain('are retried next run');
     expect(process.exitCode).toBe(1);
     // A transient error can clear, so the daemon must retry next pass.
     expect(capture.scheduledAutoSync).toBe(true);
   });
 
-  // The transient headline's clauses are conditional: when the abort lands on the
-  // LAST chunk (no unattempted tail) and no daemon is running (one-shot sync), it
-  // must claim neither "never attempted" nor "retried next run" — the same
-  // false-claim guard the permanent branch has. outcomes length == count, so
-  // nothing was skipped; autoSync off, so there is no next run.
-  it('does not overclaim on a transient abort with no unattempted tail and no daemon', async () => {
+  // The transient headline's "never attempted" clause is conditional: when the
+  // abort lands on the LAST chunk (outcomes length == count, no unattempted tail),
+  // it must NOT claim records were skipped — the same false-claim guard the
+  // permanent branch has for its daemon clause.
+  it('does not claim records were skipped on a transient abort with no unattempted tail', async () => {
     await arrangeMarkSync({
       count: 2,
-      autoSync: false,
+      autoSync: true,
       result: { outcomes: [MARK_SYNCED, MARK_FAILED], abortReason: 'transient' },
     });
 
@@ -1948,8 +1945,6 @@ describe('index', () => {
     // Only uuid-1 is pending, and it was attempted — no skipped tail to claim.
     expect(headline).toContain('1 record(s)');
     expect(headline).not.toContain('never attempted');
-    // No daemon, so it must not promise a next run.
-    expect(headline).not.toContain('retried next run');
     expect(process.exitCode).toBe(1);
   });
 

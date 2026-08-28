@@ -472,11 +472,11 @@ function markFailureHeadline(
 
   if (abortReason === 'transient') {
     // A systemic error (rate limit / 5xx) aborted the run to back off. Only claim
-    // records were skipped if a trailing chunk was actually unsent, and only
-    // promise a retry if a daemon is alive to run one.
+    // records were skipped if a trailing chunk was actually unsent; the "re-written
+    // next run" hedge matches the timeout/generic branches (soft — true whenever
+    // the user next syncs, daemon or not), so it isn't gated on autoSyncEnabled.
     const skipped = hasUnattempted ? ', so some were never attempted' : '';
-    const retry = autoSyncEnabled ? ' and are retried next run' : '';
-    return `Failed to mark ${pendingCount} record(s) synced — a systemic error stopped the run early${skipped}; they remain pending on the server${retry}.`;
+    return `Failed to mark ${pendingCount} record(s) synced — a systemic error stopped the run early${skipped}; they remain pending on the server, they may be re-written next run.`;
   }
 
   return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
@@ -1034,8 +1034,9 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
       // A permanent failure (dead token, forbidden account) won't clear on
       // retry — stop the autoSync daemon. A transient one (rate-limit/5xx) is
       // worth another pass, so keep autoSync alive to retry ("retry shortly").
-      // `error` is already narrowed to ApiRequestError by the guard above.
-      return error.isPermanent ? false : autoSync;
+      // Go through the shared guard (like the mark-synced and delete paths) so
+      // the permanence rule stays in the API seam, not re-derived here.
+      return isPermanentApiFailure(error) ? false : autoSync;
     }
 
     spinner.error('Something went wrong!');
