@@ -1895,6 +1895,32 @@ describe('index', () => {
     expect(capture.scheduledAutoSync).toBe(true);
   });
 
+  // A TRANSIENT systemic abort (a 429/5xx that stopped the run to back off) must
+  // read differently from a scatter of per-record failures — some records were
+  // never attempted — yet keep the daemon alive to retry. The short outcomes
+  // array models the aborted run leaving a trailing chunk unsent.
+  it('reports a transient abort as stopped-early and keeps autoSync alive', async () => {
+    const capture = await arrangeMarkSync({
+      count: 3,
+      autoSync: true,
+      result: { outcomes: [MARK_SYNCED, MARK_FAILED], abortReason: 'transient' },
+    });
+
+    await import('@/index.js');
+
+    // uuid-1 failed plus uuid-2 never attempted = two pending, with the
+    // stopped-early wording (not the generic per-record failure line).
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('a systemic error stopped the run early'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('2 record(s)'),
+    );
+    expect(process.exitCode).toBe(1);
+    // A transient error can clear, so the daemon must retry next pass.
+    expect(capture.scheduledAutoSync).toBe(true);
+  });
+
   // A permanent mark-synced failure on a plain one-shot `markpost sync`
   // (autoDelete off, autoSync off) must NOT claim "auto-sync was stopped" — there
   // was no daemon. The headline still guides the user to fix the cause, but a
@@ -1917,13 +1943,14 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  // A permanent abort on a LATER chunk guards index's `outcomes[index]`
-  // alignment: the bulk call returns a short outcomes array (20 entries for 25
-  // records — the aborting chunk fired, the trailing chunk didn't), with uuid-13
-  // failed inside it. index must count uuid-13 plus the five never-attempted as
-  // six pending, list uuid-13 (not a settled record like uuid-0), report 19
-  // marked, and stop the daemon. An off-by-one in the settle filter would strand
-  // the wrong records.
+  // Guards index's `outcomes[index]` alignment when a permanent abort leaves a
+  // trailing tail unattended. The bulk call is mocked to return a deliberately
+  // short outcomes array (20 entries for 25 records) standing in for an abort —
+  // chunk boundaries themselves live in tests/libs/records.test.ts — with uuid-13
+  // failed inside it. index must count uuid-13 plus the five never-attempted
+  // (uuid-20..24) as six pending, list uuid-13 (not a settled record like
+  // uuid-0), report 19 marked, and stop the daemon. An off-by-one in the settle
+  // filter would strand the wrong records.
   it('counts pending correctly and stops the daemon on a permanent abort', async () => {
     const outcomes: MarkSyncedOutcome[] = Array.from({ length: 20 }, (_item, index) =>
       index === 13 ? MARK_FAILED : MARK_SYNCED,

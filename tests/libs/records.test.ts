@@ -1535,10 +1535,11 @@ describe('markRecordsSynced', () => {
     );
   });
 
-  it('aborts remaining chunks but reports no daemon-stop on a transient (503) failure', async () => {
-    // A 503 (or 429) is a TRANSIENT systemic failure: it still aborts the
-    // remaining chunks (it may recur), but must NOT stop the daemon — a lone 5xx
-    // can be a blip, so the next pass should retry. `abortReason` stays null.
+  it('aborts remaining chunks and reports transient on a 503 failure', async () => {
+    // A 503 (or 429) is a TRANSIENT systemic failure: it aborts the remaining
+    // chunks to back off (it may recur), reported as `abortReason: 'transient'`
+    // so the caller can say the run stopped early — but it must NOT stop the
+    // daemon, since a lone 5xx can be a blip and the next pass should retry.
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 503,
@@ -1547,8 +1548,8 @@ describe('markRecordsSynced', () => {
 
     const result = await markRecordsSynced(items(250));
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    // Aborted the run, but no permanent/timeout reason — the daemon stays alive.
-    expect(result.abortReason).toBe(null);
+    // Aborted the run with a non-permanent reason — the daemon stays alive.
+    expect(result.abortReason).toBe('transient');
     expect(result.outcomes).toHaveLength(100);
     expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
       true,

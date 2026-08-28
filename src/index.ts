@@ -438,13 +438,13 @@ function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   }));
 }
 
-// Headline for the mark-synced failure report. A permanent failure and a timeout
-// abort both stop the run early (so the count includes records never attempted)
-// and each reads differently from a scatter of per-record failures. The
-// "auto-sync was stopped" clause is emitted only when `autoSyncStopped` — the
-// caller passes the very value it returns to actually stop the daemon, so the
-// message can't claim a stop that didn't happen (a one-shot `markpost sync` never
-// had a daemon; mirroring the delete path, which says nothing about auto-sync).
+// Headline for the mark-synced failure report. A permanent, timeout, or transient
+// abort all stop the run early (so the count includes records never attempted) and
+// each reads differently from a scatter of per-record failures. The "auto-sync was
+// stopped" clause is emitted only when `autoSyncStopped` — the caller passes the
+// very value it returns to actually stop the daemon, so the message can't claim a
+// stop that didn't happen (a one-shot `markpost sync` never had a daemon;
+// mirroring the delete path, which says nothing about auto-sync).
 function markFailureHeadline(
   pendingCount: number,
   abortReason: MarkAbortReason,
@@ -460,6 +460,12 @@ function markFailureHeadline(
 
   if (abortReason === 'timeout') {
     return `Timed out marking records synced — stopped after the batch that first timed out; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+  }
+
+  if (abortReason === 'transient') {
+    // A systemic error (rate limit / 5xx) aborted the run to back off, so some of
+    // the pending records were never attempted. Say so, and that a retry follows.
+    return `Failed to mark ${pendingCount} record(s) synced — a systemic error stopped the run early, so some were never attempted; they remain pending on the server and are retried next run.`;
   }
 
   return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;

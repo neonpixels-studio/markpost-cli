@@ -392,10 +392,11 @@ export type MarkSyncedItem = {
 // `'timeout'` — a chunk hit the request timeout (hung server), retried next pass.
 // `'permanent'` — a chunk hit a permanent systemic failure (dead token / forbidden
 // account: 401/403) that recurs every pass, so the caller ALSO stops the autoSync
-// daemon. A transient systemic abort (429/5xx) and a plain run-completion both map
-// to `null`: the run may be short (trailing chunks skipped) but the daemon stays
-// alive to retry.
-export type MarkAbortReason = 'timeout' | 'permanent' | null;
+// daemon. `'transient'` — a chunk hit a transient systemic failure (429/5xx): the
+// run stops early to back off (trailing chunks skipped) but the daemon stays alive
+// to retry, and the caller can say the run stopped short. `null` — the run
+// completed every chunk (any failures were per-chunk, not systemic).
+export type MarkAbortReason = 'timeout' | 'permanent' | 'transient' | null;
 
 // Outcome of a whole bulk mark-synced run. `outcomes` holds one entry per
 // record in the ORIGINAL input order, so the caller can align each result back
@@ -549,20 +550,32 @@ const markSyncedChunk = async (
     }
 
     // Every failed record in the chunk stays `MARK_FAILED` (pending, retried
-    // next run). A systemic failure aborts the remaining chunks; a PERMANENT one
-    // (dead token / forbidden account: 401/403) recurs every pass, so it also
-    // tells the caller to stop the autoSync daemon (`abortReason: 'permanent'`).
-    // A transient systemic failure aborts this run but keeps the daemon alive
-    // (`null`). A plain per-chunk failure doesn't abort — a later chunk may
-    // still succeed.
-    // @todo A sustained 429 (rate limit) would be better handled by aborting the
-    // burst to back off (per the api.ts contract) while keeping the daemon alive;
-    // out of scope for the permanent-failure fix — tracked as a follow-up.
-    return {
-      outcomes: items.map(() => MARK_FAILED),
-      abort: isSystemicApiFailure(error),
-      abortReason: isPermanentApiFailure(error) ? 'permanent' : null,
-    };
+    // next run). Permanence is classified ONCE and folded into `abort`, so
+    // `abort` and `abortReason` can't disagree even if `isPermanent` is ever
+    // widened beyond `isSystemic`: a permanent failure always aborts AND stops
+    // the daemon; a transient systemic failure (auth/rate-limit/5xx that may be a
+    // blip) aborts to back off — a sustained 429 stops after the first chunk
+    // rather than firing the whole burst — but keeps the daemon alive; a plain
+    // per-chunk failure doesn't abort, since a later chunk may still succeed.
+    const failedOutcomes: MarkSyncedOutcome[] = items.map(() => MARK_FAILED);
+
+    if (isPermanentApiFailure(error)) {
+      return {
+        outcomes: failedOutcomes,
+        abort: true,
+        abortReason: 'permanent',
+      };
+    }
+
+    if (isSystemicApiFailure(error)) {
+      return {
+        outcomes: failedOutcomes,
+        abort: true,
+        abortReason: 'transient',
+      };
+    }
+
+    return { outcomes: failedOutcomes, abort: false, abortReason: null };
   }
 };
 
