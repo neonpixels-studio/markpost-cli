@@ -1560,32 +1560,96 @@ describe('markRecordsSynced', () => {
     expect(result.outcomes).toEqual([MARK_FAILED]);
   });
 
+  // Reject every chunk the given way (a 400/422 error response), so a test can
+  // drive the two-chunk request-shape confirmation without hand-writing the mock.
+  const mockAllChunksReject = (status: number, detail: string) => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status,
+      json: () =>
+        Promise.resolve({
+          data: { errors: [{ title: 'Rejected', detail }] },
+        }),
+    });
+  };
+
   // A request-shape 4xx (a contract-validation 422 or a malformed-payload 400)
   // means the payload envelope the CLI built is wrong. Every chunk is built the
-  // same way, so a rejected chunk dooms every remaining chunk too — abort with
-  // MARK_ABORTED rather than fire the same doomed request again. markpost's bulk
-  // handler validates the whole envelope and 422s before any write (foreign
-  // uuids are dropped, not 4xx'd), so a 400/422 is never per-record here.
-  it('aborts remaining chunks on a 422, marking the rejected chunk MARK_ABORTED', async () => {
-    // Chunk 1 succeeds; chunk 2 is rejected with a 422. Chunk 3 must never be
-    // sent — the same envelope would be rejected identically.
+  // same way, so once a SECOND chunk is rejected the same way with nothing synced
+  // the run aborts with MARK_ABORTED rather than fire the same doomed request
+  // again — but a LONE rejection is not enough (a chunk could be an isolated
+  // reject), so the first fatal chunk keeps the run going.
+  it('aborts after two request-shape rejections with nothing synced', async () => {
+    // Chunks 1 and 2 both 422 with nothing synced — the second confirms the shape
+    // is wrong, so chunk 3 must never be sent.
+    mockAllChunksReject(422, 'Unknown attribute: filePath');
+
+    const result = await markRecordsSynced(items(250));
+    // Only two requests fire — the third chunk is never attempted.
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result.stoppedBy).toBe(MARK_ABORTED);
+    // Both attempted chunks are MARK_ABORTED (200); chunk 3 has no outcome.
+    expect(result.outcomes).toHaveLength(200);
+    expect(result.outcomes.every((outcome) => outcome === MARK_ABORTED)).toBe(
+      true,
+    );
+  });
+
+  it('aborts after two malformed-payload 400 rejections with nothing synced', async () => {
+    mockAllChunksReject(400, 'Invalid body');
+
+    const result = await markRecordsSynced(items(250));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result.stoppedBy).toBe(MARK_ABORTED);
+    expect(result.outcomes).toHaveLength(200);
+    expect(result.outcomes.every((outcome) => outcome === MARK_ABORTED)).toBe(
+      true,
+    );
+  });
+
+  // Two 4xx rejections with DIFFERENT messages look like two isolated per-record
+  // problems, not one envelope fault — so the run must keep going rather than
+  // abort. Only a repeated, identical categorical error is strong enough evidence.
+  it('does not abort on two request-shape rejections with different messages', async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation(() => {
+      callCount += 1;
+      return Promise.resolve({
+        ok: false,
+        status: 422,
+        json: () =>
+          Promise.resolve({
+            data: {
+              errors: [{ title: 'Rejected', detail: `problem ${callCount}` }],
+            },
+          }),
+      });
+    });
+
+    const result = await markRecordsSynced(items(250));
+    // Messages differ per chunk, so no abort — all three chunks are attempted.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result.stoppedBy).toBeNull();
+    expect(result.outcomes).toHaveLength(250);
+    expect(result.outcomes.every((outcome) => outcome === MARK_ABORTED)).toBe(
+      true,
+    );
+  });
+
+  // A single request-shape rejection is not enough to abort — the next chunk
+  // still fires, and if it succeeds the shape is proven valid. Guards against
+  // stranding syncable records behind one isolated rejection.
+  it('does not abort on a lone request-shape rejection — the next chunk still fires', async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
       callCount += 1;
-      if (callCount === 2) {
+      if (callCount === 1) {
         return Promise.resolve({
           ok: false,
           status: 422,
           json: () =>
             Promise.resolve({
-              data: {
-                errors: [
-                  {
-                    title: 'Invalid Attribute',
-                    detail: 'Unknown attribute: filePath',
-                  },
-                ],
-              },
+              data: { errors: [{ title: 'Rejected', detail: 'nope' }] },
             }),
         });
       }
@@ -1594,33 +1658,48 @@ describe('markRecordsSynced', () => {
     });
 
     const result = await markRecordsSynced(items(250));
-    // Only two requests fire — the third chunk is never attempted.
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result.stoppedBy).toBe(MARK_ABORTED);
-    // Chunk 1 synced (100), chunk 2 all aborted (100); chunk 3 has no outcome.
-    expect(result.outcomes).toHaveLength(200);
+    // All three chunks are attempted — one rejection doesn't abort.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result.stoppedBy).toBeNull();
+    expect(
+      result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_ABORTED),
+    ).toBe(true);
+    expect(
+      result.outcomes.slice(100).every((outcome) => outcome === MARK_SYNCED),
+    ).toBe(true);
+  });
+
+  // Once a chunk has synced, the envelope is proven valid, so a later 400/422 is
+  // an isolated per-chunk rejection, not proof the shape is wrong — the run must
+  // NOT abort even if two later chunks are rejected the same way.
+  it('does not abort on request-shape rejections once a chunk has synced', async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      callCount += 1;
+      if (callCount >= 2) {
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              data: { errors: [{ title: 'Rejected', detail: 'nope' }] },
+            }),
+        });
+      }
+
+      return echoBulkPatch(init);
+    });
+
+    const result = await markRecordsSynced(items(250));
+    // Chunk 1 synced, so chunks 2 and 3 both fire despite being rejected.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(result.stoppedBy).toBeNull();
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_SYNCED),
     ).toBe(true);
     expect(
-      result.outcomes
-        .slice(100, 200)
-        .every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes.slice(100).every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
-  });
-
-  it('aborts with MARK_ABORTED on a malformed-payload 400', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: () =>
-        Promise.resolve({
-          data: { errors: [{ title: 'Bad Request', detail: 'Invalid body' }] },
-        }),
-    });
-    const result = await markRecordsSynced(items(2));
-    expect(result.outcomes).toEqual([MARK_ABORTED, MARK_ABORTED]);
-    expect(result.stoppedBy).toBe(MARK_ABORTED);
   });
 
   // A 404 is neither a request-shape 4xx nor systemic, so it stays a plain chunk

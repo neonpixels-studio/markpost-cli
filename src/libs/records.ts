@@ -38,8 +38,9 @@ const SYNCED_STATUS = 'synced';
 // every remaining chunk. `MARK_ABORTED` — the chunk was rejected with a
 // request-shape 4xx (a malformed-payload 400 or a contract-validation 422, NOT
 // an auth 401/403 or a transient 429): the CLI builds every chunk's payload
-// identically, so a shape the server rejects wholesale dooms every remaining
-// chunk too — the run aborts rather than firing the same doomed request again.
+// identically, so once a SECOND chunk is rejected the same way with nothing
+// synced the run aborts rather than fire the same doomed request again (a lone
+// rejection isn't enough — see `markRecordsSynced`).
 //
 // Values are prefixed (`mark-*`) so they never collide with the wire
 // `SYNCED_STATUS = 'synced'` above: these are internal outcome tags, not the
@@ -465,18 +466,26 @@ const outcomesFromResponse = (
   );
 };
 
-// The result of PATCHing one chunk: a per-item outcome list plus whether the
-// run should stop. `abort` is set when the failure dooms every remaining chunk
-// too (a hung server, a systemic auth/rate-limit/5xx failure, or a request-shape
-// 4xx the CLI builds identically for every chunk), so the caller stops rather
-// than firing a burst it already knows will fail. `stoppedBy` names the abort
-// reason the caller reports distinctly — a timeout (`MARK_TIMED_OUT`) or a
-// request-shape rejection (`MARK_ABORTED`) — and is null for a systemic abort
-// (reported as a plain mark failure) or when the chunk didn't abort.
+// How a chunk ended, from the chunk's OWN perspective — the run-level decision to
+// stop is `markRecordsSynced`'s, which also weighs prior chunks. `timeout` (hung
+// server) and `systemic` (auth/rate-limit/5xx) each doom every remaining chunk,
+// so the caller aborts immediately. `request-shape` (a 400/422) means the payload
+// envelope looks wrong, but the caller only aborts once a SECOND chunk is rejected
+// with the SAME error (see `markRecordsSynced`) rather than strand records behind
+// a single, possibly isolated rejection. `null` is a clean chunk or a plain
+// per-chunk failure the caller runs past.
+type ChunkStop = 'timeout' | 'systemic' | 'request-shape' | null;
+
+// The result of PATCHing one chunk: a per-item outcome list, how the chunk ended,
+// and (for a `request-shape` stop only) the server's error message. The caller
+// compares that message across chunks so a categorical envelope rejection (the
+// same message twice) aborts, while two different per-record rejections that only
+// happen to both 4xx do not — it keeps running past those. Null for every other
+// stop kind.
 type MarkSyncedChunkResult = {
   outcomes: MarkSyncedOutcome[];
-  abort: boolean;
-  stoppedBy: MarkSyncedStop;
+  stop: ChunkStop;
+  message: string | null;
 };
 
 // PATCHes one chunk (<= MAX_MARK_SYNCED_BATCH_SIZE records) synced in a single
@@ -488,20 +497,21 @@ type MarkSyncedChunkResult = {
 // is non-critical post-write bookkeeping (the files are already on disk), so a
 // failed chunk simply leaves its records `pending` to re-sync next run.
 //
-// A timeout maps every item to `MARK_TIMED_OUT` and aborts (a hung server would
-// burn the full request timeout on every remaining chunk). A request-shape 4xx
-// (a malformed-payload 400 or a contract-validation 422) maps every item to
-// `MARK_ABORTED` and aborts too: the CLI builds every chunk's payload the same
-// way, so a shape the server rejects wholesale would be rejected identically on
-// every remaining chunk — retrying them just fires the same doomed request (the
-// markpost bulk handler validates the whole envelope and 422s before any write;
-// foreign uuids are dropped, not 4xx'd, so a 400/422 is never per-record here).
-// A systemic failure (auth/rate-limit/5xx) also aborts — it will recur for every
-// remaining chunk, so the caller backs off rather than hammering a server that
-// just rejected the burst (the same rule the fetch helpers apply via
-// `isSystemicApiFailure`) — but is reported as a plain failure, not `MARK_ABORTED`.
-// Any other (per-chunk) failure maps to `MARK_FAILED` without aborting — a later
-// chunk may still succeed.
+// A timeout maps every item to `MARK_TIMED_OUT` and reports `stop: 'timeout'`
+// (a hung server would burn the full request timeout on every remaining chunk).
+// A request-shape 4xx (a malformed-payload 400 or a contract-validation 422)
+// maps every item to `MARK_ABORTED` and reports `stop: 'request-shape'`: the CLI
+// builds every chunk's payload the same way, so a shape the server rejects
+// wholesale is likely wrong for every chunk — but the run only aborts once a
+// SECOND chunk agrees (see `markRecordsSynced`), not on a lone rejection. A
+// systemic failure (auth/rate-limit/5xx) reports `stop: 'systemic'` — it will
+// recur for every remaining chunk, so the caller backs off rather than hammering
+// a server that just rejected the burst (the same rule the fetch helpers apply
+// via `isSystemicApiFailure`) — but stays `MARK_FAILED`, reported as a plain
+// failure. Any other (per-chunk) failure maps to `MARK_FAILED` with `stop: null`
+// — a later chunk may still succeed. A 4xx delivered as an HTML error page (a
+// WAF/proxy interstitial) throws unparseable before it can be classified, so it
+// degrades to that plain failure rather than aborting on a misread status.
 const markSyncedChunk = async (
   items: MarkSyncedItem[],
   syncedAt: string,
@@ -526,8 +536,8 @@ const markSyncedChunk = async (
 
     return {
       outcomes: outcomesFromResponse(items, body),
-      abort: false,
-      stoppedBy: null,
+      stop: null,
+      message: null,
     };
   } catch (error) {
     // Identify the chunk by its uuid range so a stderr reader can tell which
@@ -540,37 +550,26 @@ const markSyncedChunk = async (
       error instanceof Error ? error.message : String(error),
     );
 
-    // A timeout aborts every remaining chunk so the run doesn't burn the full
-    // request timeout on each.
     if (error instanceof ApiTimeoutError) {
       return {
         outcomes: items.map(() => MARK_TIMED_OUT),
-        abort: true,
-        stoppedBy: MARK_TIMED_OUT,
+        stop: 'timeout',
+        message: null,
       };
     }
 
-    // A request-shape 4xx (a malformed-payload 400 or a contract-validation 422)
-    // means the payload envelope the CLI built is wrong. Every remaining chunk is
-    // built identically via `buildBulkRecordPayload`, so they'd all be rejected
-    // the same way — abort rather than fire the same doomed request again, and
-    // tag the items `MARK_ABORTED` so the run reports the categorical cause. An
-    // auth 401/403, a transient 429, and a 5xx stay out of this (they're systemic
-    // below); a 4xx delivered as an HTML error page (a WAF/proxy interstitial)
-    // throws unparseable before it can be classified, so it degrades to the
-    // plain per-chunk failure below rather than aborting on a misread status.
     if (isFatalRequestError(error)) {
       return {
         outcomes: items.map(() => MARK_ABORTED),
-        abort: true,
-        stoppedBy: MARK_ABORTED,
+        stop: 'request-shape',
+        message: error.message,
       };
     }
 
     return {
       outcomes: items.map(() => MARK_FAILED),
-      abort: isSystemicApiFailure(error),
-      stoppedBy: null,
+      stop: isSystemicApiFailure(error) ? 'systemic' : null,
+      message: null,
     };
   }
 };
@@ -590,20 +589,28 @@ const markSyncedChunk = async (
 // is already few enough that firing them serially keeps the burst small without
 // a concurrency limiter.
 //
-// Returns one outcome per record in input order. A timeout, a systemic failure
-// (auth/rate-limit/5xx), or a request-shape 4xx (a 400/422 rejected wholesale)
-// stops the run at that chunk rather than firing a burst that's already doomed;
-// the trailing records get no outcome and stay `pending` (their outcome index is
-// `undefined`, which the caller reads as not-synced). A plain per-chunk failure
-// doesn't abort — a later chunk may still succeed. `stoppedBy` names the
-// distinctly-reported stop reason (`MARK_TIMED_OUT` or `MARK_ABORTED`) or is null
-// when the run finished or stopped on a systemic failure, so the caller can word
-// its report accordingly.
+// Returns one outcome per record in input order. A timeout or a systemic failure
+// (auth/rate-limit/5xx) stops the run at that chunk rather than firing a burst
+// that's already doomed. A request-shape 4xx (a 400/422) stops the run only once
+// a SECOND chunk is rejected with the SAME error message and nothing has synced
+// yet: the CLI builds every chunk's payload identically, so two chunks failing
+// the same categorical way is strong evidence the envelope shape itself is wrong.
+// A lone rejection, two rejections with DIFFERENT messages (which look like two
+// isolated per-record problems, not one envelope fault), or any rejection after a
+// success (a success proves the shape valid) all keep the run going rather than
+// strand syncable records behind an unconfirmed abort. On any stop the trailing
+// records get no outcome and stay `pending` (their outcome index is `undefined`,
+// which the caller reads as not-synced). A plain per-chunk failure doesn't abort —
+// a later chunk may still succeed. `stoppedBy` names the distinctly-reported stop
+// reason (`MARK_TIMED_OUT` or `MARK_ABORTED`) or is null when the run finished or
+// stopped on a systemic failure, so the caller can word its report accordingly.
 export const markRecordsSynced = async (
   items: MarkSyncedItem[],
   syncedAt: string = new Date().toISOString(),
 ): Promise<MarkSyncedResult> => {
   const outcomes: MarkSyncedOutcome[] = [];
+  let anySynced = false;
+  let lastRequestShapeMessage: string | null = null;
 
   for (
     let start = 0;
@@ -611,13 +618,37 @@ export const markRecordsSynced = async (
     start += MAX_MARK_SYNCED_BATCH_SIZE
   ) {
     const chunk = items.slice(start, start + MAX_MARK_SYNCED_BATCH_SIZE);
-    const chunkResult = await markSyncedChunk(chunk, syncedAt);
+    const {
+      outcomes: chunkOutcomes,
+      stop,
+      message,
+    } = await markSyncedChunk(chunk, syncedAt);
 
-    outcomes.push(...chunkResult.outcomes);
+    outcomes.push(...chunkOutcomes);
+    anySynced = anySynced || chunkOutcomes.includes(MARK_SYNCED);
 
-    if (chunkResult.abort) {
-      return { outcomes, stoppedBy: chunkResult.stoppedBy };
+    if (stop === 'timeout') {
+      return { outcomes, stoppedBy: MARK_TIMED_OUT };
     }
+
+    if (stop === 'systemic') {
+      return { outcomes, stoppedBy: null };
+    }
+
+    if (stop !== 'request-shape') {
+      continue;
+    }
+
+    // Abort only once a SECOND consecutive request-shape rejection carries the
+    // SAME message, and only while nothing has synced — matching messages across
+    // two independently-built chunks is what marks the failure as envelope-level
+    // (categorical) rather than two isolated per-record rejections, and a success
+    // would have proven the shape valid.
+    if (!anySynced && message !== null && message === lastRequestShapeMessage) {
+      return { outcomes, stoppedBy: MARK_ABORTED };
+    }
+
+    lastRequestShapeMessage = message;
   }
 
   return { outcomes, stoppedBy: null };

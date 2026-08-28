@@ -1398,6 +1398,51 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('omits the not-attempted clause when the abort left nothing unattempted', async () => {
+    const records: Record[] = Array.from({ length: 2 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordsSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Both records have an outcome (the abort landed on the last chunk), so there
+    // is no un-attempted tail — the headline must not claim "the rest were not
+    // attempted."
+    vi.mocked(markRecordsSynced).mockResolvedValue({
+      outcomes: [MARK_ABORTED, MARK_ABORTED],
+      stoppedBy: MARK_ABORTED,
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('the rest were not attempted'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it('does not use the timeout wording for a plain (non-timeout) failure', async () => {
     const records: Record[] = Array.from({ length: 4 }, (_item, index) => ({
       uuid: `uuid-${index}`,

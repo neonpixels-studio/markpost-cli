@@ -196,9 +196,10 @@ export const isSystemicApiFailure = (
 
 // Narrowing guard: true only for a request-shape `ApiRequestError` (a 400/422
 // rejection — NOT a per-record 404, an auth 401/403, or a transient 429). Lets a
-// bulk caller TAG the outcome so it can decide, after seeing a whole batch agree,
-// whether the request shape itself is wrong (see markSyncedStopReason). It does
-// not itself mean "abort now" — a lone 400/422 can still be per-record.
+// bulk caller TAG the outcome so it can decide, after seeing a SECOND chunk agree
+// with nothing synced, whether the request shape itself is wrong (see
+// `markRecordsSynced`). It does not itself mean "abort now" — a lone 400/422 can
+// still be an isolated rejection.
 export const isFatalRequestError = (error: unknown): error is ApiRequestError =>
   error instanceof ApiRequestError && error.isFatalRequest;
 
