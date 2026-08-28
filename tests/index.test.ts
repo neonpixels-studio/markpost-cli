@@ -1846,11 +1846,12 @@ describe('index', () => {
     expect(capture.scheduledAutoSync).toBe(false);
   });
 
-  // A TRANSIENT mark-synced failure (a per-record MARK_FAILED from a 5xx/network
-  // blip, `abortReason: null`) also fails loud, but must keep autoSync alive: the
-  // record is still pending and the next pass should retry rather than the daemon
-  // shutting down.
-  it('keeps autoSync alive after a transient mark-synced failure', async () => {
+  // A per-chunk NON-systemic failure (a per-record MARK_FAILED inside an
+  // otherwise-successful response, or a non-systemic 4xx) is `abortReason: null`:
+  // it doesn't abort and must keep autoSync alive — the record is still pending
+  // and the next pass retries. The systemic-blip (5xx/429) case now maps to
+  // `'transient'`, covered by the test below.
+  it('keeps autoSync alive after a per-chunk (non-systemic) mark-synced failure', async () => {
     const capture = await arrangeMarkSync({
       count: 1,
       autoSync: true,
@@ -1861,12 +1862,12 @@ describe('index', () => {
 
     // Match text unique to the generic headline — 'still pending on the server'
     // alone also appears in the timeout headline, so it wouldn't catch a
-    // transient failure wrongly routed through the timeout branch.
+    // failure wrongly routed through the timeout branch.
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining('written locally but still pending on the server'),
     );
     expect(process.exitCode).toBe(1);
-    // Transient failure: the daemon must retry, so autoSync is preserved.
+    // A non-aborting failure: the daemon must retry, so autoSync is preserved.
     expect(capture.scheduledAutoSync).toBe(true);
   });
 
@@ -1910,15 +1911,46 @@ describe('index', () => {
 
     // uuid-1 failed plus uuid-2 never attempted = two pending, with the
     // stopped-early wording (not the generic per-record failure line).
-    expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('a systemic error stopped the run early'),
-    );
-    expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('2 record(s)'),
-    );
+    const headline = vi
+      .mocked(mockSpinner.error)
+      .mock.calls.map(([message]) => String(message))
+      .find((message) => message.includes('a systemic error stopped the run early'));
+    expect(headline).toBeDefined();
+    expect(headline).toContain('2 record(s)');
+    // A trailing chunk was unsent and a daemon is alive, so both conditional
+    // clauses appear.
+    expect(headline).toContain('so some were never attempted');
+    expect(headline).toContain('are retried next run');
     expect(process.exitCode).toBe(1);
     // A transient error can clear, so the daemon must retry next pass.
     expect(capture.scheduledAutoSync).toBe(true);
+  });
+
+  // The transient headline's clauses are conditional: when the abort lands on the
+  // LAST chunk (no unattempted tail) and no daemon is running (one-shot sync), it
+  // must claim neither "never attempted" nor "retried next run" — the same
+  // false-claim guard the permanent branch has. outcomes length == count, so
+  // nothing was skipped; autoSync off, so there is no next run.
+  it('does not overclaim on a transient abort with no unattempted tail and no daemon', async () => {
+    await arrangeMarkSync({
+      count: 2,
+      autoSync: false,
+      result: { outcomes: [MARK_SYNCED, MARK_FAILED], abortReason: 'transient' },
+    });
+
+    await import('@/index.js');
+
+    const headline = vi
+      .mocked(mockSpinner.error)
+      .mock.calls.map(([message]) => String(message))
+      .find((message) => message.includes('a systemic error stopped the run early'));
+    expect(headline).toBeDefined();
+    // Only uuid-1 is pending, and it was attempted — no skipped tail to claim.
+    expect(headline).toContain('1 record(s)');
+    expect(headline).not.toContain('never attempted');
+    // No daemon, so it must not promise a next run.
+    expect(headline).not.toContain('retried next run');
+    expect(process.exitCode).toBe(1);
   });
 
   // A permanent mark-synced failure on a plain one-shot `markpost sync`
@@ -1952,8 +1984,9 @@ describe('index', () => {
   // uuid-0), report 19 marked, and stop the daemon. An off-by-one in the settle
   // filter would strand the wrong records.
   it('counts pending correctly and stops the daemon on a permanent abort', async () => {
-    const outcomes: MarkSyncedOutcome[] = Array.from({ length: 20 }, (_item, index) =>
-      index === 13 ? MARK_FAILED : MARK_SYNCED,
+    const outcomes: MarkSyncedOutcome[] = Array.from(
+      { length: 20 },
+      (_item, index) => (index === 13 ? MARK_FAILED : MARK_SYNCED),
     );
     const capture = await arrangeMarkSync({
       count: 25,

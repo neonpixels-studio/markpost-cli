@@ -439,19 +439,27 @@ function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
 }
 
 // Headline for the mark-synced failure report. A permanent, timeout, or transient
-// abort all stop the run early (so the count includes records never attempted) and
-// each reads differently from a scatter of per-record failures. The "auto-sync was
-// stopped" clause is emitted only when `autoSyncStopped` — the caller passes the
-// very value it returns to actually stop the daemon, so the message can't claim a
-// stop that didn't happen (a one-shot `markpost sync` never had a daemon;
-// mirroring the delete path, which says nothing about auto-sync).
+// abort all stop the run early (so the count can include records never attempted)
+// and each reads differently from a scatter of per-record failures. Every
+// daemon-aware clause is derived from the SAME (`abortReason`, `autoSyncEnabled`)
+// the caller's returned stop signal uses, so the message can't claim a stop — or a
+// "next run" — that won't happen (a one-shot `markpost sync` never had a daemon;
+// mirroring the delete path, which says nothing about auto-sync). `hasUnattempted`
+// is whether the abort left a trailing chunk unsent, so the wording only claims
+// records were skipped when some actually were.
 function markFailureHeadline(
   pendingCount: number,
   abortReason: MarkAbortReason,
-  autoSyncStopped: boolean,
+  {
+    autoSyncEnabled,
+    hasUnattempted,
+  }: {
+    autoSyncEnabled: boolean;
+    hasUnattempted: boolean;
+  },
 ): string {
   if (abortReason === 'permanent') {
-    const daemonClause = autoSyncStopped ? ', so auto-sync was stopped;' : ';';
+    const daemonClause = autoSyncEnabled ? ', so auto-sync was stopped;' : ';';
     // Don't prescribe `markpost config` — a 403 (plan limit / sign-ups disabled)
     // isn't a token problem. markRecordsSynced already logged the failing chunk's
     // case-specific reason to stderr; point the user at that.
@@ -463,9 +471,12 @@ function markFailureHeadline(
   }
 
   if (abortReason === 'transient') {
-    // A systemic error (rate limit / 5xx) aborted the run to back off, so some of
-    // the pending records were never attempted. Say so, and that a retry follows.
-    return `Failed to mark ${pendingCount} record(s) synced — a systemic error stopped the run early, so some were never attempted; they remain pending on the server and are retried next run.`;
+    // A systemic error (rate limit / 5xx) aborted the run to back off. Only claim
+    // records were skipped if a trailing chunk was actually unsent, and only
+    // promise a retry if a daemon is alive to run one.
+    const skipped = hasUnattempted ? ', so some were never attempted' : '';
+    const retry = autoSyncEnabled ? ' and are retried next run' : '';
+    return `Failed to mark ${pendingCount} record(s) synced — a systemic error stopped the run early${skipped}; they remain pending on the server${retry}.`;
   }
 
   return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
@@ -556,20 +567,23 @@ async function markWrittenRecordsSynced(
     settled.map(({ record }) => record.uuid),
   );
 
-  // The single value the headline's "auto-sync was stopped" clause and the
-  // returned daemon-stop signal both derive from, so the message can never claim
-  // a stop that didn't happen.
+  // The daemon-stop signal the caller returns. The headline derives its
+  // daemon-aware clauses from the same (abortReason, autoSyncEnabled), so the
+  // message can never claim a stop — or a "next run" — that won't happen.
   const stoppingAutoSync = permanentlyFailed && autoSyncEnabled;
 
   if (pending.length > 0) {
+    // An abort leaves a trailing chunk unsent, so `outcomes` is shorter than the
+    // input — the headline uses this to only claim records were skipped when some
+    // actually were.
+    const hasUnattempted = outcomes.length < writtenRecords.length;
     // Compose the headline here — this function holds the abort reason and the
-    // stop decision — so reportMarkFailures takes a ready string instead of
-    // drilling two adjacent, transposable args.
-    const headline = markFailureHeadline(
-      pending.length,
-      abortReason,
-      stoppingAutoSync,
-    );
+    // daemon state — so reportMarkFailures takes a ready string instead of
+    // drilling several adjacent, transposable args.
+    const headline = markFailureHeadline(pending.length, abortReason, {
+      autoSyncEnabled,
+      hasUnattempted,
+    });
     reportMarkFailures(
       pending,
       writtenRecords.length - pending.length,
