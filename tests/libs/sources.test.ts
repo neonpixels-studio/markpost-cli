@@ -4,6 +4,7 @@ import {
   createSource,
   deleteSource,
   fetchSources,
+  rotateSourceSecret,
   updateSource,
 } from '@/libs/sources.js';
 import { ApiTimeoutError } from '@/libs/api.js';
@@ -98,6 +99,13 @@ describe('sources API timeout propagation', () => {
   it('deleteSource rejects with ApiTimeoutError instead of returning null', async () => {
     mockFetchTimeout();
     await expect(deleteSource('abc-123')).rejects.toBeInstanceOf(
+      ApiTimeoutError,
+    );
+  });
+
+  it('rotateSourceSecret rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(rotateSourceSecret('abc-123')).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
   });
@@ -407,6 +415,95 @@ describe('updateSource', () => {
     expect(
       await updateSource('abc-123', { routeFolder: '00-fixed/' }),
     ).toBeNull();
+  });
+});
+
+describe('rotateSourceSecret', () => {
+  const githubSource = {
+    ...mockSource,
+    uuid: 'ghi-789',
+    type: 'github' as SourceType,
+    provider: 'github',
+    providerSecret: 'whsec_new_generated',
+  };
+
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('POSTs to the rotate-secret path with empty attributes when no secret is supplied', async () => {
+    mockFetch({ data: { attributes: githubSource } });
+    await rotateSourceSecret('ghi-789');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/sources/ghi-789/rotate-secret',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: 'Bearer test-token',
+        },
+        body: JSON.stringify({
+          data: { type: 'sources', attributes: {} },
+        }),
+      }),
+    );
+  });
+
+  it('sends the supplied providerSecret for a manual-secret provider', async () => {
+    mockFetch({ data: { attributes: mockSource } });
+    await rotateSourceSecret('str-123', { providerSecret: 'whsec_pasted' });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/sources/str-123/rotate-secret',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'sources',
+            attributes: { providerSecret: 'whsec_pasted' },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('encodes the uuid into the URL path', async () => {
+    mockFetch({ data: { attributes: githubSource } });
+    await rotateSourceSecret('a/../b');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/sources/a%2F..%2Fb/rotate-secret',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('returns the rotated source attributes, including the revealed secret', async () => {
+    mockFetch({ data: { attributes: githubSource } });
+    expect(await rotateSourceSecret('ghi-789')).toEqual(githubSource);
+  });
+
+  it('returns null and surfaces error details when the source has no rotatable secret', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [
+            {
+              title: 'Invalid Attribute',
+              detail: 'This source has no provider set, so it has no secret to rotate.',
+            },
+          ],
+        },
+      },
+      false,
+    );
+    const result = await rotateSourceSecret('abc-123');
+    expect(result).toBeNull();
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'rotateSourceSecret["abc-123"]',
+      'Invalid Attribute: This source has no provider set, so it has no secret to rotate.',
+    );
+  });
+
+  it('returns null on network failure', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    expect(await rotateSourceSecret('ghi-789')).toBeNull();
   });
 });
 

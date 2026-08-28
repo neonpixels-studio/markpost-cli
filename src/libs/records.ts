@@ -26,21 +26,22 @@ import {
 export const PENDING_STATUS = 'pending';
 const SYNCED_STATUS = 'synced';
 
-// Result of marking one record synced. `MARK_SYNCED` — the server accepted the
-// PATCH. `MARK_FAILED` — a non-timeout, non-permanent error (a lone 404 or bad
-// body, but also a transient systemic 429/5xx that may be a one-off blip); the
-// record stays pending and the rest of the batch still runs, since the next
-// record may succeed. `MARK_TIMED_OUT` — the PATCH hit the request timeout, a
-// signal the server is hung; the batch runner stops on the first one rather than
-// paying the full timeout on every remaining record. `MARK_PERMANENTLY_FAILED` —
-// a permanent systemic failure (a dead token or a forbidden account: 401/403)
-// that will recur on every record and every pass, so the batch runner stops on
-// it AND the caller shuts the autoSync daemon down rather than looping into the
-// same failure forever — mirroring how the delete path stops the daemon only on
-// a permanent delete failure (see runDefaultSync). A transient systemic failure
-// deliberately stays `MARK_FAILED`: unlike a permanent one it isn't guaranteed to
-// doom every other record (a lone 5xx can be a blip), so aborting the whole run
-// would strand records that would have settled.
+// Per-record result of a bulk mark-synced run (see `markRecordsSynced`, which
+// PATCHes records in chunks of up to MAX_MARK_SYNCED_BATCH_SIZE). `MARK_SYNCED`
+// — the server returned this record among the ones it updated. `MARK_FAILED` —
+// the record's chunk failed (a non-timeout error), or the server didn't return
+// this uuid (partial success); it stays pending to re-sync next run. A plain
+// chunk failure doesn't stop the run, but a systemic one (auth/rate-limit/5xx)
+// aborts the remaining chunks — see `markSyncedChunk`. `MARK_TIMED_OUT` — the
+// record's chunk hit the request timeout, a signal the server is hung; the run
+// stops there rather than paying the full timeout on every remaining chunk.
+//
+// Whether an abort ALSO stops the autoSync daemon is a run-level decision, not a
+// per-record tag: a permanent systemic failure (dead token / forbidden account:
+// 401/403) recurs every pass, so the run reports `abortReason: 'permanent'` (see
+// `MarkAbortReason`) and the caller shuts the daemon down. A transient systemic
+// failure (429/5xx) still aborts the remaining chunks but keeps the daemon alive
+// to retry next pass. Either way the affected records stay `MARK_FAILED`.
 //
 // Values are prefixed (`mark-*`) so they never collide with the wire
 // `SYNCED_STATUS = 'synced'` above: these are internal outcome tags, not the
@@ -49,13 +50,9 @@ const SYNCED_STATUS = 'synced';
 export const MARK_SYNCED = 'mark-synced';
 export const MARK_FAILED = 'mark-failed';
 export const MARK_TIMED_OUT = 'mark-timed-out';
-export const MARK_PERMANENTLY_FAILED = 'mark-permanently-failed';
 
 export type MarkSyncedOutcome =
-  | typeof MARK_SYNCED
-  | typeof MARK_FAILED
-  | typeof MARK_TIMED_OUT
-  | typeof MARK_PERMANENTLY_FAILED;
+  typeof MARK_SYNCED | typeof MARK_FAILED | typeof MARK_TIMED_OUT;
 
 // markpost paginates with a cursor: each response's `links.next` embeds the
 // `page[after]` cursor to request the following page, and is `null` once
@@ -375,53 +372,140 @@ export const createRecord = async (
   }
 };
 
-// Marks a single record synced after the CLI has written it to disk, via
-// markpost's PATCH /api/records/[uuid] (server/api/records/[uuid].patch.ts),
-// which accepts `status`, `syncedAt`, and `filePath`. This is the
-// non-destructive counterpart to `deleteRecords`: with autoDelete off, moving
-// the record out of `pending` is what stops the next run's pending-only fetch
-// from re-writing it. `syncedAt` is injected (defaulting to now) so callers
-// and tests can pin the timestamp. Content-Type mirrors createRecord/
-// deleteRecords for consistency; markpost reads the body regardless.
+// markpost's bulk update handler (server/api/records/index.patch.ts) caps each
+// PATCH /api/records request at this many records (`MAX_UPDATE_BATCH_SIZE`); a
+// larger `records[]` array is rejected with a 422. The CLI chunks to this size
+// so a first sync of hundreds of records settles in `ceil(N / 100)` requests
+// instead of one PATCH per record — the whole point of moving off the per-uuid
+// endpoint (issue #123).
+export const MAX_MARK_SYNCED_BATCH_SIZE = 100;
+
+// One record the CLI wants marked synced: the uuid to update and the on-disk
+// path markpost stores so its UI can show where the note landed.
+export type MarkSyncedItem = {
+  uuid: string;
+  filePath: string;
+};
+
+// Why a mark-synced run stopped early, or `null` if it ran every chunk. One
+// discriminant (not adjacent booleans) so the reason can't be self-contradictory.
+// `'timeout'` — a chunk hit the request timeout (hung server), retried next pass.
+// `'permanent'` — a chunk hit a permanent systemic failure (dead token / forbidden
+// account: 401/403) that recurs every pass, so the caller ALSO stops the autoSync
+// daemon. A transient systemic abort (429/5xx) and a plain run-completion both map
+// to `null`: the run may be short (trailing chunks skipped) but the daemon stays
+// alive to retry.
+export type MarkAbortReason = 'timeout' | 'permanent' | null;
+
+// Outcome of a whole bulk mark-synced run. `outcomes` holds one entry per
+// record in the ORIGINAL input order, so the caller can align each result back
+// to its record by index. On an abort (a timeout OR a systemic auth/rate-limit/
+// 5xx failure) it's shorter than the input: the chunk that aborted and every
+// chunk after it were never confirmed, so those trailing records have no outcome
+// and the caller treats them as still pending. `abortReason` records why (if) the
+// run stopped early, and in particular whether the caller should stop the daemon.
+export type MarkSyncedResult = {
+  outcomes: MarkSyncedOutcome[];
+  abortReason: MarkAbortReason;
+};
+
+// The `records[]` item markpost's bulk PATCH expects: the uuid to match plus
+// the attributes to set. The CLI always sets `status`, `syncedAt`, and
+// `filePath` together — moving a written record out of `pending` so the next
+// run's pending-only fetch skips it. `filePath` is sent deliberately: markpost
+// stores it on the record so its UI can show where a synced note landed — the
+// user's own local path going to their own account, not a third-party leak.
+const buildBulkRecordPayload = (item: MarkSyncedItem, syncedAt: string) => {
+  return {
+    uuid: item.uuid,
+    status: SYNCED_STATUS,
+    syncedAt,
+    filePath: item.filePath,
+  };
+};
+
+// Reads the `meta.updated` count off a bulk-PATCH response, if present. markpost
+// sends it alongside `data` (server/api/records/index.patch.ts); it's the
+// corroborating signal used only when `data` itself is unreadable.
+const updatedCountFromMeta = (
+  body: RecordListApiResponse,
+): number | undefined => {
+  const meta = body.meta as { updated?: unknown } | undefined;
+
+  return typeof meta?.updated === 'number' ? meta.updated : undefined;
+};
+
+// Maps one chunk's request outcome to a per-item result. markpost returns the
+// records it actually updated as the `data` collection (always an array;
+// foreign/nonexistent uuids are silently dropped, mirroring the bulk delete
+// endpoint), so a uuid present there was synced and one absent stays `pending`
+// and is reported `MARK_FAILED` — that per-uuid diff is what gives the CLI real
+// partial-failure detection across a 100-record chunk, rather than trusting a
+// bare 2xx.
 //
-// Goes through `authedRequest` so the PATCH inherits the same request timeout
-// as every other API call (a stalled connection can't hang the sync forever).
-// Unlike the fetch helpers above, a failure here is logged rather than
-// re-thrown: this is non-critical post-write bookkeeping (the file is already
-// on disk), so a failed mark simply leaves the record `pending` to re-sync
-// next run, which is far less disruptive than aborting the whole sync after
-// files have landed.
+// If `data` is ever NOT an array (an off-contract or proxied response the
+// declared contract never produces), the per-uuid diff can't run, so fall back
+// to the corroborating `meta.updated` count: a full count means the whole chunk
+// was accepted (all `MARK_SYNCED`); anything else fails the chunk loud so its
+// records retry next run rather than being silently reported synced.
+const outcomesFromResponse = (
+  items: MarkSyncedItem[],
+  body: RecordListApiResponse,
+): MarkSyncedOutcome[] => {
+  if (!Array.isArray(body.data)) {
+    const wholeChunkAccepted = updatedCountFromMeta(body) === items.length;
+
+    return items.map(() => (wholeChunkAccepted ? MARK_SYNCED : MARK_FAILED));
+  }
+
+  const updated = unwrapResourceCollection('markRecordsSynced', body, 'record');
+  const updatedUuids = new Set(updated.map((record) => record.uuid));
+
+  return items.map((item) =>
+    updatedUuids.has(item.uuid) ? MARK_SYNCED : MARK_FAILED,
+  );
+};
+
+// The result of PATCHing one chunk: a per-item outcome list plus whether the
+// run should stop. `abort` is set when the failure dooms every remaining chunk
+// too (a hung server or a systemic auth/rate-limit/5xx failure), so the caller
+// stops rather than firing a burst it already knows will fail. `abortReason`
+// carries WHY up to the run level — `'timeout'` and `'permanent'` distinguish the
+// hung-server and dead-token cases (the latter also stops the daemon); a transient
+// systemic abort keeps `null` (aborts this run, daemon lives). `null` with
+// `abort: false` is the plain success/per-chunk-failure case.
+type MarkSyncedChunkResult = {
+  outcomes: MarkSyncedOutcome[];
+  abort: boolean;
+  abortReason: MarkAbortReason;
+};
+
+// PATCHes one chunk (<= MAX_MARK_SYNCED_BATCH_SIZE records) synced in a single
+// bulk request. Routes through the shared `authedRequest` seam (like every
+// other call): it attaches the bearer token, asserts success (throwing on a
+// non-2xx, an errors-carrying 2xx, or an unparseable body such as an HTML error
+// page behind a 200), and inherits the request timeout so a stalled connection
+// can't hang the sync forever. A failure here is logged, not re-thrown — this
+// is non-critical post-write bookkeeping (the files are already on disk), so a
+// failed chunk simply leaves its records `pending` to re-sync next run.
 //
-// Returns a discriminated outcome rather than a bare boolean so the caller can
-// tell a per-record failure (`MARK_FAILED`, keep going — the next record may
-// succeed) apart from a timeout (`MARK_TIMED_OUT`) and a permanent systemic
-// failure (`MARK_PERMANENTLY_FAILED`). A timeout (hung server) stops the
-// remaining batches to avoid paying the full timeout on each; a permanent
-// failure (dead token / forbidden account) stops them because it will recur on
-// every record — and additionally shuts the autoSync daemon down, since it can't
-// clear on retry (matching the delete path). Both leave the affected records
-// `pending`.
-//
-// Reading the body back as a resource would mis-report a legitimate 2xx
-// that carries no `data` (markpost's PATCH always returns the record, but a
-// `data: null` shape still counts as success here) as a failure, wrongly
-// warning the user of duplicates. `filePath` is sent deliberately — markpost
-// stores it on the record so its UI can show where a synced note landed; it's
-// the user's own local path going to their own account, not a third-party leak.
-export const markRecordSynced = async (
-  uuid: string,
-  filePath: string,
-  syncedAt: string = new Date().toISOString(),
-): Promise<MarkSyncedOutcome> => {
+// A timeout maps every item to `MARK_TIMED_OUT` and aborts (a hung server would
+// burn the full request timeout on every remaining chunk). A systemic failure
+// (auth/rate-limit/5xx) also aborts — it will recur for every remaining chunk,
+// so the caller backs off rather than hammering a server that just rejected the
+// burst (the same rule the fetch helpers apply via `isSystemicApiFailure`). A
+// PERMANENT systemic failure (dead token / forbidden account: 401/403) aborts
+// with `abortReason: 'permanent'` so the caller additionally stops the autoSync
+// daemon, which can't clear it on retry (matching the delete path); a transient
+// systemic failure aborts with `null` (daemon lives). Any other (per-chunk)
+// failure maps to `MARK_FAILED` without aborting — a later chunk may still
+// succeed.
+const markSyncedChunk = async (
+  items: MarkSyncedItem[],
+  syncedAt: string,
+): Promise<MarkSyncedChunkResult> => {
   try {
-    // Route through the shared authedRequest seam (like createRecord/
-    // fetchRecord): it attaches the bearer token and asserts success (throwing
-    // on a non-2xx or an errors-carrying 2xx, and on an unparseable body such
-    // as an HTML error page behind a 200), so a failure lands in the catch
-    // below rather than being mistaken for a silent success that leaves the
-    // record pending. We ignore the returned body — the caller only needs to
-    // know the server accepted the change.
-    await authedRequest(`/api/records/${encodeURIComponent(uuid)}`, {
+    const body = (await authedRequest('/api/records', {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/vnd.api+json',
@@ -430,44 +514,102 @@ export const markRecordSynced = async (
         data: {
           type: 'records',
           attributes: {
-            status: SYNCED_STATUS,
-            syncedAt,
-            filePath,
+            records: items.map((item) =>
+              buildBulkRecordPayload(item, syncedAt),
+            ),
           },
         },
       }),
-    });
+    })) as RecordListApiResponse;
 
-    return MARK_SYNCED;
+    return {
+      outcomes: outcomesFromResponse(items, body),
+      abort: false,
+      abortReason: null,
+    };
   } catch (error) {
+    // Identify the chunk by its uuid range so a stderr reader can tell which
+    // records this failure left pending without cross-referencing the caller's
+    // own per-record report.
+    const firstUuid = items[0]?.uuid;
+    const lastUuid = items[items.length - 1]?.uuid;
     logErrorMessage(
-      `markRecordSynced["${uuid}"]`,
+      `markRecordsSynced[${firstUuid}..${lastUuid}, ${items.length} record(s)]`,
       error instanceof Error ? error.message : String(error),
     );
 
-    // A timeout gets its own outcome so the caller can abort the remaining
-    // marks on the first one.
+    // A timeout gets its own outcome and aborts so the caller doesn't pay the
+    // full request timeout on every remaining chunk.
     if (error instanceof ApiTimeoutError) {
-      return MARK_TIMED_OUT;
+      return {
+        outcomes: items.map(() => MARK_TIMED_OUT),
+        abort: true,
+        abortReason: 'timeout',
+      };
     }
 
-    // A permanent systemic failure (dead token / forbidden account: 401/403)
-    // will recur on every subsequent record and every future pass, so the batch
-    // runner stops on it and the caller shuts the autoSync daemon down instead
-    // of re-PATCHing a server it already knows will reject.
-    if (isPermanentApiFailure(error)) {
-      return MARK_PERMANENTLY_FAILED;
-    }
-
-    // Every other error — a per-record 4xx or a transient systemic 5xx that may
-    // be a one-off — leaves this record pending and lets the rest of the batch
-    // proceed; aborting on a lone transient failure would strand records that
-    // would have settled. The daemon stays alive to retry next pass.
+    // Every failed record in the chunk stays `MARK_FAILED` (pending, retried
+    // next run). A systemic failure aborts the remaining chunks; a PERMANENT one
+    // (dead token / forbidden account: 401/403) recurs every pass, so it also
+    // tells the caller to stop the autoSync daemon (`abortReason: 'permanent'`).
+    // A transient systemic failure aborts this run but keeps the daemon alive
+    // (`null`). A plain per-chunk failure doesn't abort — a later chunk may
+    // still succeed.
     // @todo A sustained 429 (rate limit) would be better handled by aborting the
     // burst to back off (per the api.ts contract) while keeping the daemon alive;
     // out of scope for the permanent-failure fix — tracked as a follow-up.
-    return MARK_FAILED;
+    return {
+      outcomes: items.map(() => MARK_FAILED),
+      abort: isSystemicApiFailure(error),
+      abortReason: isPermanentApiFailure(error) ? 'permanent' : null,
+    };
   }
+};
+
+// Marks written records synced after the CLI has written them to disk, via
+// markpost's bulk PATCH /api/records (server/api/records/index.patch.ts). This
+// is the non-destructive counterpart to `deleteRecords`: with autoDelete off,
+// moving each record out of `pending` is what stops the next run's pending-only
+// fetch from re-writing it. `syncedAt` is injected (defaulting to now) so
+// callers and tests can pin the timestamp.
+//
+// Chunks the input into `ceil(N / MAX_MARK_SYNCED_BATCH_SIZE)` requests so a
+// large first sync settles up to 100 records per PATCH instead of one request
+// per record — the rate-limit/connection pressure that motivated issue #123.
+// Chunks run sequentially (not in parallel): the previous per-record path
+// bounded concurrency for exactly this reason, and one request per 100 records
+// is already few enough that firing them serially keeps the burst small without
+// a concurrency limiter.
+//
+// Returns one outcome per record in input order. A timeout or a systemic
+// failure (auth/rate-limit/5xx) stops the run at that chunk rather than firing a
+// burst that's already doomed; the trailing records get no outcome and stay
+// `pending` (their outcome index is `undefined`, which the caller reads as
+// not-synced). A plain per-chunk failure doesn't abort — a later chunk may still
+// succeed. `abortReason` carries why (if) the run stopped early, and whether the
+// caller should also stop the autoSync daemon (see `MarkAbortReason`).
+export const markRecordsSynced = async (
+  items: MarkSyncedItem[],
+  syncedAt: string = new Date().toISOString(),
+): Promise<MarkSyncedResult> => {
+  const outcomes: MarkSyncedOutcome[] = [];
+
+  for (
+    let start = 0;
+    start < items.length;
+    start += MAX_MARK_SYNCED_BATCH_SIZE
+  ) {
+    const chunk = items.slice(start, start + MAX_MARK_SYNCED_BATCH_SIZE);
+    const chunkResult = await markSyncedChunk(chunk, syncedAt);
+
+    outcomes.push(...chunkResult.outcomes);
+
+    if (chunkResult.abort) {
+      return { outcomes, abortReason: chunkResult.abortReason };
+    }
+  }
+
+  return { outcomes, abortReason: null };
 };
 
 export const fetchRecord = async (uuid: string): Promise<Record | null> => {

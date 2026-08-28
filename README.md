@@ -22,7 +22,7 @@ server-side records.
 | `markpost sync [--dry-run]` | Fetch all pending records, write each to a markdown file, and (when `autoDelete` is enabled) delete the written records from the server. `--dry-run` reports the exact write/delete plan without writing or mutating anything |
 | `markpost push <path...>` | Create records from one or more markdown files, directories, or glob patterns |
 | `markpost get <uuid> [--json]` | Fetch and display a single record; pass `--json` for machine-readable output |
-| `markpost sources <list\|create\|update\|delete> [uuid]` | Manage sources; `sources list --json` prints machine-readable output |
+| `markpost sources <list\|create\|update\|delete\|rotate-secret> [uuid]` | Manage sources; `sources list --json` prints machine-readable output. `rotate-secret [uuid]` mints/replaces the signing secret of a provider source (github/zapier/shortcuts reveal a fresh secret once; stripe prompts for the new value) |
 | `markpost records list [--source <type>] [--status <status>] [--search <text>] [--json]` | List records without deleting them, optionally filtered by source, status, or search text; pass `--json` for machine-readable output |
 | `markpost config <get\|set\|path> [key] [value]` | View or change the stored API token and output directory |
 | `markpost settings <get\|set> [key=value ...]` | View or change server-side sync settings (`autoSync`, `autoDelete`, `frontmatter`, `conflictStrategy`) |
@@ -115,7 +115,7 @@ inspect or change those values afterwards without hand-editing the file:
 markpost config get                      # show all stored config
 markpost config get apiToken             # show one value
 markpost config set apiToken <token>     # change the stored API token
-markpost config set outputDirectory <path>
+markpost config set outputDirectory '~/notes'  # quote it: a leading ~, $HOME, or ${HOME} is expanded when writing
 markpost config path                     # print the config file location
 ```
 
@@ -152,7 +152,7 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 |---|---|
 | `API_TOKEN` | API token for sync.danholloran.me |
 | `BASE_URL` | Base URL of the sync API (e.g. `http://localhost:8888` for local dev) |
-| `OUTPUT_DIRECTORY` | Absolute path to the directory where synced files are written |
+| `OUTPUT_DIRECTORY` | Path to the directory where synced files are written; a leading `~`, `$HOME`, or `${HOME}` is expanded to your home directory. A relative path is resolved against the current working directory, so prefer an absolute path or a `~` prefix for scheduled runs |
 
 ### Scripts
 

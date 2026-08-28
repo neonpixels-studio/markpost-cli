@@ -16,8 +16,10 @@ import {
   sep,
 } from 'node:path';
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import slugify from '@sindresorhus/slugify';
 import { config } from '@/libs/config.js';
+import { expandHomeDirectory } from '@/libs/paths.js';
 import {
   buildRecordDocument,
   stripFrontmatterDocument,
@@ -45,17 +47,44 @@ const FILE_ALREADY_EXISTS_ERROR_CODE = 'EEXIST';
 // another hash of the CLI's own output, never used as a security boundary.
 const CONTENT_HASH_ALGORITHM = 'sha256';
 
+// Identity of the exact file writeMarkdown put on disk, so a later pass can tell
+// "still my file" from "a different regular file dropped at this path between
+// passes". `deviceId` + `inode` is the OS's own identity for a file (what
+// hardlink detection and `find -samefile` compare): a replacement (delete +
+// recreate, move-over, or an editor's atomic temp-then-rename save) usually lands
+// a new inode at the same path, and `deviceId` disambiguates inode numbers that
+// are only unique within a single filesystem (a vault on an external/network
+// mount). Stored as `bigint` (via lstat's `bigint: true`) so a 64-bit inode or
+// device id — Btrfs, Windows file indexes, some network filesystems — can't lose
+// its low bits rounding through a JS double and false-match a different file.
+// Deliberately NOT mtime or birthtime: mtime changes on every in-place vault edit
+// (which must NOT count as a different file — that edit is a first-class case,
+// kept via the content-hash check), and birthtime is unreliable cross-platform
+// (libuv aliases it to ctime on Linux without statx, which also moves on edits).
+// inode is stable across in-place edits on every platform (issue #124).
+export type FileIdentity = {
+  deviceId: bigint;
+  inode: bigint;
+};
+
 // The per-uuid bookkeeping writeMarkdown carries across autoSync passes: the
-// file a record landed on, plus a hash of the exact document written there.
-// Path and hash are written, forgotten, and evicted as a unit, so they live in
-// one record rather than two parallel maps that could drift out of sync. The
-// hash is the baseline for the reuse-refresh check (see reuseWrittenFile): on a
-// later pass it tells "the server content changed" (the freshly rendered
-// document no longer hashes to this) apart from "the user edited the file in the
-// vault" (the on-disk bytes no longer hash to this).
+// file a record landed on, a hash of the exact document written there, and the
+// identity (device + inode) of that on-disk file. Path, hash, and identity are
+// written, forgotten, and evicted as a unit, so they live in one record rather
+// than parallel maps that could drift out of sync. The hash is the baseline for
+// the reuse-refresh check (see reuseWrittenFile): on a later pass it tells "the
+// server content changed" (the freshly rendered document no longer hashes to
+// this) apart from "the user edited the file in the vault" (the on-disk bytes no
+// longer hash to this). The identity is the reuse-eligibility check: it rejects
+// settling a record against an unrelated file that replaced its own file at the
+// same path (see resolveReusableWrittenState). `identity` is optional: a rare
+// post-write stat failure leaves it unverified, and the reuse check degrades to
+// the plain existing-regular-file test rather than dropping tracking (which would
+// spawn a suffixed duplicate next pass).
 export type WrittenRecordState = {
   path: string;
   contentHash: string;
+  identity?: FileIdentity;
 };
 
 // Hash of the exact bytes writeMarkdown put on disk, used only to compare one
@@ -65,10 +94,20 @@ const hashContent = (content: string): string => {
   return createHash(CONTENT_HASH_ALGORITHM).update(content).digest('hex');
 };
 
+// The configured output directory can carry a leading `~`/`$HOME` that no shell
+// expanded (a quoted `config set` value, or the interactive prompt), which
+// existsSync/mkdirSync/resolve would otherwise treat as a literal folder in the
+// cwd. Expand it here — the one read seam both ensureOutputDirectory and
+// requireOutputDirectory go through — so every writer sees the real path.
 const getOutputDirectory = () => {
-  return (
-    process.env.OUTPUT_DIRECTORY ?? (config.get('outputDirectory') as string)
-  );
+  const configured =
+    process.env.OUTPUT_DIRECTORY ?? (config.get('outputDirectory') as string);
+
+  if (!configured) {
+    return configured;
+  }
+
+  return expandHomeDirectory(configured, homedir);
 };
 
 // Slugify the title so it is always a single, safe path segment. Falls back
@@ -280,26 +319,27 @@ const evictStalePathOwners = (
 // own file instead of the suffix strategy dropping a fresh `<slug>-2.md`,
 // `<slug>-3.md` duplicate every pass — the written-vs-settled split: the local
 // file is already written, only the server-side step still needs retrying.
-// Returns the reusable state (path + content hash), or null (the caller then
-// falls through to a fresh write) when any guard fails: the uuid is untrackable
-// (empty) or was never written; the tracked path is no longer a regular file
-// (moved/deleted, or
-// replaced by a directory or symlink — reuse writes nothing for suffix/skip, so
-// settling the record against a non-file would strand it with no local content,
-// and lstat rejects a symlink rather than following it out of the vault); or the
-// file no longer lives in the current output directory (a mid-run
-// outputDirectory change must not send the record back to the old vault — same
-// reason seenSlugs is keyed by resolved path). evictStalePathOwners keeps
+// Returns the reusable state (path + content hash + identity), or null (the
+// caller then falls through to a fresh write) when any guard fails: the uuid is
+// untrackable (empty) or was never written; the tracked path is no longer a
+// regular file (moved/deleted, or replaced by a directory or symlink — reuse
+// writes nothing for suffix/skip, so settling the record against a non-file
+// would strand it with no local content, and lstat rejects a symlink rather than
+// following it out of the vault); the file no longer lives in the current output
+// directory (a mid-run outputDirectory change must not send the record back to
+// the old vault — same reason seenSlugs is keyed by resolved path); or the file
+// at the path is no longer the one we wrote (a *different* regular file was
+// dropped there between passes — its device/inode no longer matches, so
+// settling/deleting the record would lose it with no local copy: the data-loss
+// edge under autoDelete this closes, issue #124). evictStalePathOwners keeps
 // writtenState to one uuid per path, so a surviving entry is unambiguously this
 // record's file. Keyed by uuid, so a record whose title changed server-side
 // between passes keeps its original filename (its existing file is reused rather
-// than orphaned under a new slug). The check is existence + type, not identity:
-// if an external process deletes this record's file and drops a *different*
-// regular file at the same path between passes, it is reused as-is — an accepted
-// edge, since the fix (tracking inode/mtime per path) is disproportionate to a
-// rare same-path race. A stat error other than "missing" (EACCES, ENOTDIR) is
-// treated as "not reusable" rather than thrown, so a best-effort lookup can
-// never fail an otherwise-writable record.
+// than orphaned under a new slug). The directory guard is a pure string compare,
+// so it runs before the filesystem stat to skip a stat on a path already known
+// out of scope. A stat error other than "missing" (EACCES, ENOTDIR) is treated as
+// "not reusable" rather than thrown, so a best-effort lookup can never fail an
+// otherwise-writable record.
 const resolveReusableWrittenState = (
   outputDirectory: string,
   recordUuid: string,
@@ -315,27 +355,78 @@ const resolveReusableWrittenState = (
     return null;
   }
 
-  if (!isExistingRegularFile(existingState.path)) {
+  if (resolve(dirname(existingState.path)) !== resolve(outputDirectory)) {
     return null;
   }
 
-  if (resolve(dirname(existingState.path)) !== resolve(outputDirectory)) {
+  const currentIdentity = readRegularFileIdentity(existingState.path);
+
+  if (!currentIdentity) {
+    return null;
+  }
+
+  // Write-time identity was unverified (a post-write stat failed), so the
+  // existing-regular-file check above was the whole eligibility test this pass.
+  // Adopt the now-readable identity so the guard is re-armed from next pass on —
+  // never worse than leaving it unverified, and it re-closes the issue #124
+  // window that would otherwise stay open for this record's whole lifetime (the
+  // no-rewrite suffix/skip reuse path never re-records it on its own).
+  if (!existingState.identity) {
+    existingState.identity = currentIdentity;
+    return existingState;
+  }
+
+  // A known write-time identity must still match the file on disk; a different
+  // file dropped at the path (new device/inode) is refused.
+  if (!fileIdentityMatches(existingState.identity, currentIdentity)) {
     return null;
   }
 
   return existingState;
 };
 
-// True only when `filePath` is an existing regular file. lstat (not stat) so a
-// symlink reports false rather than resolving to its target. `throwIfNoEntry`
-// covers a missing entry; any other stat error (EACCES, ENOTDIR) is caught and
-// treated as "not reusable" so the best-effort reuse lookup can't fail a record.
-const isExistingRegularFile = (filePath: string): boolean => {
+// The regular-file identity (device + inode) at `filePath`, or null when the path
+// is missing, is not a regular file, or can't be stat'd. lstat (not stat) so a
+// symlink reports as non-regular rather than resolving to its target; a null
+// return covers all three "not reusable" cases (`throwIfNoEntry` handles a
+// missing entry, `isFile()` the directory/symlink case). Any other stat error
+// (EACCES, ENOTDIR) is caught and treated as "not reusable" so this best-effort
+// lookup can never fail an otherwise-writable record.
+const readRegularFileIdentity = (filePath: string): FileIdentity | null => {
   try {
-    return lstatSync(filePath, { throwIfNoEntry: false })?.isFile() ?? false;
+    // `bigint: true` returns the device/inode as BigInt, preserving 64-bit ids
+    // that would otherwise lose precision through a JS double and false-match.
+    const stats = lstatSync(filePath, { throwIfNoEntry: false, bigint: true });
+
+    if (!stats?.isFile()) {
+      return null;
+    }
+
+    return { deviceId: stats.dev, inode: stats.ino };
   } catch {
-    return false;
+    return null;
   }
+};
+
+// The tracked path still holds the file we wrote when both device and inode match.
+// A mismatch means the file was replaced between passes (a different regular file
+// dropped at the same path); reuse is refused so the record is written fresh
+// rather than silently settled/deleted against an unrelated file (issue #124). An
+// in-place vault edit keeps the same device and inode (only mtime moves), so it
+// still matches — that edit is preserved by the content-hash check, not treated
+// as a different file. This narrows the data-loss window rather than closing it
+// absolutely: a filesystem that recycles a just-freed inode number for the
+// replacement file (ext4, APFS) can still produce a false match, but that
+// requires the exact freed inode to be reissued at the same path between two
+// passes of one process — an extreme corner next to the common replace-with-new-
+// inode case this rejects.
+const fileIdentityMatches = (
+  tracked: FileIdentity,
+  current: FileIdentity,
+): boolean => {
+  return (
+    tracked.deviceId === current.deviceId && tracked.inode === current.inode
+  );
 };
 
 // Best-effort read of a file's bytes; null when it can't be read (missing,
@@ -437,8 +528,18 @@ const shouldRewriteReusedFile = (
   return serverChangedWhileLocalUntouched(reusableState, renderedContent);
 };
 
-// Record the file and content hash this uuid now occupies, so a later reuse pass
-// can both find the file and tell a server-side change apart from a vault edit.
+// Record the file, content hash, and on-disk identity this uuid now occupies, so
+// a later reuse pass can find the file, tell a server-side change apart from a
+// vault edit, and confirm the file is still the one we wrote (not a replacement
+// dropped at the path). The identity is read back on a best-effort basis right
+// after the write; stat-after-write is two syscalls on a path, not one operation
+// on a handle, so it shares the same narrow replacement race as the reuse check
+// (a replacement winning that window is recorded as ours) — the same corner
+// fileIdentityMatches already concedes for inode recycling. If the read fails (a
+// rare transient stat error), the entry is still recorded but without an
+// identity — the reuse check then degrades to the existing-regular-file test next
+// pass (and re-arms the identity then) rather than dropping tracking, which would
+// spawn a suffixed duplicate.
 const rememberWrittenState = (
   writtenState: Map<string, WrittenRecordState>,
   recordUuid: string,
@@ -448,6 +549,7 @@ const rememberWrittenState = (
   writtenState.set(recordUuid, {
     path: writtenPath,
     contentHash: hashContent(content),
+    identity: readRegularFileIdentity(writtenPath) ?? undefined,
   });
 };
 

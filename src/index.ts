@@ -3,11 +3,10 @@
 import {
   deleteRecords,
   fetchAllRecords,
-  markRecordSynced,
+  markRecordsSynced,
   MARK_SYNCED,
-  MARK_TIMED_OUT,
-  MARK_PERMANENTLY_FAILED,
-  MarkSyncedOutcome,
+  MarkSyncedItem,
+  MarkAbortReason,
   PENDING_STATUS,
 } from '@/libs/records.js';
 import {
@@ -54,14 +53,6 @@ import {
 } from '@/types/settings.types.js';
 
 type Spinner = ReturnType<typeof yoctoSpinner>;
-
-// Cap how many mark-synced PATCHes are in flight at once. A large first sync
-// can write hundreds of records; firing one unbounded `Promise.all` over all
-// of them risks rate-limit/connection failures exactly when the batch is
-// biggest — and every failed mark stays pending and re-duplicates next run.
-// Declared here (above the top-level `dispatch()` call) so the hoisted helpers
-// don't hit its temporal dead zone when the default sync runs.
-const MARK_SYNCED_CONCURRENCY = 10;
 
 // Slug ownership (resolved `<slug>.md` path -> the uuid that wrote it), shared
 // across every autoSync pass in this process rather than rebuilt per pass.
@@ -435,59 +426,16 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
   });
 }
 
-// Why a mark-synced run stopped early, or `null` if it ran every batch. One
-// discriminant (not adjacent booleans) so the reason can't be self-contradictory.
-// Only `'permanent'` also stops the autoSync daemon; `'timeout'` retries next pass.
-type MarkAbortReason = 'timeout' | 'permanent' | null;
-
-// Outcome of a whole mark-synced run. `outcomes` holds one entry per *attempted*
-// record in the original order; on an early abort it's shorter than the input
-// because the remaining batches were never sent. `abortReason` records why (if)
-// the run stopped early.
-interface MarkSyncedRun {
-  outcomes: MarkSyncedOutcome[];
-  abortReason: MarkAbortReason;
-}
-
-// PATCHes the written records synced in bounded-concurrency batches, stopping
-// early on the first permanent failure or timeout. A timeout means the server is
-// hung, and a permanent failure (dead token / forbidden account) will recur on
-// every remaining PATCH: either way firing the remaining batches would only burn
-// requests already known to be doomed, so aborting leaves those records pending
-// to retry next run, mirroring the push command's batch-abort. Every other
-// failure (a per-record 4xx or a transient 429/5xx that may be a blip) does NOT
-// abort — the next record may still succeed. A permanent failure outranks a
-// timeout in the same batch: it's the non-recoverable signal that also stops the
-// daemon, so it wins.
-async function markRecordsInBatches(
-  writtenRecords: WrittenRecord[],
-): Promise<MarkSyncedRun> {
-  const outcomes: MarkSyncedOutcome[] = [];
-
-  for (
-    let start = 0;
-    start < writtenRecords.length;
-    start += MARK_SYNCED_CONCURRENCY
-  ) {
-    const batch = writtenRecords.slice(start, start + MARK_SYNCED_CONCURRENCY);
-    const batchOutcomes = await Promise.all(
-      batch.map(({ record, filePath }) =>
-        markRecordSynced(record.uuid, filePath),
-      ),
-    );
-
-    outcomes.push(...batchOutcomes);
-
-    if (batchOutcomes.includes(MARK_PERMANENTLY_FAILED)) {
-      return { outcomes, abortReason: 'permanent' };
-    }
-
-    if (batchOutcomes.includes(MARK_TIMED_OUT)) {
-      return { outcomes, abortReason: 'timeout' };
-    }
-  }
-
-  return { outcomes, abortReason: null };
+// Projects each written record down to the `{ uuid, filePath }` shape the bulk
+// mark-synced call needs, preserving order so the returned outcomes stay aligned
+// to `writtenRecords` by index. Chunking and the stop-on-abort logic (timeout or
+// systemic failure, with a permanent one also stopping the daemon) live in
+// `markRecordsSynced` (the records lib), keeping the API surface isolated there.
+function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
+  return writtenRecords.map(({ record, filePath }) => ({
+    uuid: record.uuid,
+    filePath,
+  }));
 }
 
 // Headline for the mark-synced failure report. A permanent failure and a timeout
@@ -505,8 +453,8 @@ function markFailureHeadline(
   if (abortReason === 'permanent') {
     const daemonClause = autoSyncStopped ? ', so auto-sync was stopped;' : ';';
     // Don't prescribe `markpost config` — a 403 (plan limit / sign-ups disabled)
-    // isn't a token problem. markRecordSynced already logged the classified,
-    // case-specific reason per record; point the user at that.
+    // isn't a token problem. markRecordsSynced already logged the failing chunk's
+    // case-specific reason to stderr; point the user at that.
     return `Failed to mark ${pendingCount} record(s) synced — a permanent error (authentication or a forbidden account) will recur every pass${daemonClause} the record(s) remain pending on the server. Fix the cause reported above and sync again.`;
   }
 
@@ -580,7 +528,9 @@ async function markWrittenRecordsSynced(
 
   spinner.start('Marking records synced...');
 
-  const { outcomes, abortReason } = await markRecordsInBatches(writtenRecords);
+  const { outcomes, abortReason } = await markRecordsSynced(
+    toMarkSyncedItems(writtenRecords),
+  );
   const permanentlyFailed = abortReason === 'permanent';
   // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
   // pending if its mark failed or was never attempted (its outcome is undefined
