@@ -4,14 +4,16 @@ import {
   deleteRecords,
   fetchAllRecords,
   markRecordsSynced,
-  MARK_ABORTED,
   MARK_SYNCED,
-  MARK_TIMED_OUT,
   MarkSyncedItem,
-  MarkSyncedStop,
+  MarkAbortReason,
   PENDING_STATUS,
 } from '@/libs/records.js';
-import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
+import {
+  describeApiError,
+  isPermanentApiFailure,
+  isSystemicApiFailure,
+} from '@/libs/api.js';
 import {
   buildWritePreview,
   ensureOutputDirectory,
@@ -426,7 +428,9 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
 
 // Projects each written record down to the `{ uuid, filePath }` shape the bulk
 // mark-synced call needs, preserving order so the returned outcomes stay aligned
-// to `writtenRecords` by index. Chunking and the stop-on-abort logic live in
+// to `writtenRecords` by index. Chunking and the stop-on-abort logic (timeout, a
+// systemic failure with a permanent one also stopping the daemon, or a repeated
+// request-shape 4xx) live in
 // `markRecordsSynced` (the records lib), keeping the API surface isolated there.
 function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   return writtenRecords.map(({ record, filePath }) => ({
@@ -435,44 +439,60 @@ function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   }));
 }
 
-// How a mark-synced run ended, for the failure report: the stop reason plus how
-// many pending records the run never reached. Bundled because they're only ever
-// meaningful together (the abort description), so the headline can't be handed a
-// count that belongs to a different reason.
-type MarkStopReport = {
-  reason: MarkSyncedStop;
-  unattemptedCount: number;
-};
-
-// Headline for the mark-synced failure report. An abort reads differently from a
-// scatter of per-record failures: it stopped the run early, so the pending count
-// can fold in records never attempted after the abort. `unattemptedCount` is how
-// many of those pending records were never sent (the chunks after the stop), so
-// the abort wording only claims "the rest were not attempted" when that's true —
-// an abort on the final chunk leaves nothing unattempted. All cases leave the
-// listed records pending on the server.
+// Headline for the mark-synced failure report. A permanent, timeout, transient, or
+// request-shape abort all stop the run early (so the count can include records
+// never attempted) and each reads differently from a scatter of per-record
+// failures. Every daemon-aware clause is derived from the SAME (`abortReason`,
+// `autoSyncEnabled`) the caller's returned stop signal uses, so the message can't
+// claim a stop — or a "next run" — that won't happen (a one-shot `markpost sync`
+// never had a daemon; mirroring the delete path, which says nothing about
+// auto-sync). `hasUnattempted` is whether the abort left a trailing chunk unsent,
+// so the wording only claims records were skipped when some actually were.
 function markFailureHeadline(
   pendingCount: number,
-  stop: MarkStopReport,
+  abortReason: MarkAbortReason,
+  {
+    autoSyncEnabled,
+    hasUnattempted,
+  }: {
+    autoSyncEnabled: boolean;
+    hasUnattempted: boolean;
+  },
 ): string {
-  if (stop.reason === MARK_TIMED_OUT) {
-    return `Timed out marking records synced — stopped after the first timeout; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+  if (abortReason === 'permanent') {
+    const daemonClause = autoSyncEnabled ? ', so auto-sync was stopped;' : ';';
+    // Note the unattempted tail like the transient branch does — the abort left
+    // later chunks unsent, so the count is more than just the records that failed.
+    const skipped = hasUnattempted ? ' (some were never attempted)' : '';
+    // Don't prescribe `markpost config` — a 403 (plan limit / sign-ups disabled)
+    // isn't a token problem. markRecordsSynced already logged the failing chunk's
+    // case-specific reason to stderr; point the user at that.
+    return `Failed to mark ${pendingCount} record(s) synced${skipped} — a permanent error (authentication or a forbidden account) will recur every pass${daemonClause} the record(s) remain pending on the server. Fix the cause reported above and sync again.`;
   }
 
-  if (stop.reason === MARK_ABORTED) {
-    const notAttemptedClause =
-      stop.unattemptedCount > 0 ? ' and the rest were not attempted' : '';
+  if (abortReason === 'timeout') {
+    return `Timed out marking records synced — stopped after the batch that first timed out; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+  }
+
+  if (abortReason === 'transient') {
+    // A systemic error (rate limit / 5xx) aborted the run to back off. Only claim
+    // records were skipped if a trailing chunk was actually unsent; the "re-written
+    // next run" hedge matches the timeout/generic branches (soft — true whenever
+    // the user next syncs, daemon or not), so it isn't gated on autoSyncEnabled.
+    const skipped = hasUnattempted ? ', so some were never attempted' : '';
+    return `Failed to mark ${pendingCount} record(s) synced — a systemic error stopped the run early${skipped}; they remain pending on the server, they may be re-written next run.`;
+  }
+
+  if (abortReason === 'request-shape') {
+    // Two consecutive chunks were rejected the same categorical way (a 400/422),
+    // so the request envelope itself is wrong and every record would fail alike.
+    const notAttemptedClause = hasUnattempted
+      ? ' and the rest were not attempted'
+      : '';
     return `Aborted marking records synced — the server rejected the request wholesale (a 400/422), so every record would fail the same way${notAttemptedClause}; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
-  // The generic branch also covers a systemic abort (auth/rate-limit/5xx), which
-  // stops the run early with no distinct stop reason — so surface how many of the
-  // pending records were never sent rather than implying all N were attempted.
-  const neverAttemptedClause =
-    stop.unattemptedCount > 0
-      ? ` (${stop.unattemptedCount} never attempted — the run stopped early)`
-      : '';
-  return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server${neverAttemptedClause}; they may be re-written next run.`;
+  return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
 }
 
 // Surfaces mark-synced failures loudly (never as success): an unmarked record
@@ -482,10 +502,10 @@ function markFailureHeadline(
 function reportMarkFailures(
   failures: WrittenRecord[],
   markedCount: number,
-  stop: MarkStopReport,
+  headline: string,
   spinner: Spinner,
 ): void {
-  spinner.error(markFailureHeadline(failures.length, stop));
+  spinner.error(headline);
   failures.forEach(({ record, filePath }) => {
     // Sanitize the composed line: record.uuid comes from the same untrusted API
     // response as a title, and filePath embeds the user-configured output path —
@@ -521,21 +541,27 @@ function forgetSettledRecords(
 
 // Marks every written record synced on the server after a write, so the next
 // run's pending-only fetch skips them — the autoDelete-off path's
-// non-destructive equivalent of the delete step.
+// non-destructive equivalent of the delete step. Returns whether the autoSync
+// daemon should stop: true only when a permanent failure (dead token / forbidden
+// account) struck AND a daemon was running (`autoSyncEnabled`), so the caller can
+// break the loop into the same doomed PATCH every pass — the mark-synced
+// counterpart of the delete path's `deletePermanentlyFailed`.
 async function markWrittenRecordsSynced(
   writtenRecords: WrittenRecord[],
   spinner: Spinner,
   writtenState: Map<string, WrittenRecordState>,
-): Promise<void> {
+  { autoSyncEnabled }: { autoSyncEnabled: boolean },
+): Promise<boolean> {
   if (writtenRecords.length === 0) {
-    return;
+    return false;
   }
 
   spinner.start('Marking records synced...');
 
-  const { outcomes, stoppedBy } = await markRecordsSynced(
+  const { outcomes, abortReason } = await markRecordsSynced(
     toMarkSyncedItems(writtenRecords),
   );
+  const permanentlyFailed = abortReason === 'permanent';
   // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
   // pending if its mark failed or was never attempted (its outcome is undefined
   // because an abort — a timeout, a systemic failure, or a request-shape 4xx —
@@ -554,20 +580,38 @@ async function markWrittenRecordsSynced(
     settled.map(({ record }) => record.uuid),
   );
 
+  // The daemon-stop signal the caller returns. The headline derives its
+  // daemon-aware clauses from the same (abortReason, autoSyncEnabled), so the
+  // message can never claim a stop — or a "next run" — that won't happen.
+  const stoppingAutoSync = permanentlyFailed && autoSyncEnabled;
+
   if (pending.length > 0) {
-    // Records the run never reached: an abort/timeout stops before later chunks,
-    // so their outcome index is undefined and they have no per-record outcome.
-    const unattemptedCount = writtenRecords.length - outcomes.length;
+    // An abort leaves a trailing chunk unsent, so `outcomes` is shorter than the
+    // input — the headline uses this to only claim records were skipped when some
+    // actually were.
+    const hasUnattempted = outcomes.length < writtenRecords.length;
+    // Compose the headline here — this function holds the abort reason and the
+    // daemon state — so reportMarkFailures takes a ready string instead of
+    // drilling several adjacent, transposable args.
+    const headline = markFailureHeadline(pending.length, abortReason, {
+      autoSyncEnabled,
+      hasUnattempted,
+    });
     reportMarkFailures(
       pending,
       writtenRecords.length - pending.length,
-      { reason: stoppedBy, unattemptedCount },
+      headline,
       spinner,
     );
-    return;
+    return stoppingAutoSync;
   }
 
   spinner.success(`Marked ${writtenRecords.length} records synced!`);
+  // Return the same stop signal from both exits so the daemon-stop decision has a
+  // single source. With zero pending this is always false (a permanent abort maps
+  // its chunk to MARK_FAILED, so it can't reach here), but deriving it rather than
+  // hardcoding keeps the two paths from drifting.
+  return stoppingAutoSync;
 }
 
 // Ends a truncated sync on the truncation warning, never on a green success
@@ -902,13 +946,18 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // next run's pending-only fetch skips them instead of re-writing duplicate
     // files.
     if (!autoDelete) {
-      await markWrittenRecordsSynced(
+      const markStopsAutoSync = await markWrittenRecordsSynced(
         settleableRecords,
         spinner,
         processWrittenState,
+        { autoSyncEnabled: autoSync },
       );
       reportIncompleteSync(recordsResult.partial);
-      return autoSync;
+      // A permanent mark-synced failure (dead token / forbidden account) recurs
+      // every pass, so — like the delete path — stop the autoSync daemon instead
+      // of rescheduling into the same doomed PATCH; a transient one keeps
+      // autoSync alive to retry next pass.
+      return markStopsAutoSync ? false : autoSync;
     }
 
     // Delete Records — skipped when nothing is settleable (a bare DELETE with an
@@ -939,8 +988,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     const deleteMeta = await deleteRecords(
       settleableRecords.map(({ record }) => record.uuid),
     ).catch((error: unknown) => {
-      deletePermanentlyFailed =
-        isSystemicApiFailure(error) && error.isPermanent;
+      deletePermanentlyFailed = isPermanentApiFailure(error);
       // Sanitize before printing, same threat as the outer catch: a
       // server- or API-derived message can embed an escape.
       console.error(
@@ -999,7 +1047,9 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
       // A permanent failure (dead token, forbidden account) won't clear on
       // retry — stop the autoSync daemon. A transient one (rate-limit/5xx) is
       // worth another pass, so keep autoSync alive to retry ("retry shortly").
-      return error.isPermanent ? false : autoSync;
+      // Go through the shared guard (like the mark-synced and delete paths) so
+      // the permanence rule stays in the API seam, not re-derived here.
+      return isPermanentApiFailure(error) ? false : autoSync;
     }
 
     spinner.error('Something went wrong!');

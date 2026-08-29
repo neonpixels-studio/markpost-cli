@@ -1305,7 +1305,7 @@ describe('markRecordsSynced', () => {
     global.fetch = vi.fn();
     const result = await markRecordsSynced([]);
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(result).toEqual({ outcomes: [], stoppedBy: null });
+    expect(result).toEqual({ outcomes: [], abortReason: null });
   });
 
   it('marks every record synced in a single request at exactly the batch size', async () => {
@@ -1318,7 +1318,7 @@ describe('markRecordsSynced', () => {
     expect(result.outcomes.every((outcome) => outcome === MARK_SYNCED)).toBe(
       true,
     );
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe(null);
   });
 
   it('splits one-over-the-batch-size into two requests (ceil(N/100))', async () => {
@@ -1345,7 +1345,7 @@ describe('markRecordsSynced', () => {
       true,
     );
     expect(result.outcomes).toHaveLength(250);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe(null);
   });
 
   it('pairs each record its own uuid, filePath, and syncedAt across chunks', async () => {
@@ -1388,7 +1388,7 @@ describe('markRecordsSynced', () => {
       MARK_SYNCED,
       MARK_SYNCED,
     ]);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe(null);
   });
 
   it('aligns a per-record failure to its index when it lands in a later chunk', async () => {
@@ -1409,7 +1409,7 @@ describe('markRecordsSynced', () => {
         index === 120 ? outcome === MARK_FAILED : outcome === MARK_SYNCED,
       ),
     ).toBe(true);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe(null);
   });
 
   it('aborts remaining chunks on a timeout and marks the timed-out chunk pending', async () => {
@@ -1428,7 +1428,7 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // Only two requests fire — the third chunk is never attempted.
     expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result.stoppedBy).toBe(MARK_TIMED_OUT);
+    expect(result.abortReason).toBe('timeout');
     // Chunk 1 synced (100), chunk 2 all timed out (100); chunk 3 has no outcome.
     expect(result.outcomes).toHaveLength(200);
     expect(
@@ -1457,7 +1457,7 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // All three chunks are attempted — no abort.
     expect(global.fetch).toHaveBeenCalledTimes(3);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe(null);
     expect(result.outcomes).toHaveLength(250);
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
@@ -1476,7 +1476,7 @@ describe('markRecordsSynced', () => {
     mockFetch({ data: [], meta: { updated: 0 } });
     const result = await markRecordsSynced(items(3));
     expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe(null);
   });
 
   // Off-contract safety net: the declared contract always sends `data` as an
@@ -1486,7 +1486,7 @@ describe('markRecordsSynced', () => {
     mockFetch({ meta: { updated: 3 } });
     const result = await markRecordsSynced(items(3));
     expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED, MARK_SYNCED]);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe(null);
   });
 
   // `data: null` is off-contract (markpost always sends the updated array), so
@@ -1514,9 +1514,10 @@ describe('markRecordsSynced', () => {
     expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
   });
 
-  it('aborts remaining chunks on a systemic failure (e.g. 401) without a timeout flag', async () => {
-    // A 401 (or any auth/rate-limit/5xx) will recur for every remaining chunk,
-    // so the run backs off after the first rather than hammering the server.
+  it('aborts remaining chunks and reports permanent on a 401 failure', async () => {
+    // A 401 (dead token) is a PERMANENT systemic failure: it recurs for every
+    // remaining chunk and every future pass, so the run backs off after the first
+    // chunk AND reports `abortReason: 'permanent'` so the caller stops the daemon.
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -1526,9 +1527,30 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // Only the first chunk is attempted — the other two are never sent.
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    // A systemic abort is not a timeout, so the caller uses the failure wording.
-    expect(result.stoppedBy).toBeNull();
+    // A permanent abort — the caller both fails loud and stops the autoSync daemon.
+    expect(result.abortReason).toBe('permanent');
     // The attempted chunk is all pending; the unsent chunks have no outcome.
+    expect(result.outcomes).toHaveLength(100);
+    expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
+      true,
+    );
+  });
+
+  it('aborts remaining chunks and reports transient on a 503 failure', async () => {
+    // A 503 (or 429) is a TRANSIENT systemic failure: it aborts the remaining
+    // chunks to back off (it may recur), reported as `abortReason: 'transient'`
+    // so the caller can say the run stopped early — but it must NOT stop the
+    // daemon, since a lone 5xx can be a blip and the next pass should retry.
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.resolve({}),
+    });
+
+    const result = await markRecordsSynced(items(250));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // Aborted the run with a non-permanent reason — the daemon stays alive.
+    expect(result.abortReason).toBe('transient');
     expect(result.outcomes).toHaveLength(100);
     expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
       true,
@@ -1542,7 +1564,7 @@ describe('markRecordsSynced', () => {
     );
     const result = await markRecordsSynced(items(3));
     expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe(null);
   });
 
   it('marks a whole chunk MARK_FAILED on a network failure', async () => {
@@ -1558,6 +1580,22 @@ describe('markRecordsSynced', () => {
     });
     const result = await markRecordsSynced(items(1));
     expect(result.outcomes).toEqual([MARK_FAILED]);
+  });
+
+  // A forbidden account (403) is permanent like a dead token (401, covered
+  // above): it recurs every pass, so the chunk aborts with `abortReason:
+  // 'permanent'` and the caller stops the autoSync daemon. Its records stay
+  // MARK_FAILED (pending). The 401 and transient-503 counterparts sit with the
+  // other chunk-abort tests above.
+  it('aborts with a permanent reason on a forbidden (403) failure', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+    const result = await markRecordsSynced(items(2));
+    expect(result.abortReason).toBe('permanent');
+    expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED]);
   });
 
   // Reject every chunk the given way (a 400/422 error response), so a test can
@@ -1587,7 +1625,7 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // Only two requests fire — the third chunk is never attempted.
     expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result.stoppedBy).toBe(MARK_ABORTED);
+    expect(result.abortReason).toBe('request-shape');
     // Chunk 1 was run past (MARK_FAILED); only the stopping chunk 2 is MARK_ABORTED.
     expect(result.outcomes).toHaveLength(200);
     expect(
@@ -1603,7 +1641,7 @@ describe('markRecordsSynced', () => {
 
     const result = await markRecordsSynced(items(250));
     expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result.stoppedBy).toBe(MARK_ABORTED);
+    expect(result.abortReason).toBe('request-shape');
     expect(result.outcomes).toHaveLength(200);
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
@@ -1636,7 +1674,7 @@ describe('markRecordsSynced', () => {
     // Messages differ per chunk, so no abort — all three chunks are attempted and
     // rejected as plain per-chunk failures.
     expect(global.fetch).toHaveBeenCalledTimes(3);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBeNull();
     expect(result.outcomes).toHaveLength(250);
     expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
       true,
@@ -1667,7 +1705,7 @@ describe('markRecordsSynced', () => {
     // Chunk 2 (network error) resets the consecutiveness, so chunk 3 doesn't
     // confirm chunk 1 — all three fire and nothing aborts.
     expect(global.fetch).toHaveBeenCalledTimes(3);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBeNull();
     expect(result.outcomes).toHaveLength(250);
     expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
       true,
@@ -1699,7 +1737,7 @@ describe('markRecordsSynced', () => {
     // All three chunks are attempted — one rejection doesn't abort, and the run
     // completes, so chunk 1 stays a plain MARK_FAILED (never MARK_ABORTED).
     expect(global.fetch).toHaveBeenCalledTimes(3);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBeNull();
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
@@ -1733,7 +1771,7 @@ describe('markRecordsSynced', () => {
     // Chunk 1 synced, so chunks 2 and 3 both fire despite being rejected, and the
     // run completes — the rejected chunks stay plain MARK_FAILED.
     expect(global.fetch).toHaveBeenCalledTimes(3);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBeNull();
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_SYNCED),
     ).toBe(true);
@@ -1768,7 +1806,7 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // All three chunks are attempted — a 404 is not a categorical abort.
     expect(global.fetch).toHaveBeenCalledTimes(3);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBeNull();
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
@@ -1778,10 +1816,10 @@ describe('markRecordsSynced', () => {
   });
 
   // A 429 is systemic (rate-limit): it aborts the run to back off, but is NOT a
-  // request-shape rejection — it maps to MARK_FAILED with a null stop reason (the
-  // plain-failure wording), never MARK_ABORTED. Guards the fatal-request abort
-  // against catching a transient rate-limit.
-  it('treats a 429 as a systemic abort (MARK_FAILED, not MARK_ABORTED)', async () => {
+  // request-shape rejection — it maps to MARK_FAILED with `abortReason: 'transient'`
+  // (the daemon stays alive), never MARK_ABORTED / 'request-shape'. Guards the
+  // fatal-request abort against catching a transient rate-limit.
+  it('treats a 429 as a transient systemic abort (MARK_FAILED, not MARK_ABORTED)', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 429,
@@ -1796,7 +1834,7 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // Systemic abort after the first chunk — the other two never fire.
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBe('transient');
     expect(result.outcomes).toHaveLength(100);
     expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
       true,
@@ -1824,7 +1862,7 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // The unparseable body degrades to a plain failure, so the run continues.
     expect(global.fetch).toHaveBeenCalledTimes(3);
-    expect(result.stoppedBy).toBeNull();
+    expect(result.abortReason).toBeNull();
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);

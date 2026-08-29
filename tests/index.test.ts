@@ -82,16 +82,17 @@ const mockRecord: Record = {
 // (chunk boundaries and the timeout abort are covered in tests/libs/records.test.ts).
 // `markResultBy` maps each item's uuid to an outcome; `markResultAll` is the
 // common "every record shares one outcome" shorthand. Both always report every
-// record attempted (`stoppedBy: null`, full-length outcomes) — an abort produces
-// a SHORTER outcomes array, so timeout/abort cases use an explicit
-// `mockResolvedValue({ outcomes: [...], stoppedBy: MARK_TIMED_OUT })` instead.
+// record attempted (`abortReason: null`, full-length outcomes) — an abort produces
+// a SHORTER outcomes array, so timeout/permanent/request-shape abort cases use an
+// explicit `mockResolvedValue({ outcomes: [...], abortReason: 'timeout' |
+// 'permanent' | 'request-shape' })` instead of these.
 const markResultBy =
   (outcomeFor: (uuid: string) => MarkSyncedOutcome) =>
   async (
     items: { uuid: string; filePath: string }[],
   ): Promise<MarkSyncedResult> => ({
     outcomes: items.map((item) => outcomeFor(item.uuid)),
-    stoppedBy: null,
+    abortReason: null,
   });
 
 const markResultAll = (outcome: MarkSyncedOutcome) =>
@@ -1311,7 +1312,7 @@ describe('index', () => {
     // outcome). The short outcomes array models the real timeout abort.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_SYNCED, MARK_TIMED_OUT],
-      stoppedBy: MARK_TIMED_OUT,
+      abortReason: 'timeout',
     });
 
     await import('@/index.js');
@@ -1363,10 +1364,10 @@ describe('index', () => {
     );
     // uuid-0 synced, uuid-1's chunk was rejected as a request-shape 4xx (abort),
     // uuid-2 never attempted (no outcome) — the short outcomes array models the
-    // real abort, and stoppedBy drives the abort-specific headline.
+    // real abort, and abortReason drives the abort-specific headline.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_SYNCED, MARK_ABORTED],
-      stoppedBy: MARK_ABORTED,
+      abortReason: 'request-shape',
     });
 
     await import('@/index.js');
@@ -1429,7 +1430,7 @@ describe('index', () => {
     // attempted."
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_ABORTED, MARK_ABORTED],
-      stoppedBy: MARK_ABORTED,
+      abortReason: 'request-shape',
     });
 
     await import('@/index.js');
@@ -1469,12 +1470,12 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(
       (record: Record) => `/mock/output/${record.uuid}.md`,
     );
-    // A systemic abort (auth/rate-limit/5xx) has no distinct stop reason
-    // (stoppedBy null) but stops early: only uuid-0 was attempted, so uuid-1 and
-    // uuid-2 were never sent and the generic headline must say so.
+    // A transient systemic abort (rate-limit/5xx) stops early: only uuid-0 was
+    // attempted, so uuid-1 and uuid-2 were never sent and the transient headline
+    // must say some were skipped.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_FAILED],
-      stoppedBy: null,
+      abortReason: 'transient',
     });
 
     await import('@/index.js');
@@ -1483,7 +1484,7 @@ describe('index', () => {
       expect.stringContaining('Failed to mark 3 record(s) synced'),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('2 never attempted'),
+      expect.stringContaining('so some were never attempted'),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -1568,7 +1569,7 @@ describe('index', () => {
     // only the timed-out one is pending — no never-attempted tail.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_SYNCED, MARK_TIMED_OUT],
-      stoppedBy: MARK_TIMED_OUT,
+      abortReason: 'timeout',
     });
 
     await import('@/index.js');
@@ -1615,7 +1616,7 @@ describe('index', () => {
     // All three non-synced records are pending and the run uses timeout wording.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_SYNCED, MARK_FAILED, MARK_TIMED_OUT],
-      stoppedBy: MARK_TIMED_OUT,
+      abortReason: 'timeout',
     });
 
     await import('@/index.js');
@@ -1919,6 +1920,249 @@ describe('index', () => {
     );
     expect(process.exitCode).toBe(1);
     expect(scheduledAutoSync).toBe(true);
+  });
+
+  // Drives a mark-sync (autoDelete off) of `count` records where the bulk
+  // `markRecordsSynced` resolves the given `result`, capturing what the run
+  // reports back to the scheduler. The chunking + abort itself lives in the
+  // records lib (covered in tests/libs/records.test.ts); here we pin index's own
+  // job — turning a `MarkSyncedResult` into the settle/report and the daemon-stop
+  // decision. A `result` with a SHORTER `outcomes` array than `count` models the
+  // real abort, where trailing chunks were never sent.
+  const arrangeMarkSync = async ({
+    count,
+    result,
+    autoSync,
+  }: {
+    count: number;
+    result: MarkSyncedResult;
+    autoSync: boolean;
+  }): Promise<{ scheduledAutoSync: boolean | undefined }> => {
+    const records: Record[] = Array.from({ length: count }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordsSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const capture: { scheduledAutoSync: boolean | undefined } = {
+      scheduledAutoSync: undefined,
+    };
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        capture.scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false, autoSync }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    vi.mocked(markRecordsSynced).mockResolvedValue(result);
+
+    return capture;
+  };
+
+  // The mark-synced counterpart of the delete-permanent-failure test: with
+  // autoDelete off, a permanent mark-synced failure (dead token / forbidden
+  // account) surfaces as `abortReason: 'permanent'`. The sync must fail loud AND
+  // stop rescheduling the autoSync daemon — otherwise it wakes every few minutes
+  // and re-PATCHes the same records against a server it already knows will
+  // reject, re-writing them as duplicates every pass (issue #133).
+  it('stops autoSync from rescheduling on a permanent mark-synced failure', async () => {
+    const capture = await arrangeMarkSync({
+      count: 1,
+      autoSync: true,
+      result: { outcomes: [MARK_FAILED], abortReason: 'permanent' },
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('auto-sync was stopped'),
+    );
+    expect(process.exitCode).toBe(1);
+    // A permanent failure recurs, so the scheduler must not spin another pass.
+    expect(capture.scheduledAutoSync).toBe(false);
+  });
+
+  // A per-chunk NON-systemic failure (a per-record MARK_FAILED inside an
+  // otherwise-successful response, or a non-systemic 4xx) is `abortReason: null`:
+  // it doesn't abort and must keep autoSync alive — the record is still pending
+  // and the next pass retries. The systemic-blip (5xx/429) case now maps to
+  // `'transient'`, covered by the test below.
+  it('keeps autoSync alive after a per-chunk (non-systemic) mark-synced failure', async () => {
+    const capture = await arrangeMarkSync({
+      count: 1,
+      autoSync: true,
+      result: { outcomes: [MARK_FAILED], abortReason: null },
+    });
+
+    await import('@/index.js');
+
+    // Match text unique to the generic headline — 'still pending on the server'
+    // alone also appears in the timeout headline, so it wouldn't catch a
+    // failure wrongly routed through the timeout branch.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('written locally but still pending on the server'),
+    );
+    expect(process.exitCode).toBe(1);
+    // A non-aborting failure: the daemon must retry, so autoSync is preserved.
+    expect(capture.scheduledAutoSync).toBe(true);
+  });
+
+  // The other side of the discriminant: a TIMEOUT abort must NOT stop the daemon
+  // — the server may un-hang, so the next pass should retry. Guards against a
+  // regression that treats any abort reason as a stop. The short outcomes array
+  // (2 outcomes for 3 records) models the real abort leaving a trailing chunk
+  // unsent.
+  it('keeps autoSync alive on a timeout abort', async () => {
+    const capture = await arrangeMarkSync({
+      count: 3,
+      autoSync: true,
+      result: {
+        outcomes: [MARK_SYNCED, MARK_TIMED_OUT],
+        abortReason: 'timeout',
+      },
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(process.exitCode).toBe(1);
+    // A timeout can clear, so the daemon must retry next pass.
+    expect(capture.scheduledAutoSync).toBe(true);
+  });
+
+  // A TRANSIENT systemic abort (a 429/5xx that stopped the run to back off) must
+  // read differently from a scatter of per-record failures — some records were
+  // never attempted — yet keep the daemon alive to retry. The short outcomes
+  // array models the aborted run leaving a trailing chunk unsent.
+  it('reports a transient abort as stopped-early and keeps autoSync alive', async () => {
+    const capture = await arrangeMarkSync({
+      count: 3,
+      autoSync: true,
+      result: { outcomes: [MARK_SYNCED, MARK_FAILED], abortReason: 'transient' },
+    });
+
+    await import('@/index.js');
+
+    // uuid-1 failed plus uuid-2 never attempted = two pending, with the
+    // stopped-early wording (not the generic per-record failure line).
+    const headline = vi
+      .mocked(mockSpinner.error)
+      .mock.calls.map(([message]) => String(message))
+      .find((message) => message.includes('a systemic error stopped the run early'));
+    expect(headline).toBeDefined();
+    expect(headline).toContain('2 record(s)');
+    // A trailing chunk was unsent, so the "never attempted" clause appears.
+    expect(headline).toContain('so some were never attempted');
+    expect(process.exitCode).toBe(1);
+    // A transient error can clear, so the daemon must retry next pass.
+    expect(capture.scheduledAutoSync).toBe(true);
+  });
+
+  // The transient headline's "never attempted" clause is conditional: when the
+  // abort lands on the LAST chunk (outcomes length == count, no unattempted tail),
+  // it must NOT claim records were skipped — the same false-claim guard the
+  // permanent branch has for its daemon clause.
+  it('does not claim records were skipped on a transient abort with no unattempted tail', async () => {
+    await arrangeMarkSync({
+      count: 2,
+      autoSync: true,
+      result: { outcomes: [MARK_SYNCED, MARK_FAILED], abortReason: 'transient' },
+    });
+
+    await import('@/index.js');
+
+    const headline = vi
+      .mocked(mockSpinner.error)
+      .mock.calls.map(([message]) => String(message))
+      .find((message) => message.includes('a systemic error stopped the run early'));
+    expect(headline).toBeDefined();
+    // Only uuid-1 is pending, and it was attempted — no skipped tail to claim.
+    expect(headline).toContain('1 record(s)');
+    expect(headline).not.toContain('never attempted');
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A permanent mark-synced failure on a plain one-shot `markpost sync`
+  // (autoDelete off, autoSync off) must NOT claim "auto-sync was stopped" — there
+  // was no daemon. The headline still guides the user to fix the cause, but a
+  // cron log must not read a false statement about what the tool did.
+  it('does not claim auto-sync was stopped when it was never on', async () => {
+    await arrangeMarkSync({
+      count: 1,
+      autoSync: false,
+      result: { outcomes: [MARK_FAILED], abortReason: 'permanent' },
+    });
+
+    await import('@/index.js');
+
+    const headline = vi
+      .mocked(mockSpinner.error)
+      .mock.calls.map(([message]) => String(message))
+      .find((message) => message.includes('a permanent error'));
+    expect(headline).toBeDefined();
+    expect(headline).not.toContain('auto-sync was stopped');
+    expect(process.exitCode).toBe(1);
+  });
+
+  // Guards index's `outcomes[index]` alignment when a permanent abort leaves a
+  // trailing tail unattended. The bulk call is mocked to return a deliberately
+  // short outcomes array (20 entries for 25 records) standing in for an abort —
+  // chunk boundaries themselves live in tests/libs/records.test.ts — with uuid-13
+  // failed inside it. index must count uuid-13 plus the five never-attempted
+  // (uuid-20..24) as six pending, list uuid-13 (not a settled record like
+  // uuid-0), report 19 marked, and stop the daemon. An off-by-one in the settle
+  // filter would strand the wrong records.
+  it('counts pending correctly and stops the daemon on a permanent abort', async () => {
+    const outcomes: MarkSyncedOutcome[] = Array.from(
+      { length: 20 },
+      (_item, index) => (index === 13 ? MARK_FAILED : MARK_SYNCED),
+    );
+    const capture = await arrangeMarkSync({
+      count: 25,
+      autoSync: true,
+      result: { outcomes, abortReason: 'permanent' },
+    });
+
+    await import('@/index.js');
+
+    // uuid-13 failed plus the five never-attempted (uuid-20..24) = six pending.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 6 record(s) synced'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 19 record(s) synced despite the above.'),
+    );
+    // The failed record is listed pending; a settled record (uuid-0) is not —
+    // proving the outcome/index alignment holds when the outcomes array is
+    // truncated by an abort.
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-13 -> /mock/output/uuid-13.md'),
+    );
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-0 -> /mock/output/uuid-0.md'),
+    );
+    expect(capture.scheduledAutoSync).toBe(false);
+    expect(process.exitCode).toBe(1);
   });
 
   // Tests 1 and 2 share the same arrange: two records where mockRecord's write
