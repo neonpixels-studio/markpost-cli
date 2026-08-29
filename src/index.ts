@@ -428,8 +428,9 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
 
 // Projects each written record down to the `{ uuid, filePath }` shape the bulk
 // mark-synced call needs, preserving order so the returned outcomes stay aligned
-// to `writtenRecords` by index. Chunking and the stop-on-abort logic (timeout or
-// systemic failure, with a permanent one also stopping the daemon) live in
+// to `writtenRecords` by index. Chunking and the stop-on-abort logic (timeout, a
+// systemic failure with a permanent one also stopping the daemon, or a repeated
+// request-shape 4xx) live in
 // `markRecordsSynced` (the records lib), keeping the API surface isolated there.
 function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   return writtenRecords.map(({ record, filePath }) => ({
@@ -438,15 +439,15 @@ function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   }));
 }
 
-// Headline for the mark-synced failure report. A permanent, timeout, or transient
-// abort all stop the run early (so the count can include records never attempted)
-// and each reads differently from a scatter of per-record failures. Every
-// daemon-aware clause is derived from the SAME (`abortReason`, `autoSyncEnabled`)
-// the caller's returned stop signal uses, so the message can't claim a stop — or a
-// "next run" — that won't happen (a one-shot `markpost sync` never had a daemon;
-// mirroring the delete path, which says nothing about auto-sync). `hasUnattempted`
-// is whether the abort left a trailing chunk unsent, so the wording only claims
-// records were skipped when some actually were.
+// Headline for the mark-synced failure report. A permanent, timeout, transient, or
+// request-shape abort all stop the run early (so the count can include records
+// never attempted) and each reads differently from a scatter of per-record
+// failures. Every daemon-aware clause is derived from the SAME (`abortReason`,
+// `autoSyncEnabled`) the caller's returned stop signal uses, so the message can't
+// claim a stop — or a "next run" — that won't happen (a one-shot `markpost sync`
+// never had a daemon; mirroring the delete path, which says nothing about
+// auto-sync). `hasUnattempted` is whether the abort left a trailing chunk unsent,
+// so the wording only claims records were skipped when some actually were.
 function markFailureHeadline(
   pendingCount: number,
   abortReason: MarkAbortReason,
@@ -480,6 +481,15 @@ function markFailureHeadline(
     // the user next syncs, daemon or not), so it isn't gated on autoSyncEnabled.
     const skipped = hasUnattempted ? ', so some were never attempted' : '';
     return `Failed to mark ${pendingCount} record(s) synced — a systemic error stopped the run early${skipped}; they remain pending on the server, they may be re-written next run.`;
+  }
+
+  if (abortReason === 'request-shape') {
+    // Two consecutive chunks were rejected the same categorical way (a 400/422),
+    // so the request envelope itself is wrong and every record would fail alike.
+    const notAttemptedClause = hasUnattempted
+      ? ' and the rest were not attempted'
+      : '';
+    return `Aborted marking records synced — the server rejected the request wholesale (a 400/422), so every record would fail the same way${notAttemptedClause}; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
   return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
@@ -554,10 +564,10 @@ async function markWrittenRecordsSynced(
   const permanentlyFailed = abortReason === 'permanent';
   // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
   // pending if its mark failed or was never attempted (its outcome is undefined
-  // because a timeout or systemic failure aborted the run before its batch).
-  // Evict settled records from the written-path map so a long-running autoSync
-  // daemon doesn't leak memory — the "settled" half of the written-vs-settled
-  // split.
+  // because an abort — a timeout, a systemic failure, or a request-shape 4xx —
+  // stopped the run before its chunk). Evict settled records from the written-
+  // path map so a long-running autoSync daemon doesn't leak memory — the
+  // "settled" half of the written-vs-settled split.
   const settled = writtenRecords.filter(
     (_written, index) => outcomes[index] === MARK_SYNCED,
   );

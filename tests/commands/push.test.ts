@@ -13,6 +13,7 @@ vi.mock('chalk', () => ({
     redBright: vi.fn((value: unknown) => value),
     greenBright: vi.fn((value: unknown) => value),
     dim: vi.fn((value: unknown) => value),
+    yellow: vi.fn((value: unknown) => value),
   },
 }));
 
@@ -572,6 +573,259 @@ describe('runPushCommand', () => {
     );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Pushed "B" (uuid-b)'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('previews the resolved files without creating any records on --dry-run', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md'],
+      missing: [],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md', '--dry-run']);
+
+    // The whole point: no record-creation path is touched on a dry run.
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(readMarkdown).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Dry run — previewing 2 file(s); nothing will be pushed.',
+      ),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push 2 file(s):'),
+    );
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('a.md'));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('b.md'));
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  // A mistyped --dry-run must fail loud, never fall through to the real push and
+  // create records the user only meant to preview.
+  it('rejects a mistyped dry-run flag without resolving inputs or pushing', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    const { createRecord } = await import('@/libs/records.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', '--dryrun']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Unexpected arguments: --dryrun'),
+    );
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(resolveMarkdownInputs).not.toHaveBeenCalled();
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A dry run makes no network calls, so it must not gate on a configured token.
+  it('does not check config on a dry run', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md'],
+      missing: [],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', '--dry-run']);
+
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push 1 file(s):'),
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  // A dry run walks directories, so a previewed path can carry a filename the
+  // user never typed; a control character in it must be stripped before print.
+  it('strips control characters from a previewed path', async () => {
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['notes/\u001b[2Jgotcha.md'],
+      missing: [],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['notes', '--dry-run']);
+
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('notes/ [2Jgotcha.md'),
+    );
+    expect(console.log).not.toHaveBeenCalledWith(
+      expect.stringContaining('\u001b'),
+    );
+  });
+
+  // A file whose name starts with dashes is pushable via the POSIX `--`
+  // end-of-options separator, so a glob that expands to one isn't rejected.
+  it('treats args after -- as literal paths even when dash-leading', async () => {
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['--notes.md'],
+      missing: [],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['--dry-run', '--', '--notes.md']);
+
+    expect(resolveMarkdownInputs).toHaveBeenCalledWith(['--notes.md']);
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unexpected arguments'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push 1 file(s):'),
+    );
+  });
+
+  // An unexpected flag is rejected even alongside --dry-run: the guard runs
+  // before the preview, so a typo can't ride in on a valid dry run.
+  it('rejects an unexpected flag even when --dry-run is present', async () => {
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('@/libs/records.js');
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', '--dry-run', '--verbose']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Unexpected arguments: --verbose'),
+    );
+    expect(resolveMarkdownInputs).not.toHaveBeenCalled();
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A record title is server-controlled and untrusted; a control character in
+  // it must be stripped before the success line reaches the terminal.
+  it('strips control characters from a pushed record title', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown).mockReturnValue({ title: 'A', content: 'Content' });
+    vi.mocked(createRecord).mockResolvedValue(
+      recordFor('Sneaky\u001b[2KTitle', 'uuid-a'),
+    );
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md']);
+
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Pushed "Sneaky [2KTitle" (uuid-a)'),
+    );
+    expect(console.log).not.toHaveBeenCalledWith(
+      expect.stringContaining('\u001b'),
+    );
+  });
+
+  it('excludes the --dry-run flag from the resolved input paths', async () => {
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md'],
+      missing: [],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['--dry-run', 'a.md']);
+
+    // The flag must never reach resolveMarkdownInputs as if it were a path.
+    expect(resolveMarkdownInputs).toHaveBeenCalledWith(['a.md']);
+  });
+
+  it('fails with usage when --dry-run is the only argument', async () => {
+    const { checkConfig } = await import('@/libs/config.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['--dry-run']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No path given.'),
+    );
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(resolveMarkdownInputs).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('reports missing inputs and exits 1 on a dry run without pushing', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['real.md'],
+      missing: ['ghost.md'],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['real.md', 'ghost.md', '--dry-run']);
+
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No markdown files found for "ghost.md".'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push 1 file(s):'),
+    );
+    // A wrong glob is exactly what --dry-run exists to catch, so it stays honest
+    // and exits non-zero like the real run would.
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('reports skipped unreadable inputs and exits 1 on a dry run without pushing', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['real.md'],
+      missing: [],
+      skipped: ['./vault/locked'],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['real.md', './vault', '--dry-run']);
+
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Skipped unreadable path "./vault/locked".'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push 1 file(s):'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('exits 1 on a dry run when no inputs resolve to any file', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: [],
+      missing: ['./missing/*.md'],
+      skipped: [],
+    });
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['./missing/*.md', '--dry-run']);
+
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('No markdown files to push.'),
+    );
+    expect(console.log).not.toHaveBeenCalledWith(
+      expect.stringContaining('Would push'),
     );
     expect(process.exitCode).toBe(1);
   });

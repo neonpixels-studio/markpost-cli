@@ -12,6 +12,7 @@ import {
   formatErrorMessages,
   getApiToken,
   getBaseUrl,
+  isFatalRequestError,
   isPermanentApiFailure,
   isSystemicApiFailure,
   logApiFailure,
@@ -430,6 +431,47 @@ describe('ApiRequestError', () => {
     for (const statusCode of [429, 500, 503]) {
       expect(new ApiRequestError('nope', statusCode).isPermanent).toBe(false);
     }
+  });
+
+  // Request-shape 4xx (400/422) is what lets a bulk caller abort on a whole
+  // batch that failed the same way. The boundaries matter: a per-record 404, an
+  // auth 401/403, a transient 429, and any 5xx must stay OUT so they don't
+  // trigger the abort.
+  it('classifies only 400 and 422 as request-shape (fatal) errors', () => {
+    for (const statusCode of [400, 422]) {
+      expect(new ApiRequestError('nope', statusCode).isFatalRequest).toBe(
+        true,
+      );
+    }
+  });
+
+  it('does not classify per-record, auth, rate-limit, or server 4xx/5xx as request-shape', () => {
+    for (const statusCode of [401, 403, 404, 409, 429, 500, 503]) {
+      expect(new ApiRequestError('nope', statusCode).isFatalRequest).toBe(
+        false,
+      );
+    }
+  });
+});
+
+describe('isFatalRequestError', () => {
+  it('is true only for a 400/422 ApiRequestError', () => {
+    expect(isFatalRequestError(new ApiRequestError('nope', 400))).toBe(true);
+    expect(isFatalRequestError(new ApiRequestError('nope', 422))).toBe(true);
+  });
+
+  it('is false for a per-record, auth, rate-limit, or 5xx ApiRequestError', () => {
+    for (const statusCode of [401, 404, 429, 500]) {
+      expect(isFatalRequestError(new ApiRequestError('nope', statusCode))).toBe(
+        false,
+      );
+    }
+  });
+
+  it('is false for a plain Error or non-error value', () => {
+    expect(isFatalRequestError(new Error('network down'))).toBe(false);
+    expect(isFatalRequestError('boom')).toBe(false);
+    expect(isFatalRequestError(undefined)).toBe(false);
   });
 });
 

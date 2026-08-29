@@ -1,6 +1,7 @@
 import {
   ApiTimeoutError,
   authedRequest,
+  isFatalRequestError,
   isPermanentApiFailure,
   isSystemicApiFailure,
   logApiFailure,
@@ -29,12 +30,18 @@ const SYNCED_STATUS = 'synced';
 // Per-record result of a bulk mark-synced run (see `markRecordsSynced`, which
 // PATCHes records in chunks of up to MAX_MARK_SYNCED_BATCH_SIZE). `MARK_SYNCED`
 // — the server returned this record among the ones it updated. `MARK_FAILED` —
-// the record's chunk failed (a non-timeout error), or the server didn't return
-// this uuid (partial success); it stays pending to re-sync next run. A plain
-// chunk failure doesn't stop the run, but a systemic one (auth/rate-limit/5xx)
-// aborts the remaining chunks — see `markSyncedChunk`. `MARK_TIMED_OUT` — the
-// record's chunk hit the request timeout, a signal the server is hung; the run
-// stops there rather than paying the full timeout on every remaining chunk.
+// the record's chunk failed (a non-timeout, non-request-shape error), or the
+// server didn't return this uuid (partial success); it stays pending to re-sync
+// next run. A plain chunk failure doesn't stop the run, but a systemic one
+// (auth/rate-limit/5xx) aborts the remaining chunks — see `markSyncedChunk`.
+// `MARK_TIMED_OUT` — the record's chunk hit the request timeout, a signal the
+// server is hung; the run stops there rather than paying the full timeout on
+// every remaining chunk. `MARK_ABORTED` — the chunk was rejected with a
+// request-shape 4xx (a malformed-payload 400 or a contract-validation 422, NOT
+// an auth 401/403 or a transient 429): the CLI builds every chunk's payload
+// identically, so once a SECOND chunk is rejected the same way with nothing
+// synced the run aborts rather than fire the same doomed request again (a lone
+// rejection isn't enough — see `markRecordsSynced`).
 //
 // Whether an abort ALSO stops the autoSync daemon is a run-level decision, not a
 // per-record tag: a permanent systemic failure (dead token / forbidden account:
@@ -50,9 +57,13 @@ const SYNCED_STATUS = 'synced';
 export const MARK_SYNCED = 'mark-synced';
 export const MARK_FAILED = 'mark-failed';
 export const MARK_TIMED_OUT = 'mark-timed-out';
+export const MARK_ABORTED = 'mark-aborted';
 
 export type MarkSyncedOutcome =
-  typeof MARK_SYNCED | typeof MARK_FAILED | typeof MARK_TIMED_OUT;
+  | typeof MARK_SYNCED
+  | typeof MARK_FAILED
+  | typeof MARK_TIMED_OUT
+  | typeof MARK_ABORTED;
 
 // markpost paginates with a cursor: each response's `links.next` embeds the
 // `page[after]` cursor to request the following page, and is `null` once
@@ -394,17 +405,23 @@ export type MarkSyncedItem = {
 // account: 401/403) that recurs every pass, so the caller ALSO stops the autoSync
 // daemon. `'transient'` — a chunk hit a transient systemic failure (429/5xx): the
 // run stops early to back off (trailing chunks skipped) but the daemon stays alive
-// to retry, and the caller can say the run stopped short. `null` — the run
-// completed every chunk (any failures were per-chunk, not systemic).
-export type MarkAbortReason = 'timeout' | 'permanent' | 'transient' | null;
+// to retry, and the caller can say the run stopped short. `'request-shape'` — two
+// consecutive chunks were rejected with the SAME request-shape 4xx (400/422) and
+// nothing had synced, so the payload envelope itself is wrong: the run aborts (its
+// stopping chunk re-tagged `MARK_ABORTED`) but the daemon stays alive, since the
+// next pass may build a valid request. `null` — the run completed every chunk (any
+// failures were per-chunk, not systemic).
+export type MarkAbortReason =
+  'timeout' | 'permanent' | 'transient' | 'request-shape' | null;
 
 // Outcome of a whole bulk mark-synced run. `outcomes` holds one entry per
 // record in the ORIGINAL input order, so the caller can align each result back
-// to its record by index. On an abort (a timeout OR a systemic auth/rate-limit/
-// 5xx failure) it's shorter than the input: the chunk that aborted and every
-// chunk after it were never confirmed, so those trailing records have no outcome
-// and the caller treats them as still pending. `abortReason` records why (if) the
-// run stopped early, and in particular whether the caller should stop the daemon.
+// to its record by index. On an abort (a timeout, a systemic auth/rate-limit/
+// 5xx failure, or a repeated request-shape 4xx) it's shorter than the input: the
+// chunk that aborted and every chunk after it were never confirmed, so those
+// trailing records have no outcome and the caller treats them as still pending.
+// `abortReason` records why (if) the run stopped early — the caller words its
+// report from it and, in particular, stops the daemon only on `'permanent'`.
 export type MarkSyncedResult = {
   outcomes: MarkSyncedOutcome[];
   abortReason: MarkAbortReason;
@@ -467,17 +484,24 @@ const outcomesFromResponse = (
   );
 };
 
-// The result of PATCHing one chunk: a per-item outcome list plus whether (and
-// why) the run should stop. A non-null `abortReason` IS the abort signal (the
-// run stops on it, backing off rather than firing a burst it knows will fail)
-// and carries WHY:
-// `'timeout'` and `'permanent'` distinguish the hung-server and dead-token cases
-// (the latter also stops the daemon), and `'transient'` a systemic 429/5xx (aborts
-// this run, daemon lives). `null` is the plain success/per-chunk-failure case that
-// doesn't abort. One field, so "aborted" and "why" can never disagree.
+// The result of PATCHing one chunk, from the chunk's OWN perspective: a per-item
+// outcome list, why (if) the chunk failed in a way that bears on the run, and (for
+// a `'request-shape'` failure only) the server's error message. `abortReason`
+// carries WHY: `'timeout'` and `'permanent'` distinguish the hung-server and
+// dead-token cases (the latter also stops the daemon), `'transient'` a systemic
+// 429/5xx (aborts this run, daemon lives), and `'request-shape'` a 400/422 whose
+// envelope looks wrong. `'timeout' | 'permanent' | 'transient'` each doom every
+// remaining chunk, so `markRecordsSynced` aborts on them immediately; a lone
+// `'request-shape'` does NOT — the run aborts only once a SECOND consecutive chunk
+// is rejected with the SAME `message` (see `markRecordsSynced`), so `message` lets
+// the caller compare a categorical envelope rejection (same message twice) against
+// two isolated per-record rejections that only happen to both 4xx. `null` is the
+// plain success/per-chunk-failure case that doesn't abort. `message` is null for
+// every non-request-shape result.
 type MarkSyncedChunkResult = {
   outcomes: MarkSyncedOutcome[];
   abortReason: MarkAbortReason;
+  message: string | null;
 };
 
 // PATCHes one chunk (<= MAX_MARK_SYNCED_BATCH_SIZE records) synced in a single
@@ -489,18 +513,25 @@ type MarkSyncedChunkResult = {
 // is non-critical post-write bookkeeping (the files are already on disk), so a
 // failed chunk simply leaves its records `pending` to re-sync next run.
 //
-// A timeout maps every item to `MARK_TIMED_OUT` and aborts (a hung server would
-// burn the full request timeout on every remaining chunk). A systemic failure
-// (auth/rate-limit/5xx) also aborts — it will recur for every remaining chunk,
-// so the caller backs off rather than hammering a server that just rejected the
-// burst (the same rule the fetch helpers apply via `isSystemicApiFailure`). A
-// PERMANENT systemic failure (dead token / forbidden account: 401/403) aborts
-// with `abortReason: 'permanent'` so the caller additionally stops the autoSync
-// daemon, which can't clear it on retry (matching the delete path); a transient
-// systemic failure aborts with `'transient'` (the run stops to back off, but the
-// daemon lives). Any other (per-chunk) failure maps to `MARK_FAILED` without
-// aborting (`abortReason: null`) — a later chunk may still
-// succeed.
+// A timeout maps every item to `MARK_TIMED_OUT` and reports `abortReason:
+// 'timeout'` (a hung server would burn the full request timeout on every
+// remaining chunk). A PERMANENT systemic failure (dead token / forbidden account:
+// 401/403) maps every item to `MARK_FAILED` and reports `'permanent'` so the
+// caller aborts AND additionally stops the autoSync daemon, which can't clear it
+// on retry (matching the delete path). A transient systemic failure (rate-limit/
+// 5xx) reports `'transient'` — the caller aborts to back off rather than hammering
+// a server that just rejected the burst (the same rule the fetch helpers apply via
+// `isSystemicApiFailure`), but keeps the daemon alive. A request-shape 4xx (a
+// malformed-payload 400 or a contract-validation 422) maps every item to
+// `MARK_FAILED` and reports `'request-shape'` plus the server's error message: the
+// chunk was attempted and rejected, so its records are a plain failure UNLESS the
+// run actually aborts — `markRecordsSynced` aborts only on a SECOND consecutive
+// same-message rejection and re-tags just the chunk it stops on to `MARK_ABORTED`,
+// so a completed run never leaves a stray `MARK_ABORTED`. Any other (per-chunk)
+// failure maps to `MARK_FAILED` with `abortReason: null` — a later chunk may still
+// succeed. A 4xx delivered as an HTML error page (a WAF/proxy interstitial) throws
+// unparseable before it can be classified, so it degrades to that plain failure
+// rather than aborting on a misread status.
 const markSyncedChunk = async (
   items: MarkSyncedItem[],
   syncedAt: string,
@@ -526,6 +557,7 @@ const markSyncedChunk = async (
     return {
       outcomes: outcomesFromResponse(items, body),
       abortReason: null,
+      message: null,
     };
   } catch (error) {
     // Identify the chunk by its uuid range so a stderr reader can tell which
@@ -544,30 +576,62 @@ const markSyncedChunk = async (
       return {
         outcomes: items.map(() => MARK_TIMED_OUT),
         abortReason: 'timeout',
+        message: null,
       };
     }
 
     // Every failed record in the chunk stays `MARK_FAILED` (pending, retried next
-    // run). A non-null `abortReason` is what stops the run, so classification is
-    // the single source of the abort decision: a PERMANENT failure (dead token /
-    // forbidden account: 401/403) reports `'permanent'` and also stops the daemon;
-    // a transient systemic failure (rate-limit/5xx that may be a blip) reports
-    // `'transient'` to back off — a sustained 429 stops after the first chunk
-    // rather than firing the whole burst — but keeps the daemon alive; a plain
-    // per-chunk failure is `null` and doesn't abort, since a later chunk may
-    // still succeed.
+    // run); only the `abortReason` classification differs. A PERMANENT failure
+    // (dead token / forbidden account: 401/403) reports `'permanent'` and also
+    // stops the daemon. A transient systemic failure (rate-limit/5xx that may be a
+    // blip) reports `'transient'` to back off — a sustained 429 stops after the
+    // first chunk rather than firing the whole burst — but keeps the daemon alive.
+    // A request-shape 4xx (400/422) reports `'request-shape'` plus the server's
+    // message so the caller can abort only on a SECOND consecutive same-message
+    // rejection. A plain per-chunk failure is `null` and doesn't abort, since a
+    // later chunk may still succeed.
     const failedOutcomes: MarkSyncedOutcome[] = items.map(() => MARK_FAILED);
 
     if (isPermanentApiFailure(error)) {
-      return { outcomes: failedOutcomes, abortReason: 'permanent' };
+      return {
+        outcomes: failedOutcomes,
+        abortReason: 'permanent',
+        message: null,
+      };
     }
 
     if (isSystemicApiFailure(error)) {
-      return { outcomes: failedOutcomes, abortReason: 'transient' };
+      return {
+        outcomes: failedOutcomes,
+        abortReason: 'transient',
+        message: null,
+      };
     }
 
-    return { outcomes: failedOutcomes, abortReason: null };
+    if (isFatalRequestError(error)) {
+      return {
+        outcomes: failedOutcomes,
+        abortReason: 'request-shape',
+        message: error.message,
+      };
+    }
+
+    return { outcomes: failedOutcomes, abortReason: null, message: null };
   }
+};
+
+// Re-tag the final `count` outcomes as `MARK_ABORTED` — the chunk whose repeated
+// request-shape rejection actually stopped the run. Returns a new array so the
+// caller stays free of in-place mutation; earlier outcomes are untouched.
+const withAbortedTail = (
+  outcomes: MarkSyncedOutcome[],
+  count: number,
+): MarkSyncedOutcome[] => {
+  const firstAbortedIndex = outcomes.length - count;
+
+  return outcomes.map((outcome, index) =>
+    index >= firstAbortedIndex ? MARK_ABORTED : outcome,
+  );
 };
 
 // Marks written records synced after the CLI has written them to disk, via
@@ -585,18 +649,28 @@ const markSyncedChunk = async (
 // is already few enough that firing them serially keeps the burst small without
 // a concurrency limiter.
 //
-// Returns one outcome per record in input order. A timeout or a systemic
-// failure (auth/rate-limit/5xx) stops the run at that chunk rather than firing a
-// burst that's already doomed; the trailing records get no outcome and stay
-// `pending` (their outcome index is `undefined`, which the caller reads as
-// not-synced). A plain per-chunk failure doesn't abort — a later chunk may still
-// succeed. `abortReason` carries why (if) the run stopped early, and whether the
-// caller should also stop the autoSync daemon (see `MarkAbortReason`).
+// Returns one outcome per record in input order. A timeout or a systemic failure
+// (auth/rate-limit/5xx) stops the run at that chunk rather than firing a burst
+// that's already doomed. A request-shape 4xx (a 400/422) stops the run only once
+// a SECOND chunk is rejected with the SAME error message and nothing has synced
+// yet: the CLI builds every chunk's payload identically, so two chunks failing
+// the same categorical way is strong evidence the envelope shape itself is wrong.
+// A lone rejection, two rejections with DIFFERENT messages (which look like two
+// isolated per-record problems, not one envelope fault), or any rejection after a
+// success (a success proves the shape valid) all keep the run going rather than
+// strand syncable records behind an unconfirmed abort. On any stop the trailing
+// records get no outcome and stay `pending` (their outcome index is `undefined`,
+// which the caller reads as not-synced). A plain per-chunk failure doesn't abort —
+// a later chunk may still succeed. `abortReason` carries why (if) the run stopped
+// early — the caller words its report from it and stops the autoSync daemon only
+// on `'permanent'` (see `MarkAbortReason`).
 export const markRecordsSynced = async (
   items: MarkSyncedItem[],
   syncedAt: string = new Date().toISOString(),
 ): Promise<MarkSyncedResult> => {
   const outcomes: MarkSyncedOutcome[] = [];
+  let anySynced = false;
+  let lastRequestShapeMessage: string | null = null;
 
   for (
     let start = 0;
@@ -604,15 +678,51 @@ export const markRecordsSynced = async (
     start += MAX_MARK_SYNCED_BATCH_SIZE
   ) {
     const chunk = items.slice(start, start + MAX_MARK_SYNCED_BATCH_SIZE);
-    const chunkResult = await markSyncedChunk(chunk, syncedAt);
+    const {
+      outcomes: chunkOutcomes,
+      abortReason,
+      message,
+    } = await markSyncedChunk(chunk, syncedAt);
 
-    outcomes.push(...chunkResult.outcomes);
+    outcomes.push(...chunkOutcomes);
+    anySynced = anySynced || chunkOutcomes.includes(MARK_SYNCED);
 
-    // A non-null reason is the abort signal: stop here and surface why, leaving
-    // the trailing chunks unsent (their records get no outcome, read as pending).
-    if (chunkResult.abortReason !== null) {
-      return { outcomes, abortReason: chunkResult.abortReason };
+    // A timeout or a systemic failure (permanent or transient) dooms every
+    // remaining chunk, so abort here and surface why, leaving the trailing chunks
+    // unsent (their records get no outcome, read as pending). Only `'permanent'`
+    // additionally stops the daemon; that decision lives in the caller.
+    if (
+      abortReason === 'timeout' ||
+      abortReason === 'permanent' ||
+      abortReason === 'transient'
+    ) {
+      return { outcomes, abortReason };
     }
+
+    if (abortReason !== 'request-shape') {
+      // Reset so the match below stays CONSECUTIVE: a clean or plain-failure
+      // chunk between two identical rejections breaks the "envelope is wrong"
+      // evidence, so it must not count toward the two-in-a-row abort.
+      lastRequestShapeMessage = null;
+      continue;
+    }
+
+    // Abort only once a SECOND consecutive request-shape rejection carries the
+    // SAME message, and only while nothing has synced — matching messages across
+    // two independently-built chunks is what marks the failure as envelope-level
+    // (categorical) rather than two isolated per-record rejections, and a success
+    // would have proven the shape valid. Re-tag this stopping chunk's records
+    // `MARK_ABORTED` (they were `MARK_FAILED` until now) so the outcome reflects
+    // that the run stopped here, while the earlier chunks it ran past stay
+    // `MARK_FAILED`.
+    if (!anySynced && message !== null && message === lastRequestShapeMessage) {
+      return {
+        outcomes: withAbortedTail(outcomes, chunkOutcomes.length),
+        abortReason: 'request-shape',
+      };
+    }
+
+    lastRequestShapeMessage = message;
   }
 
   return { outcomes, abortReason: null };

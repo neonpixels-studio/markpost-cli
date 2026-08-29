@@ -20,9 +20,9 @@ server-side records.
 | Command | Description |
 |---|---|
 | `markpost sync [--dry-run]` | Fetch all pending records, write each to a markdown file, and (when `autoDelete` is enabled) delete the written records from the server. `--dry-run` reports the exact write/delete plan without writing or mutating anything |
-| `markpost push <path...>` | Create records from one or more markdown files, directories, or glob patterns |
+| `markpost push [--dry-run] <path...>` | Create records from one or more markdown files, directories, or glob patterns. `--dry-run` reports which files would be pushed, plus any missing or unreadable inputs, without creating any records |
 | `markpost get <uuid> [--json]` | Fetch and display a single record; pass `--json` for machine-readable output |
-| `markpost sources <list\|create\|update\|delete\|rotate-secret> [uuid]` | Manage sources; `sources list --json` prints machine-readable output. `rotate-secret [uuid]` mints/replaces the signing secret of a provider source (github/zapier/shortcuts reveal a fresh secret once; stripe prompts for the new value) |
+| `markpost sources <list\|create\|update\|delete\|rotate-secret> [uuid] [--yes]` | Manage sources; `sources list --json` prints machine-readable output. `sources delete` asks to confirm first (deleting a source is irreversible — it drops the ingest config and one-time signing secret) and needs an interactive terminal; in scripts pass a uuid with `--yes` (`sources delete <uuid> --yes`) to skip the prompt. `rotate-secret [uuid]` mints/replaces the signing secret of a provider source (github/zapier/shortcuts reveal a fresh secret once; stripe prompts for the new value) |
 | `markpost records list [--source <type>] [--status <status>] [--search <text>] [--json]` | List records without deleting them, optionally filtered by source, status, or search text; pass `--json` for machine-readable output |
 | `markpost config <get\|set\|path> [key] [value]` | View or change the stored API token and output directory |
 | `markpost settings <get\|set> [key=value ...]` | View or change server-side sync settings (`autoSync`, `autoDelete`, `frontmatter`, `conflictStrategy`) |

@@ -5,6 +5,7 @@ import { Record } from '@/types/records.types.js';
 import { UserSettings, ConflictStrategy } from '@/types/settings.types.js';
 import { SettingsReadResult } from '@/libs/settings.js';
 import {
+  MARK_ABORTED,
   MARK_FAILED,
   MARK_SYNCED,
   MARK_TIMED_OUT,
@@ -82,9 +83,9 @@ const mockRecord: Record = {
 // `markResultBy` maps each item's uuid to an outcome; `markResultAll` is the
 // common "every record shares one outcome" shorthand. Both always report every
 // record attempted (`abortReason: null`, full-length outcomes) — an abort produces
-// a SHORTER outcomes array, so timeout/permanent-abort cases use an explicit
-// `mockResolvedValue({ outcomes: [...], abortReason: 'timeout' | 'permanent' })`
-// instead of these.
+// a SHORTER outcomes array, so timeout/permanent/request-shape abort cases use an
+// explicit `mockResolvedValue({ outcomes: [...], abortReason: 'timeout' |
+// 'permanent' | 'request-shape' })` instead of these.
 const markResultBy =
   (outcomeFor: (uuid: string) => MarkSyncedOutcome) =>
   async (
@@ -1331,6 +1332,159 @@ describe('index', () => {
     );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Marked 1 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('uses the abort wording when a request-shape 4xx stops the run', async () => {
+    const records: Record[] = Array.from({ length: 3 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordsSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // uuid-0 synced, uuid-1's chunk was rejected as a request-shape 4xx (abort),
+    // uuid-2 never attempted (no outcome) — the short outcomes array models the
+    // real abort, and abortReason drives the abort-specific headline.
+    vi.mocked(markRecordsSynced).mockResolvedValue({
+      outcomes: [MARK_SYNCED, MARK_ABORTED],
+      abortReason: 'request-shape',
+    });
+
+    await import('@/index.js');
+
+    // Rejected uuid-1 plus the never-attempted uuid-2 = two pending.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('2 record(s) still pending'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    // The abort headline must not read as a timeout or a plain scatter of
+    // failures — guards the reason wiring.
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Timed out marking records synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-1 -> /mock/output/uuid-1.md'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('! uuid-2 -> /mock/output/uuid-2.md'),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Marked 1 record(s) synced despite'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('omits the not-attempted clause when the abort left nothing unattempted', async () => {
+    const records: Record[] = Array.from({ length: 2 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordsSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // Both records have an outcome (the abort landed on the last chunk), so there
+    // is no un-attempted tail — the headline must not claim "the rest were not
+    // attempted."
+    vi.mocked(markRecordsSynced).mockResolvedValue({
+      outcomes: [MARK_ABORTED, MARK_ABORTED],
+      abortReason: 'request-shape',
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Aborted marking records synced'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('the rest were not attempted'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('notes never-attempted records when a systemic stop ends the run early', async () => {
+    const records: Record[] = Array.from({ length: 3 }, (_item, index) => ({
+      uuid: `uuid-${index}`,
+      title: `Title ${index}`,
+      content: `Content ${index}`,
+      createdAt: '2024-01-01T00:00:00Z',
+    }));
+    const { fetchAllRecords, markRecordsSynced } = await import(
+      '@/libs/records.js'
+    );
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records,
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record: Record) => `/mock/output/${record.uuid}.md`,
+    );
+    // A transient systemic abort (rate-limit/5xx) stops early: only uuid-0 was
+    // attempted, so uuid-1 and uuid-2 were never sent and the transient headline
+    // must say some were skipped.
+    vi.mocked(markRecordsSynced).mockResolvedValue({
+      outcomes: [MARK_FAILED],
+      abortReason: 'transient',
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mark 3 record(s) synced'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('so some were never attempted'),
     );
     expect(process.exitCode).toBe(1);
   });
