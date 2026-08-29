@@ -16,6 +16,7 @@ vi.mock('@inquirer/prompts', () => ({
   input: vi.fn(),
   password: vi.fn(),
   select: vi.fn(),
+  confirm: vi.fn(),
 }));
 vi.mock('chalk', () => ({
   default: {
@@ -106,16 +107,26 @@ describe('buildEndpointUrl', () => {
 });
 
 describe('runSourcesCommand', () => {
+  // `sources delete` now refuses to prompt without an interactive terminal
+  // (both stdin and stdout must be TTYs), so simulate one by default; the
+  // non-TTY guards have their own cases below.
+  const originalStdinIsTTY = process.stdin.isTTY;
+  const originalStdoutIsTTY = process.stdout.isTTY;
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
     process.exitCode = undefined;
+    process.stdin.isTTY = true;
+    process.stdout.isTTY = true;
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.exitCode = undefined;
+    process.stdin.isTTY = originalStdinIsTTY;
+    process.stdout.isTTY = originalStdoutIsTTY;
   });
 
   it('always checks config before dispatching', async () => {
@@ -710,50 +721,375 @@ describe('runSourcesCommand', () => {
   });
 
   describe('delete', () => {
-    it('deletes directly by uuid when one is provided', async () => {
-      const { deleteSource } = await import('@/libs/sources.js');
+    it('deletes directly by uuid when one is provided and confirmed', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
-      const { select } = await import('@inquirer/prompts');
+      const { select, confirm } = await import('@inquirer/prompts');
+      vi.mocked(confirm).mockResolvedValue(true);
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
+      expect(confirm).toHaveBeenCalledTimes(1);
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
       expect(select).not.toHaveBeenCalled();
     });
 
-    it('prompts to pick a source when no uuid is given', async () => {
+    it('prompts to pick a source when no uuid is given, then confirms', async () => {
       const { fetchSources, deleteSource } = await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
-      const { select } = await import('@inquirer/prompts');
+      const { select, confirm } = await import('@inquirer/prompts');
       vi.mocked(select).mockResolvedValue('abc-123');
+      vi.mocked(confirm).mockResolvedValue(true);
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
       await runSourcesCommand(['delete']);
 
+      expect(deleteSource).toHaveBeenCalledWith('abc-123');
+    });
+
+    // An empty-string uuid is falsy like an absent one, so it must open the
+    // picker and honor the selection — not open the picker and then silently
+    // discard the pick on the `!targetUuid` guard (the `??`-vs-`||` trap).
+    it('falls through to the picker for an empty-string uuid and deletes the pick', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { select, confirm } = await import('@inquirer/prompts');
+      vi.mocked(select).mockResolvedValue('abc-123');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', '']);
+
+      expect(select).toHaveBeenCalledTimes(1);
+      expect(deleteSource).toHaveBeenCalledWith('abc-123');
+    });
+
+    // The confirmation is the whole point of the feature: a "no" answer must
+    // abort before any DELETE reaches the server.
+    it('aborts without deleting when the confirmation is declined', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      const { confirm } = await import('@inquirer/prompts');
+      vi.mocked(confirm).mockResolvedValue(false);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith('Deletion cancelled.');
+      // A user "no" is a clean abort, not a failure — must not exit non-zero.
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    // The confirm message must name the source being deleted so the user knows
+    // what they're destroying, and warn that it's irreversible.
+    it('shows the uuid and an irreversible-warning in the confirmation prompt', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { confirm } = await import('@inquirer/prompts');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('abc-123'),
+          default: false,
+        }),
+      );
+      expect(vi.mocked(confirm).mock.calls[0][0].message).toContain(
+        'cannot be undone',
+      );
+    });
+
+    // The direct-uuid path looks the source up (like update does) so a valid
+    // but wrong copy-pasted uuid shows its real name for the user to catch,
+    // rather than echoing back the string they typed.
+    it('names the looked-up source on the direct-uuid path', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { confirm } = await import('@inquirer/prompts');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(vi.mocked(confirm).mock.calls[0][0].message).toContain(
+        'Webhook Source',
+      );
+    });
+
+    // A lookup that can't resolve the uuid (e.g. fetchSources swallowed a
+    // transport error into []) must still confirm on the bare uuid — and flag
+    // the miss so it isn't mistaken for a matched source — never block delete.
+    it('flags the miss in the label when the source lookup finds nothing', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([]);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { confirm } = await import('@inquirer/prompts');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      const message = vi.mocked(confirm).mock.calls[0][0].message;
+      expect(message).toContain('abc-123');
+      expect(message).toContain('no matching source found');
+      expect(deleteSource).toHaveBeenCalledWith('abc-123');
+    });
+
+    // The label lookup is cosmetic: a timeout (which fetchSources re-throws, not
+    // swallows) must not abort a delete that issued no such read before this
+    // change. It falls back to the bare uuid, says the name is unavailable (not
+    // that the source is missing), and still confirms + deletes.
+    it('still confirms and deletes when the label lookup times out', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const timeoutError = Object.assign(new Error('timed out'), {
+        name: 'ApiTimeoutError',
+      });
+      vi.mocked(fetchSources).mockRejectedValue(timeoutError);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { confirm } = await import('@inquirer/prompts');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(confirm).toHaveBeenCalledTimes(1);
+      const message = vi.mocked(confirm).mock.calls[0][0].message;
+      expect(message).toContain('abc-123');
+      // A failed load must not be reported as a confirmed non-match.
+      expect(message).not.toContain('no matching source found');
+      expect(message).toContain('could not load the list');
+      expect(deleteSource).toHaveBeenCalledWith('abc-123');
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    // A hostile source name/uuid surfaced through the picker must be stripped
+    // before it reaches the confirm prompt, same as every other printed field.
+    it('sanitizes the uuid in the confirmation prompt', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, uuid: `abc${control}123` },
+      ]);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { select, confirm } = await import('@inquirer/prompts');
+      vi.mocked(select).mockResolvedValue(`abc${control}123`);
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete']);
+
+      expect(vi.mocked(confirm).mock.calls[0][0].message).not.toContain(
+        control,
+      );
+      expect(vi.mocked(confirm).mock.calls[0][0].message).toContain('abc 123');
+    });
+
+    // The scripting escape hatch: --yes deletes straight away with no prompt
+    // and no label lookup (the short-circuit must skip fetchSources entirely).
+    it('skips the confirmation and the label lookup when --yes is passed', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { confirm } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123', '--yes']);
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(deleteSource).toHaveBeenCalledWith('abc-123');
+    });
+
+    // A Ctrl+C at the confirmation is a deliberate abort: it must delete
+    // nothing, exit 0, and stay quiet — never fall through to the DELETE.
+    it('aborts cleanly without deleting when the confirmation is Ctrl+C-ed', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      const { confirm } = await import('@inquirer/prompts');
+      const exitPromptError = Object.assign(new Error('User force closed'), {
+        name: 'ExitPromptError',
+      });
+      vi.mocked(confirm).mockRejectedValue(exitPromptError);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+      expect(console.error).not.toHaveBeenCalled();
+    });
+
+    // The interactive confirmation names the picked source so the user can
+    // recognize it, not just the opaque uuid they never typed.
+    it('names the picked source in the confirmation prompt', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { select, confirm } = await import('@inquirer/prompts');
+      vi.mocked(select).mockResolvedValue('abc-123');
+      vi.mocked(confirm).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete']);
+
+      const message = vi.mocked(confirm).mock.calls[0][0].message;
+      expect(message).toContain('Webhook Source');
+      expect(message).toContain('abc-123');
+    });
+
+    // --yes is meaningless outside delete; it must fail loudly like a misplaced
+    // --json rather than appearing to take effect.
+    it('rejects --yes on a non-delete subcommand', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--yes']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--yes is only supported by `sources delete`.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // The guard is shared, but assert create and update hit it *before*
+    // dispatch (no prompts, no API calls) so a future reorder that moves it
+    // below dispatch can't slip past on the exit code alone.
+    it('rejects --yes on create before dispatching', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { createSource } = await import('@/libs/sources.js');
+      const { select } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create', '--yes']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
+      expect(createSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --yes on update before dispatching', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', '--yes']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    // --yes promises a non-interactive delete, so with no uuid it must fail
+    // rather than open the picker a script can't answer.
+    it('rejects --yes without a uuid instead of opening the picker', async () => {
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { select } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', '--yes']);
+
+      expect(select).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--yes requires a uuid'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Without a TTY the prompt can't be answered and inquirer's abort is
+    // swallowed as Ctrl+C, so a bare non-interactive delete must fail loud
+    // rather than silently delete nothing and exit 0.
+    it('fails loudly on a non-TTY stdin delete when --yes is absent', async () => {
+      process.stdin.isTTY = false;
+      const { deleteSource } = await import('@/libs/sources.js');
+      const { confirm } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('needs an interactive terminal'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Redirected stdout (`sources delete <uuid> > log`) leaves stdin a TTY but
+    // hides the prompt inquirer renders to stdout — same hang, so it must fail
+    // the same way.
+    it('fails loudly on a redirected-stdout delete when --yes is absent', async () => {
+      process.stdout.isTTY = false;
+      const { deleteSource } = await import('@/libs/sources.js');
+      const { confirm } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123']);
+
+      expect(confirm).not.toHaveBeenCalled();
+      expect(deleteSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('needs an interactive terminal'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // The scripting path: --yes with a uuid deletes on a non-TTY, no prompt.
+    it('deletes on a non-TTY when a uuid and --yes are given', async () => {
+      process.stdin.isTTY = false;
+      const { deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
+      const { confirm } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['delete', 'abc-123', '--yes']);
+
+      expect(confirm).not.toHaveBeenCalled();
       expect(deleteSource).toHaveBeenCalledWith('abc-123');
     });
 
     it('does nothing when there are no sources to pick from', async () => {
       const { fetchSources, deleteSource } = await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
+      const { confirm } = await import('@inquirer/prompts');
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
       await runSourcesCommand(['delete']);
 
       expect(deleteSource).not.toHaveBeenCalled();
+      expect(confirm).not.toHaveBeenCalled();
       expect(console.log).toHaveBeenCalledWith('No sources to delete.');
     });
 
     it('reports an error when deletion fails', async () => {
-      const { deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue(null);
+      const { confirm } = await import('@inquirer/prompts');
+      vi.mocked(confirm).mockResolvedValue(true);
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
       expect(console.error).toHaveBeenCalledWith('Failed to delete source.');
+      // A failed delete must exit non-zero so a scripted `delete --yes || …`
+      // catches it instead of reading the non-delete as success.
+      expect(process.exitCode).toBe(1);
     });
   });
 
