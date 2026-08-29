@@ -124,6 +124,15 @@ const AUTH_STATUS_CODES = [401, 403];
 // A rate-limit response will keep rejecting the whole burst, so a bulk caller
 // should back off rather than keep firing requests that make it worse.
 const RATE_LIMIT_STATUS_CODES = [429];
+// Request-shape failures: a malformed payload (400) or an off-contract
+// validation rejection (422, e.g. markpost tightening the PATCH attributes it
+// accepts). When every record in a batch is built the same way, such a failure
+// recurs identically for all of them, so a bulk caller can abort rather than
+// retry each doomed request. A per-record 4xx (a 404 for a record deleted
+// mid-run, a 422 on one record's own value) and a transient 429 are deliberately
+// excluded — the caller confirms the whole batch agreed before treating it as
+// request-shape.
+const FATAL_REQUEST_STATUS_CODES = [400, 422];
 // Any 5xx is a server-side fault, not something the caller's payload can fix.
 const SERVER_ERROR_MIN_STATUS = 500;
 
@@ -152,6 +161,15 @@ export class ApiRequestError extends Error {
     return this.statusCode >= SERVER_ERROR_MIN_STATUS;
   }
 
+  // A request-shape 4xx (400/422) that recurs identically for every record built
+  // the same way — the request the caller constructed is wrong, so firing the
+  // rest of a batch just repeats the same failure. Excludes per-record 4xx (a
+  // 404 for a record deleted mid-run) and the transient 429, which don't doom
+  // the batch.
+  get isFatalRequest(): boolean {
+    return FATAL_REQUEST_STATUS_CODES.includes(this.statusCode);
+  }
+
   // Systemic = will recur for every other request too, so a bulk caller should
   // stop rather than fire N requests it already knows are doomed.
   get isSystemic(): boolean {
@@ -175,6 +193,15 @@ export const isSystemicApiFailure = (
   error: unknown,
 ): error is ApiRequestError =>
   error instanceof ApiRequestError && error.isSystemic;
+
+// Narrowing guard: true only for a request-shape `ApiRequestError` (a 400/422
+// rejection — NOT a per-record 404, an auth 401/403, or a transient 429). Lets a
+// bulk caller TAG the outcome so it can decide, after seeing a SECOND chunk agree
+// with nothing synced, whether the request shape itself is wrong (see
+// `markRecordsSynced`). It does not itself mean "abort now" — a lone 400/422 can
+// still be an isolated rejection.
+export const isFatalRequestError = (error: unknown): error is ApiRequestError =>
+  error instanceof ApiRequestError && error.isFatalRequest;
 
 // Labels the failure by kind so the classification stays inside the API layer
 // instead of leaking status-code logic into command code. Falls back to a

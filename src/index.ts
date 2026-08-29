@@ -4,8 +4,11 @@ import {
   deleteRecords,
   fetchAllRecords,
   markRecordsSynced,
+  MARK_ABORTED,
   MARK_SYNCED,
+  MARK_TIMED_OUT,
   MarkSyncedItem,
+  MarkSyncedStop,
   PENDING_STATUS,
 } from '@/libs/records.js';
 import { describeApiError, isSystemicApiFailure } from '@/libs/api.js';
@@ -423,7 +426,7 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
 
 // Projects each written record down to the `{ uuid, filePath }` shape the bulk
 // mark-synced call needs, preserving order so the returned outcomes stay aligned
-// to `writtenRecords` by index. Chunking and the stop-on-timeout abort live in
+// to `writtenRecords` by index. Chunking and the stop-on-abort logic live in
 // `markRecordsSynced` (the records lib), keeping the API surface isolated there.
 function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   return writtenRecords.map(({ record, filePath }) => ({
@@ -432,16 +435,44 @@ function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   }));
 }
 
-// Headline for the mark-synced failure report. A timeout abort reads
-// differently from a scatter of per-record failures: it stopped the run early,
-// so the count includes records never attempted. Both leave the listed records
-// pending on the server.
-function markFailureHeadline(pendingCount: number, timedOut: boolean): string {
-  if (timedOut) {
-    return `Timed out marking records synced — stopped after the batch that first timed out; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+// How a mark-synced run ended, for the failure report: the stop reason plus how
+// many pending records the run never reached. Bundled because they're only ever
+// meaningful together (the abort description), so the headline can't be handed a
+// count that belongs to a different reason.
+type MarkStopReport = {
+  reason: MarkSyncedStop;
+  unattemptedCount: number;
+};
+
+// Headline for the mark-synced failure report. An abort reads differently from a
+// scatter of per-record failures: it stopped the run early, so the pending count
+// can fold in records never attempted after the abort. `unattemptedCount` is how
+// many of those pending records were never sent (the chunks after the stop), so
+// the abort wording only claims "the rest were not attempted" when that's true —
+// an abort on the final chunk leaves nothing unattempted. All cases leave the
+// listed records pending on the server.
+function markFailureHeadline(
+  pendingCount: number,
+  stop: MarkStopReport,
+): string {
+  if (stop.reason === MARK_TIMED_OUT) {
+    return `Timed out marking records synced — stopped after the first timeout; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
-  return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server; they may be re-written next run.`;
+  if (stop.reason === MARK_ABORTED) {
+    const notAttemptedClause =
+      stop.unattemptedCount > 0 ? ' and the rest were not attempted' : '';
+    return `Aborted marking records synced — the server rejected the request wholesale (a 400/422), so every record would fail the same way${notAttemptedClause}; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
+  }
+
+  // The generic branch also covers a systemic abort (auth/rate-limit/5xx), which
+  // stops the run early with no distinct stop reason — so surface how many of the
+  // pending records were never sent rather than implying all N were attempted.
+  const neverAttemptedClause =
+    stop.unattemptedCount > 0
+      ? ` (${stop.unattemptedCount} never attempted — the run stopped early)`
+      : '';
+  return `Failed to mark ${pendingCount} record(s) synced — written locally but still pending on the server${neverAttemptedClause}; they may be re-written next run.`;
 }
 
 // Surfaces mark-synced failures loudly (never as success): an unmarked record
@@ -451,10 +482,10 @@ function markFailureHeadline(pendingCount: number, timedOut: boolean): string {
 function reportMarkFailures(
   failures: WrittenRecord[],
   markedCount: number,
-  timedOut: boolean,
+  stop: MarkStopReport,
   spinner: Spinner,
 ): void {
-  spinner.error(markFailureHeadline(failures.length, timedOut));
+  spinner.error(markFailureHeadline(failures.length, stop));
   failures.forEach(({ record, filePath }) => {
     // Sanitize the composed line: record.uuid comes from the same untrusted API
     // response as a title, and filePath embeds the user-configured output path —
@@ -502,14 +533,15 @@ async function markWrittenRecordsSynced(
 
   spinner.start('Marking records synced...');
 
-  const { outcomes, timedOut } = await markRecordsSynced(
+  const { outcomes, stoppedBy } = await markRecordsSynced(
     toMarkSyncedItems(writtenRecords),
   );
   // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
   // pending if its mark failed or was never attempted (its outcome is undefined
-  // because a timeout aborted the run before its batch). Evict settled records
-  // from the written-path map so a long-running autoSync daemon doesn't leak
-  // memory — the "settled" half of the written-vs-settled split.
+  // because an abort — a timeout, a systemic failure, or a request-shape 4xx —
+  // stopped the run before its chunk). Evict settled records from the written-
+  // path map so a long-running autoSync daemon doesn't leak memory — the
+  // "settled" half of the written-vs-settled split.
   const settled = writtenRecords.filter(
     (_written, index) => outcomes[index] === MARK_SYNCED,
   );
@@ -523,10 +555,13 @@ async function markWrittenRecordsSynced(
   );
 
   if (pending.length > 0) {
+    // Records the run never reached: an abort/timeout stops before later chunks,
+    // so their outcome index is undefined and they have no per-record outcome.
+    const unattemptedCount = writtenRecords.length - outcomes.length;
     reportMarkFailures(
       pending,
       writtenRecords.length - pending.length,
-      timedOut,
+      { reason: stoppedBy, unattemptedCount },
       spinner,
     );
     return;
