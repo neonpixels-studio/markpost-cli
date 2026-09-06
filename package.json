@@ -6,6 +6,9 @@
   "bin": {
     "markpost": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -19,6 +22,8 @@
     "lint": "prettier --check ./src && eslint ./src",
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
     "prepare": "husky",
+    "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && npm run build",
+    "postpack": "node -e \"require('node:fs').accessSync('dist/index.js')\"",
     "sync:contract": "node scripts/sync-contract.mjs",
     "sync:markdown-serialization": "node scripts/sync-markdown-serialization.mjs"
   },
