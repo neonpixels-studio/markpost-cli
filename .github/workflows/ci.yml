@@ -20,4 +20,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:ci
       - run: npm run build
-      - run: node dist/index.js --help
+      - run: node dist/index.js --help | grep -q 'Usage: markpost <command>'
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/markpost-config
