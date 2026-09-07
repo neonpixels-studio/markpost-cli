@@ -565,6 +565,44 @@ describe('runSourcesCommand', () => {
         expect.stringContaining('Failed to create source.'),
       );
     });
+
+    // `create` always prompts (type, name, folder, provider) with no --yes-like
+    // escape hatch, so a non-TTY invocation must fail loud instead of hanging on
+    // the first unanswerable prompt — same guard shape as delete's non-TTY
+    // cases below.
+    it('fails loudly on a non-TTY stdin create instead of hanging on the first prompt', async () => {
+      process.stdin.isTTY = false;
+      const { select } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      expect(select).not.toHaveBeenCalled();
+      expect(createSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('needs an interactive terminal'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Redirected stdout hides everything inquirer renders even with a TTY
+    // stdin, so it must be rejected the same way as a non-TTY stdin.
+    it('fails loudly on a redirected-stdout create instead of hanging on the first prompt', async () => {
+      process.stdout.isTTY = false;
+      const { select } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      expect(select).not.toHaveBeenCalled();
+      expect(createSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('needs an interactive terminal'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
   });
 
   describe('update', () => {
@@ -717,6 +755,65 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['update', 'abc-123']);
 
       expect(console.error).toHaveBeenCalledWith('Failed to update source.');
+    });
+
+    // Without a uuid, `update` opens the interactive picker; on a non-TTY
+    // stdin that picker can't render an answerable prompt, so it must fail
+    // loud instead of hanging — same guard shape as delete's non-TTY cases.
+    it('fails loudly on a non-TTY stdin update with no uuid instead of opening the picker', async () => {
+      process.stdin.isTTY = false;
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { select } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('needs an interactive terminal'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Redirected stdout hides the picker even with a TTY stdin, so a bare
+    // `update` piped to a file must be rejected the same way.
+    it('fails loudly on a redirected-stdout update with no uuid instead of opening the picker', async () => {
+      process.stdout.isTTY = false;
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { select } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('needs an interactive terminal'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Even with an explicit uuid, `update` still ends by prompting for the
+    // route folder — the same unanswerable-prompt hang, just reached via the
+    // direct-uuid path instead of the picker.
+    it('fails loudly on a non-TTY update with an explicit uuid instead of hanging on the route-folder prompt', async () => {
+      process.stdin.isTTY = false;
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(input).not.toHaveBeenCalled();
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('needs an interactive terminal'),
+      );
+      expect(process.exitCode).toBe(1);
     });
   });
 
@@ -1095,9 +1192,8 @@ describe('runSourcesCommand', () => {
 
   describe('rotate-secret', () => {
     it('rotates by uuid for a generated provider and reveals the new secret once', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(rotateSourceSecret).mockResolvedValue({
         ...githubSource,
@@ -1123,9 +1219,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('prompts (masked) for the new secret and sends it for a manual-secret provider', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       const { password } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
       vi.mocked(password).mockResolvedValueOnce('whsec_pasted_stripe');
@@ -1159,9 +1254,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('does not raise the missing-secret alarm for a manual provider (its response has none)', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       const { password } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
       vi.mocked(password).mockResolvedValueOnce('whsec_pasted_stripe');
@@ -1183,9 +1277,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('aborts without calling the API when a manual secret is left blank', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       const { password } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
       vi.mocked(password).mockResolvedValueOnce('   ');
@@ -1200,9 +1293,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('refuses a source with no rotatable secret and skips the API call', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
@@ -1215,9 +1307,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports not-found when the uuid does not match any source', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
@@ -1230,9 +1321,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('offers only rotatable sources in the interactive picker', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([
         webhookSource,
@@ -1250,18 +1340,15 @@ describe('runSourcesCommand', () => {
 
       expect(select).toHaveBeenCalledWith(
         expect.objectContaining({
-          choices: [
-            expect.objectContaining({ value: 'ghi-789' }),
-          ],
+          choices: [expect.objectContaining({ value: 'ghi-789' })],
         }),
       );
       expect(rotateSourceSecret).toHaveBeenCalledWith('ghi-789', {});
     });
 
     it('explains rotate-secret needs a provider source when only non-rotatable sources exist', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource, emailSource]);
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
@@ -1288,9 +1375,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('warns when a generated rotation succeeds but the response omits the secret', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       // Server rotated the secret (old one now dead) but returned no plaintext.
       vi.mocked(rotateSourceSecret).mockResolvedValue({
@@ -1308,9 +1394,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports an error when the rotation fails', async () => {
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(rotateSourceSecret).mockResolvedValue(null);
       const { runSourcesCommand } = await import('@/commands/sources.js');
@@ -1327,9 +1412,8 @@ describe('runSourcesCommand', () => {
 
     it('strips control characters from a hostile rotated secret before printing', async () => {
       const control = String.fromCharCode(0x1b);
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(rotateSourceSecret).mockResolvedValue({
         ...githubSource,
@@ -1354,9 +1438,8 @@ describe('runSourcesCommand', () => {
     // --json before doing anything — a `| jq` pipeline would lose the secret.
     it('rejects --json on rotate-secret before prompting or calling the API', async () => {
       const { checkConfig } = await import('@/libs/config.js');
-      const { fetchSources, rotateSourceSecret } = await import(
-        '@/libs/sources.js'
-      );
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
       const { runSourcesCommand } = await import('@/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', '--json']);

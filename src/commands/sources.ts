@@ -55,6 +55,8 @@ export const buildEndpointUrl = (
 // Only `list` renders JSON; the other subcommands are interactive or emit a
 // one-off result, so --json means nothing to them.
 const LIST_SUBCOMMAND = 'list';
+const CREATE_SUBCOMMAND = 'create';
+const UPDATE_SUBCOMMAND = 'update';
 // `delete` is the only subcommand `--yes` applies to, so it's named for the
 // guard that rejects the flag elsewhere as well as its handler-map key.
 const DELETE_SUBCOMMAND = 'delete';
@@ -68,14 +70,46 @@ const SOURCES_HANDLERS = new Map<
   ) => Promise<void>
 >([
   [LIST_SUBCOMMAND, (_uuid, json) => listSources(json)],
-  ['create', () => createSourceCommand()],
-  ['update', (uuid) => updateSourceCommand(uuid)],
+  [CREATE_SUBCOMMAND, () => createSourceCommand()],
+  [UPDATE_SUBCOMMAND, (uuid) => updateSourceCommand(uuid)],
   [
     DELETE_SUBCOMMAND,
     (uuid, _json, skipConfirm) => deleteSourceCommand(uuid, skipConfirm),
   ],
   ['rotate-secret', (uuid) => rotateSecretCommand(uuid)],
 ]);
+
+// The message for the one subcommand (if any) that `subcommand` can't
+// complete without an interactive terminal. Every one of these ends by
+// rendering an inquirer prompt (a confirmation, a picker, or a text/select
+// input), and inquirer needs both stdin and stdout to be a TTY to render and
+// read one — a redirected/non-interactive run would otherwise hang, or (for
+// delete) abort via the swallowed-Ctrl+C path below yet still exit 0. `delete`
+// is only guarded here when `--yes` is absent (that flag is its documented
+// escape hatch); `create` and `update` have no such flag — `create` always
+// prompts, and `update` always ends by prompting for the route folder,
+// whether the target came from an explicit uuid or the interactive picker —
+// so both are guarded outright. Kept as one lookup (not three near-identical
+// `!isInteractive` checks in `usageErrorFor`) so the guard condition itself
+// stays in a single place.
+const interactiveGuardMessageFor = (
+  subcommand: string,
+  skipConfirm: boolean,
+): string | null => {
+  if (subcommand === DELETE_SUBCOMMAND && !skipConfirm) {
+    return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
+  }
+
+  if (subcommand === CREATE_SUBCOMMAND) {
+    return `\`sources create\` needs an interactive terminal — it always prompts for the source details.`;
+  }
+
+  if (subcommand === UPDATE_SUBCOMMAND) {
+    return `\`sources update\` needs an interactive terminal — it prompts for the route folder, and to pick a source when no uuid is given.`;
+  }
+
+  return null;
+};
 
 // The invocation-level usage checks that all fail the same way (one usage
 // message, non-zero exit). Returns the message to show, or null when the
@@ -107,15 +141,8 @@ const usageErrorFor = (
     return `--yes requires a uuid: \`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`.`;
   }
 
-  // The confirmation prompt can't be answered without an interactive terminal:
-  // inquirer renders to stdout and reads stdin, and its EOF abort is swallowed
-  // as a Ctrl+C below — so a redirected/non-interactive `sources delete` would
-  // hang or delete nothing yet still exit 0. Fail loud and point scripts at
-  // --yes. Only delete is guarded here because it's the irreversible one;
-  // `create`/`update` also prompt, but that predates this change and their
-  // non-TTY behavior is out of scope for the delete-confirmation work.
-  if (subcommand === DELETE_SUBCOMMAND && !skipConfirm && !isInteractive) {
-    return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
+  if (!isInteractive) {
+    return interactiveGuardMessageFor(subcommand, skipConfirm);
   }
 
   return null;
@@ -152,8 +179,8 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     }
 
     // A prompt needs both streams to be a terminal: inquirer reads stdin and
-    // renders to stdout, so a redirect on either makes the confirmation
-    // unanswerable.
+    // renders to stdout, so a redirect on either makes create/update/delete's
+    // prompts unanswerable.
     const isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
     const usageError = usageErrorFor(
       subcommand,
