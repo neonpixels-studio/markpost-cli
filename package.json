@@ -24,7 +24,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.3.0",
+    "@types/node": "^26.4.1",
     "@vitest/ui": "^4.1.11",
     "eslint": "^10.9.1",
     "eslint-config-prettier": "^10.1.8",
@@ -32,14 +32,14 @@
     "husky": "^9.1.7",
     "jiti": "^2.7.0",
     "prettier": "^3.9.6",
-    "tsc-alias": "^1.9.2",
+    "tsc-alias": "^1.9.3",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.68.0",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^4.1.4"
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.6.0",
-    "@sindresorhus/slugify": "^3.0.0",
+    "@inquirer/prompts": "^8.7.0",
+    "@sindresorhus/slugify": "^3.0.1",
     "chalk": "^6.0.0",
     "cli-spinners": "^3.4.0",
     "conf": "^15.1.0",
