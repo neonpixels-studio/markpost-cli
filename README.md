@@ -27,6 +27,7 @@ server-side records.
 | `markpost config <get\|set\|path> [key] [value]` | View or change the stored API token and output directory |
 | `markpost settings <get\|set> [key=value ...]` | View or change server-side sync settings (`autoSync`, `autoDelete`, `frontmatter`, `conflictStrategy`) |
 | `markpost help` | Show aggregated usage |
+| `markpost --version` (or `-v` / `version`) | Print the installed CLI version |
 
 The destructive fetch/write/delete sync runs only under the explicit
 `markpost sync` command.

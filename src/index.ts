@@ -37,6 +37,7 @@ import {
   runSettingsCommand,
   USAGE as SETTINGS_USAGE,
 } from '@/commands/settings.js';
+import packageJson from '../package.json' with { type: 'json' };
 import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
@@ -104,6 +105,15 @@ const SYNC_USAGE = `Usage: markpost sync [--dry-run]
 const HELP_COMMANDS = new Set(['help', '--help', '-h']);
 const HELP_FLAG_ARGS = new Set(['--help', '-h']);
 
+// Tokens in the command position that print the installed CLI version instead
+// of running a command — a globally-installed user's only way to confirm
+// which @markpost/cli they're on. `version` is included alongside the flags
+// for the same reason `help` sits alongside `--help`/`-h` in HELP_COMMANDS.
+// Checked like HELP_COMMANDS: a top-level token, never a per-command
+// sub-argument.
+const VERSION_COMMANDS = new Set(['version', '--version', '-v']);
+const VERSION_USAGE = 'Usage: markpost --version';
+
 interface Command {
   run: (args: string[]) => Promise<void>;
   usage: string;
@@ -159,7 +169,7 @@ const HELP_TEXT = [
   'Commands:',
   ...[...COMMANDS.values()].flatMap((command) => ['', command.usage]),
   '',
-  'Run `markpost help` (or `--help`) to see this message.',
+  'Run `markpost help` (or `--help`) to see this message, or `markpost --version` (or `-v`) for the installed version.',
 ].join('\n');
 
 // A top-level help request optionally targets one command: `markpost help
@@ -170,7 +180,35 @@ function printHelp(topic: string | undefined): void {
   console.log(command ? command.usage : HELP_TEXT);
 }
 
+// A version request takes no further arguments — unlike `help <topic>`,
+// there's no sub-argument for it to mean anything, so `markpost --version
+// sync` is a genuine usage mistake (a stray extra word), not a request to
+// version *and* sync. Fails loud (stderr + exit 1) like the sync command's
+// own unexpected-argument guard, rather than silently printing the version
+// and ignoring the rest of the line.
+function runVersionCommand(args: string[]): void {
+  if (args.length > 0) {
+    console.error(chalk.redBright(`Unexpected arguments: ${args.join(' ')}`));
+    console.error(VERSION_USAGE);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(packageJson.version);
+}
+
 async function dispatch(): Promise<void> {
+  // An explicit version request is a success: print to stdout, exit 0. Checked
+  // before help so `--version`/`-v`/`version` is dispatched the same way
+  // `--help`/`-h`/`help` is, rather than falling through to the unknown-command
+  // branch. This does mean a future `version` entry in COMMANDS would be
+  // permanently shadowed — the same precedence tradeoff HELP_COMMANDS already
+  // makes for `help`.
+  if (VERSION_COMMANDS.has(commandName)) {
+    runVersionCommand(commandArgs);
+    return;
+  }
+
   // An explicit top-level help request is a success: print to stdout, exit 0.
   if (HELP_COMMANDS.has(commandName)) {
     printHelp(commandArgs[0]);

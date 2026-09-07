@@ -309,6 +309,90 @@ describe('index', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it.each(['--version', '-v', 'version'])(
+    'prints only the installed package version and exits 0 for "%s" without touching the sync',
+    async (versionFlag) => {
+      process.argv = ['node', 'index.js', versionFlag];
+      const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+      const { default: yoctoSpinner } = await import('yocto-spinner');
+      const packageJson = await import('../package.json', { with: { type: 'json' } });
+
+      await import('@/index.js');
+
+      // Exactly one console.log call, and it's the bare version string — pins
+      // the version path against accidentally also dumping HELP_TEXT.
+      expect(console.log).toHaveBeenCalledTimes(1);
+      expect(console.log).toHaveBeenCalledWith(packageJson.default.version);
+      // Also pin the shape (semver-ish), not just "whatever package.json
+      // currently says" — a dropped/blanked `version` field would still pass
+      // the exact-match assertion above but must fail here.
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringMatching(/^\d+\.\d+\.\d+/),
+      );
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(deleteRecords).not.toHaveBeenCalled();
+      expect(yoctoSpinner).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
+  // A version request takes no further arguments — unlike `help <topic>`, a
+  // trailing word after `--version` isn't meaningful, so it must be treated as
+  // a genuine usage mistake (fail loud) rather than silently printing the
+  // version and ignoring the rest of the line.
+  it.each(['--version', '-v', 'version'])(
+    'rejects extra arguments after "%s" instead of printing the version',
+    async (versionToken) => {
+      process.argv = ['node', 'index.js', versionToken, 'sync'];
+      const { fetchAllRecords, deleteRecords } = await import(
+        '@/libs/records.js'
+      );
+
+      await import('@/index.js');
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Unexpected arguments: sync'),
+      );
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost --version'),
+      );
+      expect(process.exitCode).toBe(1);
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(deleteRecords).not.toHaveBeenCalled();
+    },
+  );
+
+  // VERSION_COMMANDS is only checked against the command position — a
+  // per-command sub-argument that happens to collide with a version token
+  // must still reach the handler untouched, exactly like HELP_FLAG_ARGS
+  // doesn't intercept a `-h`/`--help` sub-argument outside its own check.
+  it('passes "-v" through to the command handler when it is a sub-argument, not the command itself', async () => {
+    process.argv = ['node', 'index.js', 'push', '-v'];
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await import('@/index.js');
+
+    expect(runPushCommand).toHaveBeenCalledWith(['-v']);
+  });
+
+  // The sync command rejects unexpected arguments outright (see
+  // runSyncCommand), so `--version` used as a sub-argument here must not be
+  // silently swallowed as a version request or as a no-op — it's a genuine
+  // usage mistake and must fail loud like any other unrecognized sync flag.
+  it('rejects "--version" as a sync sub-argument instead of printing the version', async () => {
+    process.argv = ['node', 'index.js', 'sync', '--version'];
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+
+    await import('@/index.js');
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Unexpected arguments: --version'),
+    );
+    expect(process.exitCode).toBe(1);
+    expect(fetchAllRecords).not.toHaveBeenCalled();
+    expect(deleteRecords).not.toHaveBeenCalled();
+  });
+
   it('prints help, fails loud, and never runs the destructive sync when invoked with no arguments', async () => {
     process.argv = ['node', 'index.js'];
     const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
