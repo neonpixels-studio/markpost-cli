@@ -60,6 +60,7 @@ const UPDATE_SUBCOMMAND = 'update';
 // `delete` is the only subcommand `--yes` applies to, so it's named for the
 // guard that rejects the flag elsewhere as well as its handler-map key.
 const DELETE_SUBCOMMAND = 'delete';
+const ROTATE_SECRET_SUBCOMMAND = 'rotate-secret';
 
 const SOURCES_HANDLERS = new Map<
   string,
@@ -76,22 +77,25 @@ const SOURCES_HANDLERS = new Map<
     DELETE_SUBCOMMAND,
     (uuid, _json, skipConfirm) => deleteSourceCommand(uuid, skipConfirm),
   ],
-  ['rotate-secret', (uuid) => rotateSecretCommand(uuid)],
+  [ROTATE_SECRET_SUBCOMMAND, (uuid) => rotateSecretCommand(uuid)],
 ]);
 
-// The message for the one subcommand (if any) that `subcommand` can't
-// complete without an interactive terminal. Every one of these ends by
-// rendering an inquirer prompt (a confirmation, a picker, or a text/select
-// input), and inquirer needs both stdin and stdout to be a TTY to render and
-// read one — a redirected/non-interactive run would otherwise hang, or (for
-// delete) abort via the swallowed-Ctrl+C path below yet still exit 0. `delete`
-// is only guarded here when `--yes` is absent (that flag is its documented
-// escape hatch); `create` and `update` have no such flag — `create` always
-// prompts, and `update` always ends by prompting for the route folder,
+// The message for the subcommand (if any) that can't complete without an
+// interactive terminal — inquirer needs both stdin and stdout to be a TTY to
+// render and read a prompt, so a redirected/non-interactive run would
+// otherwise hang, or (for delete) abort via the swallowed-Ctrl+C path below
+// yet still exit 0. `delete` is only guarded when `--yes` is absent (its
+// documented escape hatch); `create` and `update` have no such flag — `create`
+// always prompts, and `update` always ends by prompting for the route folder,
 // whether the target came from an explicit uuid or the interactive picker —
-// so both are guarded outright. Kept as one lookup (not three near-identical
-// `!isInteractive` checks in `usageErrorFor`) so the guard condition itself
-// stays in a single place.
+// so both are guarded outright. `rotate-secret` also prompts (a picker with no
+// uuid, or a password input for a manual-secret provider) but is deliberately
+// left out here: it's out of scope for this change, same as create/update
+// were out of scope for delete's original guard. See the `rotate-secret`
+// non-TTY test below for what this currently leaves unguarded.
+// @todo Guard `rotate-secret` the same way (picker needs a uuid; a
+// manual-secret provider's password prompt needs a TTY check inside
+// collectRotateInput, since the provider isn't known until after fetchSources).
 const interactiveGuardMessageFor = (
   subcommand: string,
   skipConfirm: boolean,
@@ -101,11 +105,11 @@ const interactiveGuardMessageFor = (
   }
 
   if (subcommand === CREATE_SUBCOMMAND) {
-    return `\`sources create\` needs an interactive terminal — it always prompts for the source details.`;
+    return `\`sources ${CREATE_SUBCOMMAND}\` needs an interactive terminal — it always prompts for the source details.`;
   }
 
   if (subcommand === UPDATE_SUBCOMMAND) {
-    return `\`sources update\` needs an interactive terminal — it prompts for the route folder, and to pick a source when no uuid is given.`;
+    return `\`sources ${UPDATE_SUBCOMMAND}\` needs an interactive terminal — it prompts for the route folder, and to pick a source when no uuid is given.`;
   }
 
   return null;

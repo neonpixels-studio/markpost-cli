@@ -427,6 +427,22 @@ describe('runSourcesCommand', () => {
         expect.stringContaining('never hit'),
       );
     });
+
+    // `list` never prompts, so it must stay usable on a non-TTY — this is the
+    // primary scripted path (`sources list --json > file`) the new create/
+    // update guard must not sweep in alongside them.
+    it('still lists on a non-TTY (neither stdin nor stdout is a terminal)', async () => {
+      process.stdin.isTTY = false;
+      process.stdout.isTTY = false;
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      expect(fetchSources).toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    });
   });
 
   describe('create', () => {
@@ -581,7 +597,7 @@ describe('runSourcesCommand', () => {
       expect(select).not.toHaveBeenCalled();
       expect(createSource).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('needs an interactive terminal'),
+        expect.stringContaining('always prompts for the source details'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -599,7 +615,7 @@ describe('runSourcesCommand', () => {
       expect(select).not.toHaveBeenCalled();
       expect(createSource).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('needs an interactive terminal'),
+        expect.stringContaining('always prompts for the source details'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -772,7 +788,7 @@ describe('runSourcesCommand', () => {
       expect(select).not.toHaveBeenCalled();
       expect(updateSource).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('needs an interactive terminal'),
+        expect.stringContaining('prompts for the route folder'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -791,7 +807,7 @@ describe('runSourcesCommand', () => {
       expect(select).not.toHaveBeenCalled();
       expect(updateSource).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('needs an interactive terminal'),
+        expect.stringContaining('prompts for the route folder'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -811,7 +827,7 @@ describe('runSourcesCommand', () => {
       expect(input).not.toHaveBeenCalled();
       expect(updateSource).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('needs an interactive terminal'),
+        expect.stringContaining('prompts for the route folder'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -1122,7 +1138,7 @@ describe('runSourcesCommand', () => {
       expect(confirm).not.toHaveBeenCalled();
       expect(deleteSource).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('needs an interactive terminal'),
+        expect.stringContaining('--yes'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -1141,7 +1157,7 @@ describe('runSourcesCommand', () => {
       expect(confirm).not.toHaveBeenCalled();
       expect(deleteSource).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('needs an interactive terminal'),
+        expect.stringContaining('--yes'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -1216,6 +1232,30 @@ describe('runSourcesCommand', () => {
         .split('\n')
         .filter((line) => line.includes('whsec_rotated_value'));
       expect(secretMentions).toHaveLength(1);
+    });
+
+    // `rotate-secret` is deliberately left out of the create/update/delete TTY
+    // guard added for #148 (see the `@todo` in sources.ts) — a uuid'd rotation
+    // of a generated provider needs no prompt at all, so it must keep working
+    // on a non-TTY. This pins that the broader `!isInteractive` check doesn't
+    // sweep rotate-secret in by accident; it is not an endorsement of piping
+    // this (the secret still lands in whatever stdout is redirected to).
+    it('still rotates by uuid on a non-TTY (deliberately unguarded for now)', async () => {
+      process.stdin.isTTY = false;
+      process.stdout.isTTY = false;
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([githubSource]);
+      vi.mocked(rotateSourceSecret).mockResolvedValue({
+        ...githubSource,
+        providerSecret: 'whsec_rotated_value',
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'ghi-789']);
+
+      expect(rotateSourceSecret).toHaveBeenCalledWith('ghi-789', {});
+      expect(process.exitCode).toBeUndefined();
     });
 
     it('prompts (masked) for the new secret and sends it for a manual-secret provider', async () => {
