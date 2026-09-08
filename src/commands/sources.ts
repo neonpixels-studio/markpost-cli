@@ -55,9 +55,12 @@ export const buildEndpointUrl = (
 // Only `list` renders JSON; the other subcommands are interactive or emit a
 // one-off result, so --json means nothing to them.
 const LIST_SUBCOMMAND = 'list';
+const CREATE_SUBCOMMAND = 'create';
+const UPDATE_SUBCOMMAND = 'update';
 // `delete` is the only subcommand `--yes` applies to, so it's named for the
 // guard that rejects the flag elsewhere as well as its handler-map key.
 const DELETE_SUBCOMMAND = 'delete';
+const ROTATE_SECRET_SUBCOMMAND = 'rotate-secret';
 
 const SOURCES_HANDLERS = new Map<
   string,
@@ -68,14 +71,49 @@ const SOURCES_HANDLERS = new Map<
   ) => Promise<void>
 >([
   [LIST_SUBCOMMAND, (_uuid, json) => listSources(json)],
-  ['create', () => createSourceCommand()],
-  ['update', (uuid) => updateSourceCommand(uuid)],
+  [CREATE_SUBCOMMAND, () => createSourceCommand()],
+  [UPDATE_SUBCOMMAND, (uuid) => updateSourceCommand(uuid)],
   [
     DELETE_SUBCOMMAND,
     (uuid, _json, skipConfirm) => deleteSourceCommand(uuid, skipConfirm),
   ],
-  ['rotate-secret', (uuid) => rotateSecretCommand(uuid)],
+  [ROTATE_SECRET_SUBCOMMAND, (uuid) => rotateSecretCommand(uuid)],
 ]);
+
+// The message for the subcommand (if any) that can't complete without an
+// interactive terminal — inquirer needs both stdin and stdout to be a TTY to
+// render and read a prompt, so a redirected/non-interactive run would
+// otherwise hang, or (for delete) abort via the swallowed-Ctrl+C path below
+// yet still exit 0. `delete` is only guarded when `--yes` is absent (its
+// documented escape hatch); `create` and `update` have no such flag — `create`
+// always prompts, and `update` always ends by prompting for the route folder,
+// whether the target came from an explicit uuid or the interactive picker —
+// so both are guarded outright. `rotate-secret` also prompts (a picker with no
+// uuid, or a password input for a manual-secret provider) but is deliberately
+// left out here: it's out of scope for this change, same as create/update
+// were out of scope for delete's original guard. See the `rotate-secret`
+// non-TTY test below for what this currently leaves unguarded.
+// @todo Guard `rotate-secret` the same way (picker needs a uuid; a
+// manual-secret provider's password prompt needs a TTY check inside
+// collectRotateInput, since the provider isn't known until after fetchSources).
+const interactiveGuardMessageFor = (
+  subcommand: string,
+  skipConfirm: boolean,
+): string | null => {
+  if (subcommand === DELETE_SUBCOMMAND && !skipConfirm) {
+    return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
+  }
+
+  if (subcommand === CREATE_SUBCOMMAND) {
+    return `\`sources ${CREATE_SUBCOMMAND}\` needs an interactive terminal — it always prompts for the source details.`;
+  }
+
+  if (subcommand === UPDATE_SUBCOMMAND) {
+    return `\`sources ${UPDATE_SUBCOMMAND}\` needs an interactive terminal — it prompts for the route folder, and to pick a source when no uuid is given.`;
+  }
+
+  return null;
+};
 
 // The invocation-level usage checks that all fail the same way (one usage
 // message, non-zero exit). Returns the message to show, or null when the
@@ -107,15 +145,8 @@ const usageErrorFor = (
     return `--yes requires a uuid: \`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`.`;
   }
 
-  // The confirmation prompt can't be answered without an interactive terminal:
-  // inquirer renders to stdout and reads stdin, and its EOF abort is swallowed
-  // as a Ctrl+C below — so a redirected/non-interactive `sources delete` would
-  // hang or delete nothing yet still exit 0. Fail loud and point scripts at
-  // --yes. Only delete is guarded here because it's the irreversible one;
-  // `create`/`update` also prompt, but that predates this change and their
-  // non-TTY behavior is out of scope for the delete-confirmation work.
-  if (subcommand === DELETE_SUBCOMMAND && !skipConfirm && !isInteractive) {
-    return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
+  if (!isInteractive) {
+    return interactiveGuardMessageFor(subcommand, skipConfirm);
   }
 
   return null;
@@ -152,8 +183,8 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     }
 
     // A prompt needs both streams to be a terminal: inquirer reads stdin and
-    // renders to stdout, so a redirect on either makes the confirmation
-    // unanswerable.
+    // renders to stdout, so a redirect on either makes create/update/delete's
+    // prompts unanswerable.
     const isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
     const usageError = usageErrorFor(
       subcommand,
