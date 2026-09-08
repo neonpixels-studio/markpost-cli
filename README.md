@@ -17,16 +17,16 @@ every command. A bare `markpost` with no arguments prints that help and exits
 non-zero — it does **not** sync, so an accidental invocation can't delete
 server-side records.
 
-| Command | Description |
-|---|---|
-| `markpost sync [--dry-run]` | Fetch all pending records, write each to a markdown file, and (when `autoDelete` is enabled) delete the written records from the server. `--dry-run` reports the exact write/delete plan without writing or mutating anything |
-| `markpost push [--dry-run] <path...>` | Create records from one or more markdown files, directories, or glob patterns. `--dry-run` reports which files would be pushed, plus any missing or unreadable inputs, without creating any records |
-| `markpost get <uuid> [--json]` | Fetch and display a single record; pass `--json` for machine-readable output |
-| `markpost sources <list\|create\|update\|delete\|rotate-secret> [uuid] [--yes]` | Manage sources; `sources list --json` prints machine-readable output. `sources delete` asks to confirm first (deleting a source is irreversible — it drops the ingest config and one-time signing secret) and needs an interactive terminal; in scripts pass a uuid with `--yes` (`sources delete <uuid> --yes`) to skip the prompt. `rotate-secret [uuid]` mints/replaces the signing secret of a provider source (github/zapier/shortcuts reveal a fresh secret once; stripe prompts for the new value) |
-| `markpost records list [--source <type>] [--status <status>] [--search <text>] [--json]` | List records without deleting them, optionally filtered by source, status, or search text; pass `--json` for machine-readable output |
-| `markpost config <get\|set\|path> [key] [value]` | View or change the stored API token and output directory |
-| `markpost settings <get\|set> [key=value ...]` | View or change server-side sync settings (`autoSync`, `autoDelete`, `frontmatter`, `conflictStrategy`) |
-| `markpost help` | Show aggregated usage |
+| Command                                                                                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `markpost sync [--dry-run]`                                                              | Fetch all pending records, write each to a markdown file, and (when `autoDelete` is enabled) delete the written records from the server. `--dry-run` reports the exact write/delete plan without writing or mutating anything                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `markpost push [--dry-run] <path...>`                                                    | Create records from one or more markdown files, directories, or glob patterns. `--dry-run` reports which files would be pushed, plus any missing or unreadable inputs, without creating any records                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `markpost get <uuid> [--json]`                                                           | Fetch and display a single record; pass `--json` for machine-readable output                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `markpost sources <list\|create\|update\|delete\|rotate-secret> [uuid] [--yes]`          | Manage sources; `sources list --json` prints machine-readable output. `sources delete` asks to confirm first (deleting a source is irreversible — it drops the ingest config and one-time signing secret) and needs an interactive terminal; in scripts pass a uuid with `--yes` (`sources delete <uuid> --yes`) to skip the prompt. `sources create` and `sources update` also need an interactive terminal — they always prompt (for source details, or the route folder) and have no `--yes` equivalent, so they exit with an error rather than hang under a pipe or cron job. `rotate-secret [uuid]` mints/replaces the signing secret of a provider source (github/zapier/shortcuts reveal a fresh secret once; stripe prompts for the new value); it isn't guarded yet — it can still hang waiting on a prompt (a picker with no uuid, or the stripe secret prompt), so run it interactively |
+| `markpost records list [--source <type>] [--status <status>] [--search <text>] [--json]` | List records without deleting them, optionally filtered by source, status, or search text; pass `--json` for machine-readable output                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `markpost config <get\|set\|path> [key] [value]`                                         | View or change the stored API token and output directory                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `markpost settings <get\|set> [key=value ...]`                                           | View or change server-side sync settings (`autoSync`, `autoDelete`, `frontmatter`, `conflictStrategy`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `markpost help`                                                                          | Show aggregated usage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 The destructive fetch/write/delete sync runs only under the explicit
 `markpost sync` command.
@@ -45,11 +45,11 @@ object to **stderr**:
 
 `error` is one of a small, stable set of machine-readable codes:
 
-| `error` code      | When it happens                                                                 |
-|-------------------|---------------------------------------------------------------------------------|
+| `error` code      | When it happens                                                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `config_required` | A required value (API token or output directory) is not configured and `--json` mode will not prompt. Also includes a `missing` field naming the config key. |
-| `usage`           | A bad or missing argument/subcommand, or `--json` passed where it is not supported. |
-| `fetch_failed`    | The requested operation could not be completed (a failed or empty fetch, or an error thrown while carrying it out — e.g. an auth/5xx failure). |
+| `usage`           | A bad or missing argument/subcommand, or `--json` passed where it is not supported.                                                                          |
+| `fetch_failed`    | The requested operation could not be completed (a failed or empty fetch, or an error thrown while carrying it out — e.g. an auth/5xx failure).               |
 
 Any string in `message` that is server-derived is sanitized so it cannot inject
 a live terminal escape sequence. Additional fields (such as `missing`) may
@@ -148,24 +148,24 @@ npm install
 
 Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://direnv.net/), run `direnv allow` to load them automatically.
 
-| Variable | Description |
-|---|---|
-| `API_TOKEN` | API token for sync.danholloran.me |
-| `BASE_URL` | Base URL of the sync API (e.g. `http://localhost:8888` for local dev) |
+| Variable           | Description                                                                                                                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `API_TOKEN`        | API token for sync.danholloran.me                                                                                                                                                                                                                               |
+| `BASE_URL`         | Base URL of the sync API (e.g. `http://localhost:8888` for local dev)                                                                                                                                                                                           |
 | `OUTPUT_DIRECTORY` | Path to the directory where synced files are written; a leading `~`, `$HOME`, or `${HOME}` is expanded to your home directory. A relative path is resolved against the current working directory, so prefer an absolute path or a `~` prefix for scheduled runs |
 
 ### Scripts
 
-| Command            | Description                            |
-| ------------------ | -------------------------------------- |
-| `npm run build`    | Compile TypeScript to `dist/`          |
-| `npm run watch`    | Watch and recompile on changes         |
-| `npm test`         | Run tests with Vitest                  |
-| `npm run test:ci`  | Run tests once (CI mode)               |
-| `npm run test:ui`  | Run tests with Vitest UI               |
-| `npm run lint`     | Check formatting and linting           |
-| `npm run lint:fix` | Auto-fix formatting and linting issues |
-| `npm run sync:contract` | Refresh the vendored markpost API contract (see below) |
+| Command                               | Description                                                   |
+| ------------------------------------- | ------------------------------------------------------------- |
+| `npm run build`                       | Compile TypeScript to `dist/`                                 |
+| `npm run watch`                       | Watch and recompile on changes                                |
+| `npm test`                            | Run tests with Vitest                                         |
+| `npm run test:ci`                     | Run tests once (CI mode)                                      |
+| `npm run test:ui`                     | Run tests with Vitest UI                                      |
+| `npm run lint`                        | Check formatting and linting                                  |
+| `npm run lint:fix`                    | Auto-fix formatting and linting issues                        |
+| `npm run sync:contract`               | Refresh the vendored markpost API contract (see below)        |
 | `npm run sync:markdown-serialization` | Refresh the vendored markpost serialization slice (see below) |
 
 ### Contract sync
@@ -201,7 +201,7 @@ re-exports the generic envelope types (`ApiError`, `ApiRequest`,
     run: npx vitest run tests/types/contract-drift.test.ts
   ```
   after your existing install step.
-- **What this does *not* do:** it does not detect when markpost's *real*
+- **What this does _not_ do:** it does not detect when markpost's _real_
   upstream contract has changed and the vendored copy has fallen behind — that
   would require network access at test time (flaky, and fails offline CI).
   Re-run `npm run sync:contract` periodically or whenever a markpost API
@@ -230,14 +230,14 @@ test failing. This closes that gap the same way the contract sync does.
   it never ships in the published `dist/`. Review the diff, run `npm test`,
   then commit.
 - **Catching drift:** `tests/libs/frontmatter-drift.test.ts` runs on every
-  `npm test` / `npm run test:ci`. It executes markpost's *real* (vendored)
+  `npm test` / `npm run test:ci`. It executes markpost's _real_ (vendored)
   serialization functions and the CLI's mirrored ones over a shared battery of
   inputs — plain values, empty and multi-tag lists, every YAML metacharacter,
   whitespace, and escape sequences — and fails if any input serializes
   differently. No network access needed. When markpost's serialization
   changes, re-run the sync: the vendored slice updates, and if the CLI mirror
   has not been updated to match, this test goes red.
-- **What this does *not* do:** it does not detect when markpost's upstream
+- **What this does _not_ do:** it does not detect when markpost's upstream
   serialization has changed and the vendored slice has fallen behind — that
   would require network access at test time. Re-run
   `npm run sync:markdown-serialization` whenever a markpost markdown change is
