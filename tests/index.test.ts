@@ -380,6 +380,29 @@ describe('index', () => {
     },
   );
 
+  // Version bypasses the centralized per-command HELP_FLAG_ARGS check in
+  // dispatch (it returns early, before that check runs), so it needs its own
+  // — otherwise `markpost version --help` would fall into the
+  // unexpected-arguments guard instead of behaving like every other
+  // command's `--help`.
+  it.each(['--help', '-h'])(
+    'prints version usage for "version %s" instead of rejecting it as an unexpected argument',
+    async (helpFlag) => {
+      process.argv = ['node', 'index.js', 'version', helpFlag];
+      const { fetchAllRecords, deleteRecords } = await import(
+        '@/libs/records.js'
+      );
+
+      await import('@/index.js');
+
+      expect(console.log).toHaveBeenCalledWith('Usage: markpost --version');
+      expect(console.error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(deleteRecords).not.toHaveBeenCalled();
+    },
+  );
+
   // VERSION_COMMANDS is only checked against the command position — a
   // per-command sub-argument that happens to collide with a version token
   // must still reach the handler untouched, exactly like HELP_FLAG_ARGS

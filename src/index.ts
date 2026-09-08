@@ -196,6 +196,15 @@ function printHelp(topic: string | undefined): void {
 // own unexpected-argument guard, rather than silently printing the version
 // and ignoring the rest of the line.
 function runVersionCommand(args: string[]): void {
+  // `markpost version --help` must print usage like every other command's
+  // `--help`/`-h` sub-argument does (see the centralized HELP_FLAG_ARGS check
+  // in dispatch) — checked here, before the arity guard, because version
+  // bypasses that centralized check by returning early from dispatch itself.
+  if (args.some((arg) => HELP_FLAG_ARGS.has(arg))) {
+    console.log(VERSION_USAGE);
+    return;
+  }
+
   if (args.length > 0) {
     console.error(chalk.redBright(`Unexpected arguments: ${args.join(' ')}`));
     console.error(VERSION_USAGE);
