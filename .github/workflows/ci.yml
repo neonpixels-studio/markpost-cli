@@ -22,7 +22,9 @@ jobs:
       - run: npm run build
       - name: Built CLI prints top-level help
         run: |
-          node dist/index.js --help > help.txt
-          grep -q '^Usage: markpost <command>' help.txt || { echo "top-level usage line changed — update ci.yml or src/index.ts:157"; cat help.txt; exit 1; }
+          node dist/index.js --help > "$RUNNER_TEMP/help.txt" 2>&1
+          grep -q '^Usage: markpost <command>' "$RUNNER_TEMP/help.txt" || { echo "top-level usage line changed — update ci.yml or HELP_TEXT in src/index.ts"; cat "$RUNNER_TEMP/help.txt"; exit 1; }
         env:
+          # conf -> env-paths reads XDG_CONFIG_HOME on Linux only; this keeps the
+          # help smoke test off any real config store. Revisit if runs-on changes.
           XDG_CONFIG_HOME: ${{ runner.temp }}/markpost-config
