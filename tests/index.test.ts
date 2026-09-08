@@ -309,6 +309,24 @@ describe('index', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  // `version` isn't a COMMANDS entry, so without a special case this would
+  // fall through to the full HELP_TEXT — contradicting the line HELP_TEXT
+  // itself prints about `markpost --version`.
+  it.each(['version', '--version', '-v'])(
+    'prints only the version usage for "help %s" instead of the full help',
+    async (versionTopic) => {
+      process.argv = ['node', 'index.js', 'help', versionTopic];
+
+      await import('@/index.js');
+
+      expect(console.log).toHaveBeenCalledWith('Usage: markpost --version');
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost <command>'),
+      );
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
   it.each(['--version', '-v', 'version'])(
     'prints only the installed package version and exits 0 for "%s" without touching the sync',
     async (versionFlag) => {

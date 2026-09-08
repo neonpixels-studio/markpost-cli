@@ -173,9 +173,18 @@ const HELP_TEXT = [
 ].join('\n');
 
 // A top-level help request optionally targets one command: `markpost help
-// sync` prints just the sync usage. An unrecognized topic falls back to the
-// full help rather than erroring — a help request should stay helpful.
+// sync` prints just the sync usage. `markpost help version` is handled the
+// same way even though `version` isn't in COMMANDS — without this it would
+// fall through to the full HELP_TEXT, which contradicts the line HELP_TEXT
+// itself prints about `markpost --version`. An unrecognized topic falls back
+// to the full help rather than erroring — a help request should stay
+// helpful.
 function printHelp(topic: string | undefined): void {
+  if (topic !== undefined && VERSION_COMMANDS.has(topic)) {
+    console.log(VERSION_USAGE);
+    return;
+  }
+
   const command = topic ? COMMANDS.get(topic) : undefined;
   console.log(command ? command.usage : HELP_TEXT);
 }
@@ -190,6 +199,17 @@ function runVersionCommand(args: string[]): void {
   if (args.length > 0) {
     console.error(chalk.redBright(`Unexpected arguments: ${args.join(' ')}`));
     console.error(VERSION_USAGE);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Fail loud rather than printing the literal string "undefined": the one
+  // thing this command exists to answer, it must not answer wrong while
+  // still exiting 0.
+  if (!packageJson.version) {
+    console.error(
+      chalk.redBright('Unable to determine the installed CLI version.'),
+    );
     process.exitCode = 1;
     return;
   }
