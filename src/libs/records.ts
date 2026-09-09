@@ -750,7 +750,24 @@ export const fetchRecord = async (uuid: string): Promise<Record | null> => {
   }
 };
 
-export const deleteRecords = async (
+// markpost's bulk delete handler (server/api/records/index.delete.ts) caps
+// each DELETE /api/records request at this many uuids (`MAX_DELETE_BATCH_SIZE`
+// in shared/utils/records.ts, which DELETE and PATCH currently share); a
+// larger `uuids[]` array is rejected with a 422. The CLI chunks to this size
+// (mirroring `MAX_MARK_SYNCED_BATCH_SIZE`/`markRecordsSynced`) so settling
+// over 100 records doesn't fail the whole delete outright, leaving every one
+// of them to be re-fetched and re-written as duplicate files (issue #158).
+export const MAX_DELETE_BATCH_SIZE = 100;
+
+// DELETEs one chunk (<= MAX_DELETE_BATCH_SIZE uuids) in a single bulk
+// request. Same shape as the pre-chunking `deleteRecords`: a systemic
+// auth/5xx failure (or a timeout, via `authedRequest`) is re-thrown so it
+// dooms the whole run immediately rather than being retried chunk by chunk
+// against a server that's already down or a token that's already dead; any
+// other failure (e.g. markpost rejecting a malformed chunk) is logged and
+// reported as `null` so a later, independently-built chunk still gets a
+// chance to succeed.
+const deleteRecordsChunk = async (
   uuids: string[],
 ): Promise<ApiDeleteMeta | null> => {
   try {
@@ -783,4 +800,47 @@ export const deleteRecords = async (
 
     return null;
   }
+};
+
+// Chunks `uuids` into `ceil(N / MAX_DELETE_BATCH_SIZE)` DELETE requests so a
+// bulk delete over the server's cap settles instead of failing outright (see
+// `MAX_DELETE_BATCH_SIZE`). Chunks run sequentially, same rationale as
+// `markRecordsSynced`: one request per 100 uuids is already few enough that
+// firing them serially keeps the burst small without a concurrency limiter.
+//
+// A timeout or systemic failure (auth/rate-limit/5xx) on any chunk re-throws
+// out of `deleteRecordsChunk` and propagates here uncaught, aborting every
+// remaining chunk immediately — those uuids were never attempted and stay
+// pending. A plain per-chunk failure does NOT abort (mirroring
+// `markRecordsSynced`'s non-timeout, non-systemic case): the chunks are built
+// independently, so a later one may still succeed, and continuing maximizes
+// how many records actually get removed from the server this run.
+//
+// The bulk-delete endpoint only ever returns a count, not which uuids it
+// deleted (unlike the bulk-PATCH endpoint's per-record diff), so a failed
+// chunk can't be reconciled into a trustworthy partial total. Rather than
+// return a partial `deleted` count that a caller could mistake for "the whole
+// batch succeeded" — the exact silent-failure this chunking exists to fix —
+// any chunk failure makes the WHOLE result `null`, preserving the original
+// single-request contract every caller (and existing test) already relies
+// on: non-null means every requested uuid was confirmed deleted.
+export const deleteRecords = async (
+  uuids: string[],
+): Promise<ApiDeleteMeta | null> => {
+  let totalDeleted = 0;
+  let anyChunkFailed = false;
+
+  for (let start = 0; start < uuids.length; start += MAX_DELETE_BATCH_SIZE) {
+    const chunk = uuids.slice(start, start + MAX_DELETE_BATCH_SIZE);
+    const chunkMeta = await deleteRecordsChunk(chunk);
+
+    if (!chunkMeta) {
+      anyChunkFailed = true;
+      continue;
+    }
+
+    totalDeleted += chunkMeta.deleted;
+  }
+
+  return anyChunkFailed ? null : { deleted: totalDeleted };
 };

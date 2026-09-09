@@ -11,6 +11,7 @@ import {
   MARK_FAILED,
   MARK_SYNCED,
   MARK_TIMED_OUT,
+  MAX_DELETE_BATCH_SIZE,
   MAX_MARK_SYNCED_BATCH_SIZE,
 } from '@/libs/records.js';
 import { ApiTimeoutError } from '@/libs/api.js';
@@ -1135,6 +1136,121 @@ describe('deleteRecords', () => {
     await expect(deleteRecords(['abc-123'])).rejects.toMatchObject({
       statusCode: 500,
       isSystemic: true,
+    });
+  });
+
+  // Build `count` predictable uuids so a test can assert chunk boundaries
+  // without hand-listing them.
+  const uuids = (count: number) =>
+    Array.from({ length: count }, (_item, index) => `uuid-${index}`);
+
+  // The number of uuids in each DELETE request's body, in call order.
+  const chunkSizes = () =>
+    vi.mocked(global.fetch).mock.calls.map((call) => {
+      const body = JSON.parse(String(call[1]?.body));
+      return body.data.attributes.uuids.length as number;
+    });
+
+  // Echoes back `{ meta: { deleted } }` sized to however many uuids the
+  // request actually sent, mirroring markpost's real bulk delete handler
+  // (which deletes every uuid it's sent, so `deleted` equals the batch
+  // size).
+  const mockBulkDeleteEcho = () => {
+    global.fetch = vi.fn().mockImplementation((_url, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      const deleted = body.data.attributes.uuids.length as number;
+
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ meta: { deleted } }),
+      });
+    });
+  };
+
+  // Regression coverage for #158: markpost's DELETE handler rejects a
+  // uuids[] array over MAX_DELETE_BATCH_SIZE with a 422, so a sync settling
+  // over 100 records must chunk instead of firing one oversized request.
+  describe('chunking to the server cap (#158)', () => {
+    it('deletes every uuid in a single request at exactly the batch size', async () => {
+      mockBulkDeleteEcho();
+      const result = await deleteRecords(uuids(MAX_DELETE_BATCH_SIZE));
+      // A full-but-not-over chunk is one request — the off-by-one boundary.
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(chunkSizes()).toEqual([MAX_DELETE_BATCH_SIZE]);
+      expect(result).toEqual({ deleted: MAX_DELETE_BATCH_SIZE });
+    });
+
+    it('splits one-over-the-batch-size into two requests (ceil(N/100))', async () => {
+      mockBulkDeleteEcho();
+      const result = await deleteRecords(uuids(MAX_DELETE_BATCH_SIZE + 1));
+      // 101 uuids must not go in one over-cap request markpost would 422.
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(chunkSizes()).toEqual([MAX_DELETE_BATCH_SIZE, 1]);
+      expect(result).toEqual({ deleted: MAX_DELETE_BATCH_SIZE + 1 });
+    });
+
+    it('chunks 250 uuids into 100/100/50 requests, each within the cap', async () => {
+      mockBulkDeleteEcho();
+      const result = await deleteRecords(uuids(250));
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(chunkSizes()).toEqual([100, 100, 50]);
+      // No chunk may ever exceed the server cap.
+      expect(chunkSizes().every((size) => size <= MAX_DELETE_BATCH_SIZE)).toBe(
+        true,
+      );
+      expect(result).toEqual({ deleted: 250 });
+    });
+
+    // A plain (non-systemic) per-chunk failure is scoped to that chunk's
+    // uuids — the chunks are built independently, so a later one may still
+    // succeed — but the caller must never be told a partial batch was fully
+    // deleted. That would silently swallow the failure: the un-deleted
+    // records would be forgotten locally as if settled, and re-fetched next
+    // run with no tracked path, dropping a fresh duplicate file.
+    it('still attempts every chunk after a plain failure, but surfaces it instead of reporting a partial delete as complete', async () => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ meta: { deleted: 100 } }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          json: () =>
+            Promise.resolve({
+              data: { errors: [{ title: 'Error', detail: 'Bad request' }] },
+            }),
+        });
+
+      const result = await deleteRecords(uuids(150));
+
+      // Both chunks were sent — the second chunk's failure didn't stop the
+      // first from being attempted, and vice versa.
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(chunkSizes()).toEqual([100, 50]);
+      // Not `{ deleted: 100 }` — that would tell the caller the whole batch
+      // (150) succeeded when 50 uuids' outcome is actually unknown.
+      expect(result).toBeNull();
+    });
+
+    // A timeout or systemic failure (auth/rate-limit/5xx) dooms every
+    // remaining chunk, so — unlike a plain per-chunk failure — it must abort
+    // the run rather than paying for (and reporting) chunks that are already
+    // doomed to fail the same way.
+    it('aborts remaining chunks on a systemic (401) failure in an earlier chunk', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ data: { errors: [] } }),
+      });
+
+      await expect(deleteRecords(uuids(150))).rejects.toMatchObject({
+        statusCode: 401,
+        isSystemic: true,
+      });
+      // Only the first chunk is attempted — the second is never sent once
+      // the first throws.
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
   });
 });
