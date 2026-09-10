@@ -168,6 +168,8 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 | `npm run lint:fix`                    | Auto-fix formatting and linting issues                        |
 | `npm run sync:contract`               | Refresh the vendored markpost API contract (see below)        |
 | `npm run sync:markdown-serialization` | Refresh the vendored markpost serialization slice (see below) |
+| `npm run sync:source-contract`        | Refresh the vendored markpost source-type/webhook-secret contract (see below) |
+| `npm run sync:settings-contract`      | Refresh the vendored markpost settings contract (see below)   |
 
 ### Contract sync
 
@@ -243,6 +245,49 @@ test failing. This closes that gap the same way the contract sync does.
   would require network access at test time. Re-run
   `npm run sync:markdown-serialization` whenever a markpost markdown change is
   suspected.
+
+### Source and settings contract sync
+
+`src/types/sources.types.ts` (`SOURCE_TYPES`, `MANUAL_SECRET_PROVIDERS`,
+`SECRET_BACKED_PROVIDERS`, `ROTATABLE_PROVIDERS`) and
+`src/types/settings.types.ts` (`CONFLICT_STRATEGIES`,
+`DEFAULT_CONFLICT_STRATEGY`, `DEFAULT_AUTO_DELETE`, `DEFAULT_AUTO_SYNC`,
+`DEFAULT_FRONTMATTER_ENABLED`) hand-mirror markpost's real source-type,
+webhook-secret, and settings contracts. Until now those two files had no
+vendored copy and no drift test — just a test that hardcoded today's values,
+which is exactly what let `sources.types.ts` list a source type (`rss`) that
+markpost had already dropped (markpost#116, issue #78): the hardcoded
+expectation drifted right alongside the mirror instead of catching it. This
+closes that gap the same way `sync:contract` and
+`sync:markdown-serialization` do.
+
+- **Refreshing it:** run `npm run sync:source-contract` and
+  `npm run sync:settings-contract` (each optionally takes
+  `-- --from <path-to-a-local-markpost-checkout>`; without `--from` they
+  shallow-clone markpost fresh). Like the other syncs these are **human-run**
+  steps, not part of CI — they need network access (or a local checkout).
+  - `sync:source-contract` vendors markpost's `shared/utils/sourceTypes.ts`
+    and `shared/utils/webhookSecrets.ts` verbatim (both are self-contained,
+    with no imports) into `tests/types/vendor/markpost-source-types.generated.ts`
+    and `tests/types/vendor/markpost-webhook-secrets.generated.ts`.
+  - `sync:settings-contract` extracts just `CONFLICT_STRATEGIES` from
+    markpost's `server/utils/response.ts` and just the `autoSync` /
+    `autoDelete` / `frontmatter` / `conflictStrategy` column defaults from the
+    `userSettings` table in `server/db/schema.ts` (the rest of both files is
+    irrelevant to the CLI) into
+    `tests/types/vendor/markpost-settings-contract.generated.ts`.
+
+  Both write a manifest recording the exact source commit(s) they synced
+  from. Review the diff, run `npm test`, then commit.
+- **Catching drift:** `tests/types/sources.types.test.ts` and
+  `tests/types/settings.types.test.ts` run on every `npm test` /
+  `npm run test:ci` and compare the CLI's mirrored constants against the
+  vendored copies, failing the moment they diverge. No network access needed.
+- **What this does _not_ do:** like the other syncs, it does not detect when
+  markpost's upstream contract has changed and the vendored copy has fallen
+  behind — that would require network access at test time. Re-run both sync
+  scripts periodically or whenever a markpost source/webhook/settings change
+  is suspected.
 
 ## Security scanning
 
