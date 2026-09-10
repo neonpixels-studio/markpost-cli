@@ -1,0 +1,53 @@
+// Guards the CLI's hand-mirrored ingest-endpoint constants
+// (src/commands/sources.ts's WEBHOOK_INGEST_BASE and EMAIL_DOMAIN) against
+// silent drift from markpost's real `app/composables/useSources.ts`. These
+// are the exact webhook/email URLs a user configures their provider against,
+// so a mismatch here means the CLI prints a dead endpoint with no test
+// failing to catch it.
+//
+// Like the frontmatter-serialization drift guard, this never hits the
+// network: the vendored constants are refreshed by hand via
+// `npm run sync:source-endpoints` and reviewed like any other diff (see
+// README.md#source-endpoint-sync).
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+import {
+  EMAIL_DOMAIN as cliEmailDomain,
+  WEBHOOK_INGEST_BASE as cliWebhookIngestBase,
+} from '@/commands/sources.js';
+
+import {
+  EMAIL_DOMAIN as markpostEmailDomain,
+  WEBHOOK_INGEST_BASE as markpostWebhookIngestBase,
+} from './vendor/markpost-source-endpoints.generated.js';
+import manifest from './vendor/markpost-source-endpoints.manifest.json' with { type: 'json' };
+
+const VENDOR_FILE_PATH = fileURLToPath(
+  new URL('./vendor/markpost-source-endpoints.generated.ts', import.meta.url),
+);
+
+describe('source endpoint drift', () => {
+  it('the vendored markpost constants are present and record their provenance', () => {
+    expect(existsSync(VENDOR_FILE_PATH)).toBe(true);
+    expect(manifest.sourceFile).toBe('app/composables/useSources.ts');
+    expect(manifest.sourceCommit).toMatch(/^[0-9a-f]{40}$/);
+    // Catches the sync script and the manifest falling out of step with each
+    // other (e.g. a constant added to one but not the other) — the static
+    // imports above only prove the *named* constants this file expects still
+    // exist, not that the manifest's own bookkeeping matches them.
+    expect(manifest.exportedDeclarations).toEqual([
+      'WEBHOOK_INGEST_BASE',
+      'EMAIL_DOMAIN',
+    ]);
+  });
+
+  it('WEBHOOK_INGEST_BASE matches markpost byte-for-byte', () => {
+    expect(cliWebhookIngestBase).toBe(markpostWebhookIngestBase);
+  });
+
+  it('EMAIL_DOMAIN matches markpost byte-for-byte', () => {
+    expect(cliEmailDomain).toBe(markpostEmailDomain);
+  });
+});

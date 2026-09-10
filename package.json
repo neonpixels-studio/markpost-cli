@@ -25,7 +25,8 @@
     "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && npm run build",
     "postpack": "node -e \"require('node:fs').accessSync('dist/index.js')\"",
     "sync:contract": "node scripts/sync-contract.mjs",
-    "sync:markdown-serialization": "node scripts/sync-markdown-serialization.mjs"
+    "sync:markdown-serialization": "node scripts/sync-markdown-serialization.mjs",
+    "sync:source-endpoints": "node scripts/sync-source-endpoints.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

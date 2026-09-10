@@ -22,7 +22,6 @@
 //   npm run sync:markdown-serialization -- --from <path>    # copies from an existing local checkout
 //   npm run sync:markdown-serialization -- --from=<path>    # same, `=` form
 
-import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -32,20 +31,31 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
-import { parseFromPathArg } from './sync-contract.mjs';
+import {
+  assertPathIsCommitted,
+  cloneMarkpostInto,
+  parseFromPathArg,
+  readCommitHashForPath,
+  resolveSourceRepo,
+} from './lib/markpost-checkout.mjs';
 
-const MARKPOST_REPO_URL = 'https://github.com/neonpixels-studio/markpost';
 const SOURCE_RELATIVE_PATH = 'server/utils/markdown.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, '..');
 const VENDOR_DIR = join(REPO_ROOT, 'tests/libs/vendor');
-const VENDOR_FILE = join(VENDOR_DIR, 'markpost-markdown-serialization.generated.ts');
-const MANIFEST_FILE = join(VENDOR_DIR, 'markpost-markdown-serialization.manifest.json');
+const VENDOR_FILE = join(
+  VENDOR_DIR,
+  'markpost-markdown-serialization.generated.ts',
+);
+const MANIFEST_FILE = join(
+  VENDOR_DIR,
+  'markpost-markdown-serialization.manifest.json',
+);
 
 // The declarations pulled out of markdown.ts, in the order they are emitted.
 // Types first (so the functions that reference them resolve), then the four
@@ -61,7 +71,10 @@ const REQUIRED_FUNCTION_NAMES = [
 ];
 // The public entry points the drift test imports; force `export` onto them if
 // markpost ever stops exporting one, so the generated module stays importable.
-const PUBLIC_FUNCTION_NAMES = ['serializeFrontmatter', 'assembleMarkdownDocument'];
+const PUBLIC_FUNCTION_NAMES = [
+  'serializeFrontmatter',
+  'assembleMarkdownDocument',
+];
 
 const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 //
@@ -154,57 +167,6 @@ function extractSerializationSlice(source) {
   return declarations.join('\n\n');
 }
 
-function cloneMarkpostInto(cloneDir) {
-  execFileSync('git', ['clone', '--depth', '1', MARKPOST_REPO_URL, cloneDir], {
-    stdio: 'inherit',
-  });
-}
-
-function assertSourceIsCommitted(checkoutDir) {
-  const status = execFileSync(
-    'git',
-    ['status', '--porcelain', '--', SOURCE_RELATIVE_PATH],
-    { cwd: checkoutDir, encoding: 'utf-8' },
-  ).trim();
-
-  if (!status) {
-    return;
-  }
-
-  throw new Error(
-    `${SOURCE_RELATIVE_PATH} has uncommitted changes in ${checkoutDir} — ` +
-      'commit them first so the manifest records the commit the vendored slice actually came from',
-  );
-}
-
-function readCommitHash(checkoutDir) {
-  const commitHash = execFileSync(
-    'git',
-    ['log', '-1', '--format=%H', '--', SOURCE_RELATIVE_PATH],
-    { cwd: checkoutDir, encoding: 'utf-8' },
-  ).trim();
-
-  if (!commitHash) {
-    throw new Error(
-      `No commit history found for ${SOURCE_RELATIVE_PATH} in ${checkoutDir} — ` +
-        'is this a markpost git checkout?',
-    );
-  }
-
-  return commitHash;
-}
-
-function resolveSourceRepo(checkoutDir) {
-  try {
-    return execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd: checkoutDir,
-      encoding: 'utf-8',
-    }).trim();
-  } catch {
-    return resolve(checkoutDir);
-  }
-}
-
 function readMarkdownSource(checkoutDir) {
   const sourcePath = join(checkoutDir, SOURCE_RELATIVE_PATH);
 
@@ -242,8 +204,8 @@ function syncFrom(checkoutDir) {
   const source = readMarkdownSource(checkoutDir);
   const slice = extractSerializationSlice(source);
 
-  assertSourceIsCommitted(checkoutDir);
-  const sourceCommit = readCommitHash(checkoutDir);
+  assertPathIsCommitted(checkoutDir, SOURCE_RELATIVE_PATH);
+  const sourceCommit = readCommitHashForPath(checkoutDir, SOURCE_RELATIVE_PATH);
   const sourceRepo = resolveSourceRepo(checkoutDir);
 
   writeVendoredSlice(slice);
@@ -273,7 +235,10 @@ function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main();
 }
 
