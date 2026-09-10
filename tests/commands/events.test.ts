@@ -210,7 +210,13 @@ describe('runEventsCommand', () => {
       });
       const { runEventsCommand } = await import('@/commands/events.js');
 
-      await expect(runEventsCommand(['list'])).resolves.not.toThrow();
+      // runEventsCommand catches everything, so `resolves.not.toThrow()`
+      // alone would pass even if the crash were silently swallowed. Assert
+      // directly that nothing failed: no error logged, no non-zero exit.
+      await runEventsCommand(['list']);
+
+      expect(console.error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('Malformed kind'),
       );

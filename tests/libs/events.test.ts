@@ -362,4 +362,88 @@ describe('fetchAllEvents', () => {
       partial: true,
     });
   });
+
+  // extractAfterCursor deliberately avoids URLSearchParams, which decodes
+  // application/x-www-form-urlencoded and would turn a literal `+` in the
+  // cursor into a space. A plain percent-decode must preserve it exactly.
+  it('preserves a literal + in the cursor instead of decoding it as a space', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [eventResource(mockEvent)],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: { next: '/api/events?page%5Bafter%5D=a+b&page%5Bsize%5D=1' },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [eventResource(mockEvent2)],
+            meta: { total: 2, size: 1, hasMore: false },
+            links: { next: null },
+          }),
+      });
+    global.fetch = fetchMock;
+
+    await fetchAllEvents();
+
+    const secondRequestUrl = fetchMock.mock.calls[1][0] as string;
+    expect(secondRequestUrl).toContain(
+      `page[after]=${encodeURIComponent('a+b')}`,
+    );
+  });
+
+  // A cursor value carrying `=` (e.g. base64 padding) must survive: the
+  // parser splits on the FIRST `=` only, not every `=` in the pair.
+  it('preserves = characters within the cursor value (e.g. base64 padding)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [eventResource(mockEvent)],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: {
+              next: '/api/events?page%5Bafter%5D=abc%3D%3D&page%5Bsize%5D=1',
+            },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [eventResource(mockEvent2)],
+            meta: { total: 2, size: 1, hasMore: false },
+            links: { next: null },
+          }),
+      });
+    global.fetch = fetchMock;
+
+    await fetchAllEvents();
+
+    const secondRequestUrl = fetchMock.mock.calls[1][0] as string;
+    expect(secondRequestUrl).toContain(
+      `page[after]=${encodeURIComponent('abc==')}`,
+    );
+  });
+
+  // A malformed percent-encoding (e.g. a lone `%`) must not crash the read —
+  // it's treated as "no usable cursor", stopping pagination with `partial: true`.
+  it('treats a malformed percent-encoded cursor as unreadable rather than throwing', async () => {
+    mockFetch({
+      data: [eventResource(mockEvent)],
+      meta: { total: 2, size: 1, hasMore: true },
+      links: { next: '/api/events?page%5Bafter%5D=%&page%5Bsize%5D=1' },
+    });
+
+    const result = await fetchAllEvents();
+
+    expect(result).toEqual({ ok: true, events: [mockEvent], partial: true });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 });
