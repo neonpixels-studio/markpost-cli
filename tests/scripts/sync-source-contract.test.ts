@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assertFileHasNoImports,
+  assertRequiredExportsPresent,
   // @ts-expect-error -- plain .mjs, not part of the typed src/ tree.
 } from '../../scripts/sync-source-contract.mjs';
 
@@ -46,5 +47,64 @@ describe('assertFileHasNoImports', () => {
         'shared/utils/webhookSecrets.ts',
       ),
     ).toThrow(/shared\/utils\/webhookSecrets\.ts/);
+  });
+});
+
+describe('assertRequiredExportsPresent', () => {
+  const SOURCE = `
+    export const SOURCE_TYPES = ["webhook", "email"] as const;
+    export type SourceType = (typeof SOURCE_TYPES)[number];
+    export function isSourceType(value: string): boolean {
+      return true;
+    }
+  `;
+
+  it('accepts a file that exports every required name', () => {
+    expect(() =>
+      assertRequiredExportsPresent(SOURCE, 'shared/utils/sourceTypes.ts', [
+        'SOURCE_TYPES',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('accepts an exported function or type alias, not just const', () => {
+    expect(() =>
+      assertRequiredExportsPresent(SOURCE, 'shared/utils/sourceTypes.ts', [
+        'SourceType',
+        'isSourceType',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('throws loudly when a required export is renamed or removed', () => {
+    const renamed = SOURCE.replace('SOURCE_TYPES', 'SUPPORTED_SOURCE_TYPES');
+
+    expect(() =>
+      assertRequiredExportsPresent(renamed, 'shared/utils/sourceTypes.ts', [
+        'SOURCE_TYPES',
+      ]),
+    ).toThrow(/no longer exports: SOURCE_TYPES/);
+  });
+
+  it('names every missing export, not just the first', () => {
+    expect(() =>
+      assertRequiredExportsPresent(SOURCE, 'shared/utils/webhookSecrets.ts', [
+        'MANUAL_SECRET_PROVIDER_IDS',
+        'ROTATABLE_PROVIDER_IDS',
+      ]),
+    ).toThrow(/MANUAL_SECRET_PROVIDER_IDS, ROTATABLE_PROVIDER_IDS/);
+  });
+
+  it('ignores an export that is not exported (no export keyword)', () => {
+    const notExported = SOURCE.replace(
+      'export const SOURCE_TYPES',
+      'const SOURCE_TYPES',
+    );
+
+    expect(() =>
+      assertRequiredExportsPresent(notExported, 'shared/utils/sourceTypes.ts', [
+        'SOURCE_TYPES',
+      ]),
+    ).toThrow(/no longer exports: SOURCE_TYPES/);
   });
 });

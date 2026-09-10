@@ -20,7 +20,7 @@
 //   npm run sync:source-contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:source-contract -- --from=<path>    # same, `=` form
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
@@ -29,8 +29,10 @@ import { parseFromPathArg } from './sync-contract.mjs';
 import {
   assertPathIsCommitted,
   readCommitHash,
+  readSource,
   resolveSourceRepo,
   withMarkpostCheckout,
+  writeManifest,
 } from './lib/markpost-checkout.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -45,17 +47,27 @@ const MANIFEST_FILE = join(
 // markdown-serialization slice) because each is already the *entire*
 // contract — every export in them is something sources.types.ts mirrors —
 // and each is self-contained (see assertFileHasNoImports below), so a
-// whole-file copy stays trivially compilable in isolation.
+// whole-file copy stays trivially compilable in isolation. `requiredExports`
+// is what the drift test (tests/types/sources.types.test.ts) actually
+// imports from the vendored copy — checked at sync time so a markpost rename
+// fails here, with a pointer to what changed, instead of surfacing later as
+// an opaque "does not provide an export named" module error.
 const VENDORED_FILES = [
   {
     sourceRelativePath: 'shared/utils/sourceTypes.ts',
     vendorFileName: 'markpost-source-types.generated.ts',
     description: "markpost's canonical source-type list",
+    requiredExports: ['SOURCE_TYPES'],
   },
   {
     sourceRelativePath: 'shared/utils/webhookSecrets.ts',
     vendorFileName: 'markpost-webhook-secrets.generated.ts',
     description: "markpost's webhook-secret provider classification",
+    requiredExports: [
+      'MANUAL_SECRET_PROVIDER_IDS',
+      'SECRET_BACKED_PROVIDER_IDS',
+      'ROTATABLE_PROVIDER_IDS',
+    ],
   },
 ];
 
@@ -107,16 +119,61 @@ export function assertFileHasNoImports(source, sourceRelativePath) {
   }
 }
 
-function readSource(checkoutDir, sourceRelativePath) {
-  const sourcePath = join(checkoutDir, sourceRelativePath);
+function exportedTopLevelNames(sourceFile) {
+  return sourceFile.statements
+    .filter((statement) => {
+      const isExported = statement.modifiers?.some(
+        (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+      );
 
-  if (!existsSync(sourcePath)) {
+      return (
+        isExported &&
+        (ts.isVariableStatement(statement) ||
+          ts.isFunctionDeclaration(statement) ||
+          ts.isTypeAliasDeclaration(statement) ||
+          ts.isInterfaceDeclaration(statement))
+      );
+    })
+    .flatMap((statement) => {
+      if (ts.isVariableStatement(statement)) {
+        return statement.declarationList.declarations.map((declaration) =>
+          declaration.name.getText(sourceFile),
+        );
+      }
+
+      return statement.name ? [statement.name.getText(sourceFile)] : [];
+    });
+}
+
+// Confirms every name the drift test imports from the vendored file is still
+// exported, so a markpost rename/removal fails here — naming exactly what
+// changed — instead of as an opaque module-resolution error inside
+// tests/types/sources.types.test.ts.
+export function assertRequiredExportsPresent(
+  source,
+  sourceRelativePath,
+  requiredExports,
+) {
+  const sourceFile = ts.createSourceFile(
+    sourceRelativePath,
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ false,
+    ts.ScriptKind.TS,
+  );
+
+  const actualExports = new Set(exportedTopLevelNames(sourceFile));
+  const missingExports = requiredExports.filter(
+    (exportName) => !actualExports.has(exportName),
+  );
+
+  if (missingExports.length > 0) {
     throw new Error(
-      `No ${sourceRelativePath} found in ${checkoutDir} — is this a markpost checkout?`,
+      `${sourceRelativePath} no longer exports: ${missingExports.join(', ')} — ` +
+        'markpost renamed or removed part of the contract; update ' +
+        'scripts/sync-source-contract.mjs and src/types/sources.types.ts to match',
     );
   }
-
-  return readFileSync(sourcePath, 'utf-8');
 }
 
 function writeVendoredFile(vendorFileName, header, source) {
@@ -124,46 +181,46 @@ function writeVendoredFile(vendorFileName, header, source) {
   writeFileSync(join(VENDOR_DIR, vendorFileName), `${header}${source}`);
 }
 
-function writeManifest(sourceRepo, syncedFiles) {
-  const manifest = {
-    sourceRepo,
-    sourceFiles: syncedFiles,
-    syncedAt: new Date().toISOString(),
-  };
+// Validates and reads everything for every file first, only writing once
+// every file has cleared validation — a failure on the second file (e.g. a
+// new import) must not leave the first file's vendored copy updated while
+// the manifest (written last, after the loop) still describes the old state.
+function resolveFilesToSync(checkoutDir) {
+  return VENDORED_FILES.map(
+    ({ sourceRelativePath, vendorFileName, description, requiredExports }) => {
+      const source = readSource(checkoutDir, sourceRelativePath);
 
-  mkdirSync(VENDOR_DIR, { recursive: true });
-  writeFileSync(MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
+      assertFileHasNoImports(source, sourceRelativePath);
+      assertRequiredExportsPresent(source, sourceRelativePath, requiredExports);
+      assertPathIsCommitted(checkoutDir, sourceRelativePath);
+
+      return {
+        sourceRelativePath,
+        vendorFileName,
+        source,
+        header: vendorFileHeader(sourceRelativePath, description),
+        sourceCommit: readCommitHash(checkoutDir, sourceRelativePath),
+      };
+    },
+  );
 }
 
-// Resolves everything that can fail (missing files, non-type-only... i.e.
-// non-import-free content, uncommitted changes) before writing anything, so
-// a mid-sync failure can't leave one vendored file updated and the other
-// stale, or a manifest that disagrees with what's on disk.
 function syncFrom(checkoutDir) {
+  const resolvedFiles = resolveFilesToSync(checkoutDir);
   const sourceRepo = resolveSourceRepo(checkoutDir);
-  const syncedFiles = [];
 
-  for (const {
-    sourceRelativePath,
-    vendorFileName,
-    description,
-  } of VENDORED_FILES) {
-    const source = readSource(checkoutDir, sourceRelativePath);
-
-    assertFileHasNoImports(source, sourceRelativePath);
-    assertPathIsCommitted(checkoutDir, sourceRelativePath);
-
-    const sourceCommit = readCommitHash(checkoutDir, sourceRelativePath);
-
-    writeVendoredFile(
-      vendorFileName,
-      vendorFileHeader(sourceRelativePath, description),
-      source,
-    );
-    syncedFiles.push({ path: sourceRelativePath, sourceCommit });
+  for (const { vendorFileName, header, source } of resolvedFiles) {
+    writeVendoredFile(vendorFileName, header, source);
   }
 
-  writeManifest(sourceRepo, syncedFiles);
+  writeManifest(
+    MANIFEST_FILE,
+    sourceRepo,
+    resolvedFiles.map(({ sourceRelativePath, sourceCommit }) => ({
+      path: sourceRelativePath,
+      sourceCommit,
+    })),
+  );
 }
 
 function main() {

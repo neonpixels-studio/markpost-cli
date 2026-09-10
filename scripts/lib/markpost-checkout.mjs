@@ -1,26 +1,42 @@
 // Shared git-checkout helpers for the markpost contract-sync scripts
 // (scripts/sync-source-contract.mjs, scripts/sync-settings-contract.mjs).
-// Every sync script needs the same three things — a fresh markpost checkout
-// (or an explicit `--from` override), the commit that last touched the file
-// it's vendoring, and the repo its `origin` actually points at — so this is
-// the one place that logic lives instead of drifting copies in each script.
+// Every sync script needs the same things — a fresh markpost checkout (or an
+// explicit `--from` override), the commit that last touched the file it's
+// vendoring, the repo its `origin` actually points at, reading a source file
+// out of the checkout, and writing a manifest recording where a vendored copy
+// came from — so this is the one place that logic lives instead of drifting
+// copies in each script.
 //
 // scripts/sync-contract.mjs and scripts/sync-markdown-serialization.mjs
 // predate this module and keep their own copies; they aren't touched here to
 // avoid churning working, already-reviewed code, but any *new* sync script
 // should build on this one instead of adding a third/fourth copy.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 export const MARKPOST_REPO_URL =
   'https://github.com/neonpixels-studio/markpost';
 
+// Full history (`--filter=blob:none`, not `--depth 1`) so `readCommitHash`
+// below can actually walk a path's log instead of every path reporting HEAD
+// (the only commit a shallow clone has). Blobless keeps the clone cheap —
+// only the commit graph and trees download eagerly, file contents fetch
+// on demand for the paths actually read.
 export function cloneMarkpostInto(cloneDir) {
-  execFileSync('git', ['clone', '--depth', '1', MARKPOST_REPO_URL, cloneDir], {
-    stdio: 'inherit',
-  });
+  execFileSync(
+    'git',
+    ['clone', '--filter=blob:none', MARKPOST_REPO_URL, cloneDir],
+    { stdio: 'inherit' },
+  );
 }
 
 // Refuses to record provenance for a file with uncommitted local changes —
@@ -45,11 +61,13 @@ export function assertPathIsCommitted(checkoutDir, relativePath) {
 
 // The commit that actually last touched `relativePath`, not just whatever
 // HEAD happens to be — keeps the manifest diff stable across upstream
-// commits that don't touch the vendored file. `git log` exits 0 with empty
-// stdout when the path has no commits in this checkout (e.g. it's present
-// but git-ignored, or this isn't the checkout's repo root) — that's exactly
-// the case the manifest's provenance claim needs to fail on, not silently
-// record as `sourceCommit: ""`.
+// commits that don't touch the vendored file. Requires a full-history
+// checkout (see cloneMarkpostInto); a shallow clone has only one commit and
+// would report it for every path regardless of when that path last changed.
+// `git log` exits 0 with empty stdout when the path has no commits in this
+// checkout (e.g. it's present but git-ignored, or this isn't the checkout's
+// repo root) — that's exactly the case the manifest's provenance claim needs
+// to fail on, not silently record as `sourceCommit: ""`.
 export function readCommitHash(checkoutDir, relativePath) {
   const commitHash = execFileSync(
     'git',
@@ -67,6 +85,25 @@ export function readCommitHash(checkoutDir, relativePath) {
   return commitHash;
 }
 
+// Strips any embedded userinfo (`https://x-access-token:<token>@github.com/...`)
+// before a remote URL is recorded anywhere — a checkout cloned by CI tooling
+// or a credential-embedding helper would otherwise leak that token straight
+// into a committed manifest, where a one-line JSON diff is easy to skim past
+// in review. scp-style URLs (`git@host:org/repo`) fail `new URL(...)` and
+// have no userinfo to strip, so they pass through unchanged.
+function stripCredentials(remoteUrl) {
+  try {
+    const parsed = new URL(remoteUrl);
+
+    parsed.username = '';
+    parsed.password = '';
+
+    return parsed.toString();
+  } catch {
+    return remoteUrl;
+  }
+}
+
 // Resolves the checkout's real `origin` remote so a `--from` sync against a
 // fork or a local branch records provenance the manifest can actually be
 // verified against, instead of hardcoding `neonpixels-studio/markpost` for a
@@ -74,34 +111,75 @@ export function readCommitHash(checkoutDir, relativePath) {
 // when the checkout has no `origin` remote (e.g. a bare local clone).
 export function resolveSourceRepo(checkoutDir) {
   try {
-    return execFileSync('git', ['remote', 'get-url', 'origin'], {
+    const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd: checkoutDir,
       encoding: 'utf-8',
     }).trim();
+
+    return stripCredentials(remoteUrl);
   } catch {
     return resolve(checkoutDir);
   }
 }
 
+// Reads `relativePath` out of a markpost checkout, failing with a
+// friendly "is this a markpost checkout?" message rather than a raw ENOENT
+// when the path is missing (e.g. `--from` pointed at the wrong directory).
+export function readSource(checkoutDir, relativePath) {
+  const sourcePath = join(checkoutDir, relativePath);
+
+  if (!existsSync(sourcePath)) {
+    throw new Error(
+      `No ${relativePath} found in ${checkoutDir} — is this a markpost checkout?`,
+    );
+  }
+
+  return readFileSync(sourcePath, 'utf-8');
+}
+
+// Writes a sync manifest recording which repo and commit(s) a vendored copy
+// came from, creating the vendor directory if needed. `syncedFiles` is an
+// array of `{ path, sourceCommit }` — one entry per source file the calling
+// script vendored from.
+export function writeManifest(manifestFile, sourceRepo, syncedFiles) {
+  const manifest = {
+    sourceRepo,
+    sourceFiles: syncedFiles,
+    syncedAt: new Date().toISOString(),
+  };
+
+  mkdirSync(dirname(manifestFile), { recursive: true });
+  writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 // Runs `syncFrom(checkoutDir)` against either an explicit `--from` checkout
 // or a fresh temporary clone, and guarantees the temporary clone (never a
 // caller-supplied `--from` directory) is removed afterwards even if
-// `syncFrom` throws partway through.
-export function withMarkpostCheckout(fromPath, temporaryDirPrefix, syncFrom) {
+// `syncFrom` throws partway through. Returns whatever `syncFrom` returns.
+//
+// `cloneInto` defaults to the real network clone but is overridable so
+// tests/scripts/markpost-checkout.test.ts can exercise the temp-dir
+// lifecycle (creation, and cleanup on both success and throw) with a fake
+// that never touches the network — the same "isolate external services"
+// reasoning as apiFetch in src/libs/api.ts.
+export function withMarkpostCheckout(
+  fromPath,
+  temporaryDirPrefix,
+  syncFrom,
+  cloneInto = cloneMarkpostInto,
+) {
   const temporaryCloneDir = fromPath
     ? undefined
     : mkdtempSync(join(tmpdir(), temporaryDirPrefix));
 
   try {
     if (temporaryCloneDir) {
-      cloneMarkpostInto(temporaryCloneDir);
+      cloneInto(temporaryCloneDir);
     }
 
     const checkoutDir = fromPath ?? temporaryCloneDir;
 
-    syncFrom(checkoutDir);
-
-    return checkoutDir;
+    return syncFrom(checkoutDir);
   } finally {
     if (temporaryCloneDir) {
       rmSync(temporaryCloneDir, { recursive: true, force: true });

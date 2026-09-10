@@ -129,4 +129,28 @@ describe('extractUserSettingsDefaults', () => {
       /conflictStrategy/,
     );
   });
+
+  // Regression coverage: drizzle accepts modifier calls in either order
+  // (`.default(...).notNull()` as well as `.notNull().default(...)`) — the
+  // extractor's recursive walk must find `.default(...)` regardless of which
+  // side of `.notNull()` it lands on.
+  it('finds the default when .default(...) comes before .notNull()', () => {
+    const reordered = SCHEMA_SOURCE.replace(
+      'autoSync: boolean("auto_sync").notNull().default(true),',
+      'autoSync: boolean("auto_sync").default(true).notNull(),',
+    );
+
+    expect(extractUserSettingsDefaults(reordered).autoSync).toBe(true);
+  });
+
+  it('throws loudly when a tracked column has a non-literal default', () => {
+    const nonLiteralDefault = SCHEMA_SOURCE.replace(
+      'conflictStrategy: text("conflict_strategy").notNull().default("suffix"),',
+      'conflictStrategy: text("conflict_strategy").notNull().default(DEFAULT_STRATEGY),',
+    );
+
+    expect(() => extractUserSettingsDefaults(nonLiteralDefault)).toThrow(
+      /conflictStrategy/,
+    );
+  });
 });

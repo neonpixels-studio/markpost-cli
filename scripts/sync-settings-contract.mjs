@@ -26,7 +26,7 @@
 //   npm run sync:settings-contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:settings-contract -- --from=<path>    # same, `=` form
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
@@ -35,8 +35,10 @@ import { parseFromPathArg } from './sync-contract.mjs';
 import {
   assertPathIsCommitted,
   readCommitHash,
+  readSource,
   resolveSourceRepo,
   withMarkpostCheckout,
+  writeManifest,
 } from './lib/markpost-checkout.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -81,18 +83,6 @@ const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 // exact commits this was synced from.
 
 `;
-
-function readSource(checkoutDir, sourceRelativePath) {
-  const sourcePath = join(checkoutDir, sourceRelativePath);
-
-  if (!existsSync(sourcePath)) {
-    throw new Error(
-      `No ${sourceRelativePath} found in ${checkoutDir} — is this a markpost checkout?`,
-    );
-  }
-
-  return readFileSync(sourcePath, 'utf-8');
-}
 
 function parseSource(sourceRelativePath, source) {
   return ts.createSourceFile(
@@ -289,17 +279,6 @@ function writeVendoredFile(conflictStrategiesDeclaration, defaults) {
   writeFileSync(VENDOR_FILE, `${VENDOR_FILE_HEADER}${body}\n`);
 }
 
-function writeManifest(sourceRepo, syncedFiles) {
-  const manifest = {
-    sourceRepo,
-    sourceFiles: syncedFiles,
-    syncedAt: new Date().toISOString(),
-  };
-
-  mkdirSync(VENDOR_DIR, { recursive: true });
-  writeFileSync(MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
 // Resolves everything that can fail (missing files, missing declarations,
 // uncommitted changes) before writing anything, so a mid-sync failure can't
 // leave the vendored file and the manifest's recorded commits disagreeing
@@ -334,7 +313,7 @@ function syncFrom(checkoutDir) {
   ];
 
   writeVendoredFile(conflictStrategiesDeclaration, defaults);
-  writeManifest(sourceRepo, syncedFiles);
+  writeManifest(MANIFEST_FILE, sourceRepo, syncedFiles);
 }
 
 function main() {
