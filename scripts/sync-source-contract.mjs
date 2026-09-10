@@ -115,8 +115,24 @@ export function assertFileHasNoImports(sourceFile, sourceRelativePath) {
   }
 }
 
+// A local re-export (`const SOURCE_TYPES = [...]; export { SOURCE_TYPES };`)
+// is just as valid and verbatim-vendorable as an inline `export const` — it
+// has no `moduleSpecifier` (that's `export { x } from './other'`, which
+// re-exports someone else's declaration and wouldn't be self-contained here).
+function namesFromLocalReExport(statement) {
+  if (!ts.isExportDeclaration(statement) || statement.moduleSpecifier) {
+    return [];
+  }
+
+  if (!statement.exportClause || !ts.isNamedExports(statement.exportClause)) {
+    return [];
+  }
+
+  return statement.exportClause.elements.map((element) => element.name.text);
+}
+
 function exportedTopLevelNames(sourceFile) {
-  return sourceFile.statements
+  const inlineExportNames = sourceFile.statements
     .filter(
       (statement) =>
         hasExportModifier(statement) &&
@@ -134,6 +150,12 @@ function exportedTopLevelNames(sourceFile) {
 
       return statement.name ? [statement.name.getText(sourceFile)] : [];
     });
+
+  const localReExportNames = sourceFile.statements.flatMap(
+    namesFromLocalReExport,
+  );
+
+  return [...inlineExportNames, ...localReExportNames];
 }
 
 // Confirms every name the drift test imports from the vendored file is still
@@ -169,7 +191,13 @@ function writeVendoredFile(vendorFileName, header, source) {
 // every file has cleared validation — a failure on the second file (e.g. a
 // new import) must not leave the first file's vendored copy updated while
 // the manifest (written last, after the loop) still describes the old state.
-function resolveFilesToSync(checkoutDir) {
+// This relies on `Array.prototype.map` being eager and synchronous: a throw
+// partway through never returns a partial array, so `syncFrom`'s write loop
+// below can only ever run once every entry has already cleared validation.
+// Exported so tests/scripts/sync-source-contract.test.ts can exercise that
+// guarantee directly, without touching the real vendor directory the way an
+// end-to-end run of `syncFrom` itself would.
+export function resolveFilesToSync(checkoutDir) {
   return VENDORED_FILES.map(
     ({ sourceRelativePath, vendorFileName, description, requiredExports }) => {
       const source = readSource(checkoutDir, sourceRelativePath);

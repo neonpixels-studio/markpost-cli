@@ -116,6 +116,32 @@ describe('extractConflictStrategiesDeclaration', () => {
       extractConflictStrategiesDeclaration(withSiblingDeclarator),
     ).toThrow(/alongside another declarator/);
   });
+
+  // Regression coverage: `as const` isn't the only compile-time-erased
+  // wrapper markpost could reasonably write — `satisfies` and redundant
+  // parens are just as self-contained and must not be misdiagnosed as "now
+  // references another identifier".
+  it('accepts CONFLICT_STRATEGIES wrapped in both as const and satisfies', () => {
+    const withSatisfies = RESPONSE_SOURCE.replace(
+      'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
+      'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const satisfies readonly string[];',
+    );
+
+    expect(() =>
+      extractConflictStrategiesDeclaration(withSatisfies),
+    ).not.toThrow();
+  });
+
+  it('accepts CONFLICT_STRATEGIES wrapped in redundant parens', () => {
+    const withParens = RESPONSE_SOURCE.replace(
+      'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
+      'export const CONFLICT_STRATEGIES = (["suffix", "overwrite", "skip"] as const);',
+    );
+
+    expect(() =>
+      extractConflictStrategiesDeclaration(withParens),
+    ).not.toThrow();
+  });
 });
 
 describe('extractUserSettingsDefaults', () => {
@@ -179,6 +205,27 @@ describe('extractUserSettingsDefaults', () => {
     );
 
     expect(extractUserSettingsDefaults(reordered).autoSync).toBe(true);
+  });
+
+  // Regression coverage: newer drizzle versions support a callback form for
+  // a table's second argument (`pgTable("x", (t) => ({ ... }))`, used to
+  // reference the table's own columns e.g. for composite indexes) alongside
+  // the plain object literal form SCHEMA_SOURCE otherwise uses.
+  it('finds columns when the table uses the callback form', () => {
+    const callbackForm = SCHEMA_SOURCE.replace(
+      'export const userSettings = pgTable("user_settings", {',
+      'export const userSettings = pgTable("user_settings", (t) => ({',
+    ).replace(
+      '  theme: text("theme").notNull().default("system"),\n});',
+      '  theme: text("theme").notNull().default("system"),\n}));',
+    );
+
+    expect(extractUserSettingsDefaults(callbackForm)).toEqual({
+      autoSync: true,
+      autoDelete: true,
+      frontmatter: true,
+      conflictStrategy: 'suffix',
+    });
   });
 
   it('throws loudly when a tracked column has a non-literal default', () => {

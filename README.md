@@ -184,7 +184,7 @@ re-exports the generic envelope types (`ApiError`, `ApiRequest`,
 
 - **Refreshing it:** run `npm run sync:contract` (optionally
   `-- --from <path-to-a-local-markpost-checkout>`; without `--from` it
-  shallow-clones markpost fresh). This is a **human-run** step, not part of
+  clones markpost fresh, full history and blobless). This is a **human-run** step, not part of
   CI — it needs network access (or a local checkout) to fetch the current
   contract, and a test that depends on network access would be flaky and fail
   offline. Review the resulting diff, run `npm run build` and `npm test`, then
@@ -223,7 +223,7 @@ test failing. This closes that gap the same way the contract sync does.
 
 - **Refreshing it:** run `npm run sync:markdown-serialization` (optionally
   `-- --from <path-to-a-local-markpost-checkout>`; without `--from` it
-  shallow-clones markpost fresh). Like the contract sync this is a
+  clones markpost fresh, full history and blobless). Like the contract sync this is a
   **human-run** step, not part of CI — it needs network access (or a local
   checkout). It extracts just the serialization slice of `markdown.ts` (the
   four functions above plus the two types they use, leaving the

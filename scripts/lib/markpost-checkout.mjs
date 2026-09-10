@@ -74,11 +74,22 @@ export function assertPathIsCommitted(checkoutDir, relativePath) {
 // (see its own comment), so this only ever fires for a caller-supplied
 // `--from` directory.
 export function assertCheckoutIsNotShallow(checkoutDir) {
-  const isShallow = execFileSync(
-    'git',
-    ['rev-parse', '--is-shallow-repository'],
-    { cwd: checkoutDir, encoding: 'utf-8' },
-  ).trim();
+  let isShallow;
+
+  try {
+    isShallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+      cwd: checkoutDir,
+      encoding: 'utf-8',
+    }).trim();
+  } catch {
+    // Not a git repo at all (e.g. --from pointed at a plain directory) — that
+    // is a different problem than shallow-ness, and readSource's friendlier
+    // "is this a markpost checkout?" message covers it; don't shadow that
+    // with a raw git error here.
+    throw new Error(
+      `${checkoutDir} is not a git checkout — is this a markpost checkout?`,
+    );
+  }
 
   if (isShallow === 'true') {
     throw new Error(

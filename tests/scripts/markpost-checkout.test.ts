@@ -193,6 +193,24 @@ describe('assertCheckoutIsNotShallow', () => {
       rmSync(shallowCloneDir, { recursive: true, force: true });
     }
   });
+
+  // Regression coverage: a directory that isn't a git repo at all (e.g.
+  // --from pointed at the wrong path) is a different problem than
+  // shallow-ness — it must surface the same friendly "is this a markpost
+  // checkout?" wording as readSource, not a raw git error.
+  it('throws a friendly error for a directory that is not a git repo', () => {
+    const notARepoDir = mkdtempSync(
+      join(tmpdir(), 'markpost-checkout-not-a-repo-'),
+    );
+
+    try {
+      expect(() => assertCheckoutIsNotShallow(notARepoDir)).toThrow(
+        /is this a markpost checkout/,
+      );
+    } finally {
+      rmSync(notARepoDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('withMarkpostCheckout', () => {

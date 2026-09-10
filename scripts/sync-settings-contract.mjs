@@ -86,8 +86,23 @@ const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 
 `;
 
+// Unwraps any of `as const`, `satisfies X`, and surrounding parens, however
+// many are nested (e.g. `([...] as const) satisfies readonly string[]`) —
+// all three are erased at compile time and don't change what the underlying
+// expression actually is, so a plain array of string literals under any
+// combination of them is still self-contained and safe to vendor verbatim.
 function unwrapAsConstAssertion(expression) {
-  return ts.isAsExpression(expression) ? expression.expression : expression;
+  let current = expression;
+
+  while (
+    ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isParenthesizedExpression(current)
+  ) {
+    current = current.expression;
+  }
+
+  return current;
 }
 
 // The declaration is vendored as verbatim statement text (see
@@ -210,6 +225,26 @@ function literalToJsValue(node, columnName) {
   );
 }
 
+// drizzle's second `pgTable` argument is either the column object literal
+// directly (`pgTable("x", { ... })`) or, in newer drizzle versions, a
+// callback that returns one (`pgTable("x", (t) => ({ ... }))`, used to
+// reference the table's own columns while defining them — e.g. for
+// composite indexes). An arrow returning an object literal must parenthesize
+// it (`=> ({...})`, never `=> {...}`, which parses as a block), so the
+// object literal is always one `ParenthesizedExpression` unwrap away from
+// the arrow's body.
+function unwrapColumnsArgument(node) {
+  if (ts.isArrowFunction(node)) {
+    return unwrapColumnsArgument(node.body);
+  }
+
+  if (ts.isParenthesizedExpression(node)) {
+    return unwrapColumnsArgument(node.expression);
+  }
+
+  return ts.isObjectLiteralExpression(node) ? node : undefined;
+}
+
 function findUserSettingsColumns(sourceFile) {
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) {
@@ -229,9 +264,10 @@ function findUserSettingsColumns(sourceFile) {
     }
 
     const [, columnsArgument] = declaration.initializer.arguments;
+    const columns = columnsArgument && unwrapColumnsArgument(columnsArgument);
 
-    if (columnsArgument && ts.isObjectLiteralExpression(columnsArgument)) {
-      return columnsArgument;
+    if (columns) {
+      return columns;
     }
   }
 

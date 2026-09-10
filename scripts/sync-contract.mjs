@@ -10,7 +10,7 @@
 // the diff it produces, then commit the result.
 //
 // Usage:
-//   npm run sync:contract                     # shallow-clones markpost fresh
+//   npm run sync:contract                     # clones markpost fresh (full history, blobless)
 //   npm run sync:contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:contract -- --from=<path>    # same, `=` form
 
@@ -113,10 +113,18 @@ function parseFromPathArg(argv) {
   return fromPath;
 }
 
+// Full history (`--filter=blob:none`, not `--depth 1`): `readCommitHash`
+// below needs the real per-path log, and a shallow clone's single grafted
+// commit shows the contract file as newly added, so it would report that
+// boundary commit as "last touched" regardless of when the file actually
+// last changed. Blobless keeps the clone cheap — only the commit graph and
+// trees download eagerly.
 function cloneMarkpostInto(cloneDir) {
-  execFileSync('git', ['clone', '--depth', '1', MARKPOST_REPO_URL, cloneDir], {
-    stdio: 'inherit',
-  });
+  execFileSync(
+    'git',
+    ['clone', '--filter=blob:none', MARKPOST_REPO_URL, cloneDir],
+    { stdio: 'inherit' },
+  );
 }
 
 function assertContractIsCommitted(checkoutDir) {
