@@ -144,6 +144,78 @@ describe('runEventsCommand', () => {
       );
     });
 
+    it('colors each kind through its dedicated chalk function', async () => {
+      const chalk = (await import('chalk')).default;
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      vi.mocked(fetchAllEvents).mockResolvedValue({
+        ok: true,
+        events: [okEvent, errEvent],
+        partial: false,
+      });
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list']);
+
+      expect(chalk.green).toHaveBeenCalledWith('OK');
+      expect(chalk.redBright).toHaveBeenCalledWith('ERR');
+    });
+
+    it('leaves an off-contract kind uncolored instead of failing', async () => {
+      const chalk = (await import('chalk')).default;
+      const offContractEvent: Event = {
+        id: 'evt-4',
+        userId: 'user-1',
+        ts: '2024-01-04T00:00:00Z',
+        kind: 'mystery',
+        message: 'Unknown kind from an off-contract response',
+        recordUuid: null,
+        sourceId: null,
+      };
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      vi.mocked(fetchAllEvents).mockResolvedValue({
+        ok: true,
+        events: [offContractEvent],
+        partial: false,
+      });
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list']);
+
+      expect(chalk.green).not.toHaveBeenCalled();
+      expect(chalk.yellow).not.toHaveBeenCalled();
+      expect(chalk.redBright).not.toHaveBeenCalled();
+      expect(chalk.dim).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('MYSTERY'),
+      );
+    });
+
+    // A non-string kind (an off-contract response) must not crash the whole
+    // list via a bare `.toUpperCase()` call.
+    it('does not crash on a non-string kind', async () => {
+      const malformedEvent = {
+        id: 'evt-5',
+        userId: 'user-1',
+        ts: '2024-01-05T00:00:00Z',
+        kind: null,
+        message: 'Malformed kind',
+        recordUuid: null,
+        sourceId: null,
+      } as unknown as Event;
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      vi.mocked(fetchAllEvents).mockResolvedValue({
+        ok: true,
+        events: [malformedEvent],
+        partial: false,
+      });
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await expect(runEventsCommand(['list'])).resolves.not.toThrow();
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Malformed kind'),
+      );
+    });
+
     // recordUuid is null on errEvent — its "record:" line must not print.
     it('omits the record line for an event with no recordUuid', async () => {
       const { fetchAllEvents } = await import('@/libs/events.js');
@@ -192,6 +264,44 @@ describe('runEventsCommand', () => {
         );
       expect(printedControl).toBe(false);
       expect(console.log).toHaveBeenCalledWith('  A B');
+    });
+
+    // Covers the fields the test above doesn't: an off-contract kind, plus
+    // sourceId/recordUuid, which are only sanitized on the "source:"/
+    // "record:" lines.
+    it('strips control characters from kind, sourceId, and recordUuid before printing', async () => {
+      const control = String.fromCharCode(0x1b);
+      const evilEvent: Event = {
+        id: 'evt-6',
+        userId: 'user-1',
+        ts: '2024-01-06T00:00:00Z',
+        kind: `mystery${control}kind`,
+        message: 'irrelevant',
+        recordUuid: `rec${control}1`,
+        sourceId: `src${control}1`,
+      };
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      vi.mocked(fetchAllEvents).mockResolvedValue({
+        ok: true,
+        events: [evilEvent],
+        partial: false,
+      });
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list']);
+
+      const printedControl = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('source: src 1'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('record: rec 1'),
+      );
     });
 
     it('prints the events as a parseable JSON array with --json', async () => {
@@ -261,6 +371,9 @@ describe('runEventsCommand', () => {
 
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchAllEvents).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--bogus'),
+      );
       expect(process.exitCode).toBe(1);
     });
 
@@ -289,6 +402,29 @@ describe('runEventsCommand', () => {
       expect(console.log).not.toHaveBeenCalledWith('No events found.');
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to fetch events from the server.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A partial read that still collected some events must print them,
+    // warn, and exit non-zero — never silently present a truncated log as
+    // the full one.
+    it('warns and exits non-zero on a partial read, still printing what it got', async () => {
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      vi.mocked(fetchAllEvents).mockResolvedValue({
+        ok: true,
+        events: [okEvent],
+        partial: true,
+      });
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('this list may be incomplete'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Ingested record from webhook'),
       );
       expect(process.exitCode).toBe(1);
     });

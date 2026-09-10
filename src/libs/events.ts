@@ -14,16 +14,21 @@ import {
 // markpost paginates the events feed with the same cursor scheme as records
 // (server/api/events/index.get.ts): each response's `links.next` embeds the
 // `page[after]` cursor for the following page, and is `null` once
-// `meta.hasMore` is false. This mirrors `extractAfterCursor` in records.ts —
-// same avoidance of `URLSearchParams` (it would turn a literal `+` in the
-// cursor into a space) and the same percent-decoded key match, since
-// markpost's `eventPaginationLinks` (server/utils/response.ts) builds the
-// link with `URLSearchParams` too, producing `page%5Bafter%5D=...`. Kept as
-// its own small copy rather than importing records.ts's private helper: the
-// two only share this one function today (not the rule-of-three's three
-// occurrences), and pulling in the whole records module for it would be a
-// worse coupling than the duplication. Flagged as a follow-up if a third
-// cursor-paginated CLI resource shows up.
+// `meta.hasMore` is false. This whole module mirrors records.ts's
+// fetchAllRecords/fetchPaginatedRecords closely — extractAfterCursor (same
+// avoidance of `URLSearchParams`, which would turn a literal `+` in the
+// cursor into a space, and the same percent-decoded key match, since
+// markpost's `eventPaginationLinks` in server/utils/response.ts builds the
+// link with `URLSearchParams` too, producing `page%5Bafter%5D=...`), the
+// FetchAll*Result shape, the cursor-following loop (nextCursorFrom,
+// seenCursors, the partial flag), and the meta/links fallback defaults below.
+// Kept as its own copy rather than importing records.ts's private helpers:
+// with only two occurrences the rule of three doesn't yet require a shared
+// abstraction, and pulling in the whole records module for a few functions
+// would be a worse coupling than the duplication. Flagged as a follow-up
+// (extract a shared `fetchAllPages` into e.g. `@/libs/pagination.ts`) if a
+// third cursor-paginated CLI resource shows up — see the PR's follow-up
+// suggestions.
 const decodePercentEncoding = (value: string): string | undefined => {
   try {
     return decodeURIComponent(value);

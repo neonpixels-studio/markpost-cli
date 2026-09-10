@@ -7,7 +7,7 @@ import { failWithMessage } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
-import { Event } from '@/types/events.types.js';
+import { Event, EVENT_KINDS, EventKind } from '@/types/events.types.js';
 
 export const USAGE = `Usage: markpost events list [options]
 
@@ -70,29 +70,33 @@ const parseListArgs = (args: string[]): void => {
   }
 };
 
-// Color-codes by markpost's event kind (server/db/schema.ts EVENT_KINDS:
-// ok/dim/warn/err) so a scan of the log reads at a glance; an off-contract
-// kind still prints, just uncolored.
-const colorizeKind = (kind: string): string => {
-  const label = sanitizeForTerminal(kind.toUpperCase());
+// One color function per markpost event kind (server/db/schema.ts
+// EVENT_KINDS), keyed off the shared `EventKind` union so a kind added there
+// can't silently ship with no color mapping here.
+const KIND_COLORS: Record<EventKind, (text: string) => string> = {
+  ok: chalk.green,
+  dim: chalk.dim,
+  warn: chalk.yellow,
+  err: chalk.redBright,
+};
 
-  if (kind === 'ok') {
-    return chalk.green(label);
+const isEventKind = (kind: string): kind is EventKind =>
+  (EVENT_KINDS as readonly string[]).includes(kind);
+
+// `event.kind` is untrusted API output typed as a bare `string` (see
+// events.types.ts), so it's coerced through `String(... ?? '')` before
+// `toUpperCase()` — an off-contract non-string value (null, a number) must
+// not throw and take down the whole list. An off-contract *string* value
+// (neither ok/dim/warn/err) still prints, just uncolored.
+const colorizeKind = (kind: unknown): string => {
+  const kindText = String(kind ?? '');
+  const label = sanitizeForTerminal(kindText.toUpperCase());
+
+  if (!isEventKind(kindText)) {
+    return label;
   }
 
-  if (kind === 'warn') {
-    return chalk.yellow(label);
-  }
-
-  if (kind === 'err') {
-    return chalk.redBright(label);
-  }
-
-  if (kind === 'dim') {
-    return chalk.dim(label);
-  }
-
-  return label;
+  return KIND_COLORS[kindText](label);
 };
 
 // ts, kind, and message come from the untrusted API response, so each is

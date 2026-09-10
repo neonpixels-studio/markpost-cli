@@ -28,6 +28,12 @@ function mockFetch(responseBody: object, ok = true, status = ok ? 200 : 400) {
   });
 }
 
+function mockFetchTimeout() {
+  global.fetch = vi
+    .fn()
+    .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+}
+
 const mockEvent: Event = {
   id: 'evt-1',
   userId: 'user-1',
@@ -81,7 +87,9 @@ describe('fetchPaginatedEvents', () => {
 
     const requestedUrl = vi.mocked(global.fetch).mock.calls[0][0] as string;
     expect(requestedUrl).toContain('page[size]=50');
-    expect(requestedUrl).toContain(`page[after]=${encodeURIComponent('cursor-1')}`);
+    expect(requestedUrl).toContain(
+      `page[after]=${encodeURIComponent('cursor-1')}`,
+    );
   });
 
   // markpost's eventPaginationLinks sends only `next` (no `prev`), unlike
@@ -183,7 +191,9 @@ describe('fetchAllEvents', () => {
           Promise.resolve({
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
-            links: { next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1' },
+            links: {
+              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+            },
           }),
       })
       .mockResolvedValueOnce({
@@ -206,7 +216,9 @@ describe('fetchAllEvents', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const secondRequestUrl = fetchMock.mock.calls[1][0] as string;
-    expect(secondRequestUrl).toContain(`page[after]=${encodeURIComponent('evt-1')}`);
+    expect(secondRequestUrl).toContain(
+      `page[after]=${encodeURIComponent('evt-1')}`,
+    );
   });
 
   // A later page failing non-systemically must keep the pages already
@@ -220,7 +232,9 @@ describe('fetchAllEvents', () => {
           Promise.resolve({
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
-            links: { next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1' },
+            links: {
+              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+            },
           }),
       })
       .mockRejectedValueOnce(new Error('Network blip'));
@@ -246,7 +260,9 @@ describe('fetchAllEvents', () => {
           Promise.resolve({
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
-            links: { next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1' },
+            links: {
+              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+            },
           }),
       })
       .mockResolvedValueOnce({
@@ -254,14 +270,43 @@ describe('fetchAllEvents', () => {
         status: 500,
         json: () =>
           Promise.resolve({
-            errors: [
-              { status: '500', title: 'Server error', detail: 'boom' },
-            ],
+            errors: [{ status: '500', title: 'Server error', detail: 'boom' }],
           }),
       });
     global.fetch = fetchMock;
 
     await expect(fetchAllEvents()).rejects.toThrow();
+  });
+
+  // A request timeout on the INITIAL page must propagate as an
+  // ApiTimeoutError (fail loud), never collapse to `{ ok: false }`.
+  it('propagates a timeout on the initial page', async () => {
+    mockFetchTimeout();
+
+    await expect(fetchAllEvents()).rejects.toThrow(/timed out/);
+  });
+
+  // A request timeout on a LATER page dooms the rest of the read the same
+  // way a systemic failure does — it must propagate, not degrade to a
+  // partial success (logApiFailure re-throws a timeout via rethrowIfTimeout).
+  it('propagates a timeout encountered on a later page', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [eventResource(mockEvent)],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: {
+              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+            },
+          }),
+      })
+      .mockRejectedValueOnce(new DOMException('timed out', 'TimeoutError'));
+    global.fetch = fetchMock;
+
+    await expect(fetchAllEvents()).rejects.toThrow(/timed out/);
   });
 
   // A page claiming more results but yielding no usable cursor (malformed
@@ -271,6 +316,22 @@ describe('fetchAllEvents', () => {
       data: [eventResource(mockEvent)],
       meta: { total: 2, size: 1, hasMore: true },
       links: { next: null },
+    });
+
+    expect(await fetchAllEvents()).toEqual({
+      ok: true,
+      events: [mockEvent],
+      partial: true,
+    });
+  });
+
+  // A present `next` link that carries no `page[after]` param (a malformed
+  // link, distinct from a `null` link) must also flag the read incomplete.
+  it('flags partial when the next link is present but has no page[after]', async () => {
+    mockFetch({
+      data: [eventResource(mockEvent)],
+      meta: { total: 2, size: 1, hasMore: true },
+      links: { next: '/api/events?page%5Bsize%5D=1' },
     });
 
     expect(await fetchAllEvents()).toEqual({
