@@ -70,9 +70,13 @@ const parseListArgs = (args: string[]): void => {
   }
 };
 
-// One color function per markpost event kind (server/db/schema.ts
-// EVENT_KINDS), keyed off the shared `EventKind` union so a kind added there
-// can't silently ship with no color mapping here.
+// One color function per markpost event kind, keyed off the local
+// `EventKind` union (src/types/events.types.ts) so a kind added to that list
+// can't ship without a color. `EVENT_KINDS` is copied by hand from
+// markpost's server/db/schema.ts (it isn't part of the vendored contract
+// sync — see src/types/api.types.ts), so a kind added only on the server
+// side won't fail the build here; it just prints uncolored via the
+// `isEventKind` fallback below.
 const KIND_COLORS: Record<EventKind, (text: string) => string> = {
   ok: chalk.green,
   dim: chalk.dim,
