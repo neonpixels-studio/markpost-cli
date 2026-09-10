@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  assertCheckoutIsNotShallow,
   assertPathIsCommitted,
   readCommitHash,
   readSource,
@@ -27,8 +28,20 @@ import {
 
 let repoDir: string;
 
-function runGit(args: string[]) {
-  execFileSync('git', args, { cwd: repoDir, encoding: 'utf-8' });
+// Isolates every git invocation from the developer's global/system config
+// (commit.gpgsign, init.defaultObjectFormat, etc.) — without this, a machine
+// with commit signing enabled fails every test in this file on the baseline
+// commit in beforeEach, for reasons entirely unrelated to the code under test.
+function runGit(args: string[], cwd: string = repoDir) {
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    env: {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+    },
+  });
 }
 
 beforeEach(() => {
@@ -151,11 +164,45 @@ describe('writeManifest', () => {
   });
 });
 
+describe('assertCheckoutIsNotShallow', () => {
+  it('does not throw for a full-history checkout', () => {
+    expect(() => assertCheckoutIsNotShallow(repoDir)).not.toThrow();
+  });
+
+  it('throws for a shallow checkout', () => {
+    const shallowCloneDir = mkdtempSync(
+      join(tmpdir(), 'markpost-checkout-shallow-'),
+    );
+
+    try {
+      // `--depth` is silently ignored for a plain local-path clone; the
+      // `file://` form is required to actually produce a shallow clone.
+      runGit([
+        'clone',
+        '--quiet',
+        '--depth',
+        '1',
+        `file://${repoDir}`,
+        shallowCloneDir,
+      ]);
+
+      expect(() => assertCheckoutIsNotShallow(shallowCloneDir)).toThrow(
+        /shallow git clone/,
+      );
+    } finally {
+      rmSync(shallowCloneDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('withMarkpostCheckout', () => {
   // A fake `cloneInto` (the same shape as cloneMarkpostInto) that never
-  // touches the network — it just proves it was called with the temp dir
-  // withMarkpostCheckout created, by writing a marker file into it.
+  // touches the network — it just `git init`s the temp dir (so the
+  // shallow-checkout guard has a real repo to inspect) and proves it was
+  // called with the temp dir withMarkpostCheckout created, by writing a
+  // marker file into it.
   function fakeCloneInto(cloneDir: string) {
+    runGit(['init', '--quiet'], cloneDir);
     writeFileSync(join(cloneDir, 'cloned.marker'), 'cloned');
   }
 

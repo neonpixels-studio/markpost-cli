@@ -1,5 +1,6 @@
 // Shared git-checkout helpers for the markpost contract-sync scripts
-// (scripts/sync-source-contract.mjs, scripts/sync-settings-contract.mjs).
+// (scripts/sync-contract.mjs, scripts/sync-markdown-serialization.mjs,
+// scripts/sync-source-contract.mjs, scripts/sync-settings-contract.mjs).
 // Every sync script needs the same things — a fresh markpost checkout (or an
 // explicit `--from` override), the commit that last touched the file it's
 // vendoring, the repo its `origin` actually points at, reading a source file
@@ -8,9 +9,13 @@
 // copies in each script.
 //
 // scripts/sync-contract.mjs and scripts/sync-markdown-serialization.mjs
-// predate this module and keep their own copies; they aren't touched here to
-// avoid churning working, already-reviewed code, but any *new* sync script
-// should build on this one instead of adding a third/fourth copy.
+// predate this module and mostly keep their own copies (readContractSource/
+// readMarkdownSource, their own manifest writers, their own clone/main
+// plumbing) to avoid churning working, already-reviewed code — but both now
+// import `resolveSourceRepo` from here rather than keep a second and third
+// copy that skip the credential-stripping in `stripCredentials` below. Any
+// *new* sync script should build on this module rather than add another
+// copy of anything in it.
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -22,6 +27,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import ts from 'typescript';
 
 export const MARKPOST_REPO_URL =
   'https://github.com/neonpixels-studio/markpost';
@@ -57,6 +63,31 @@ export function assertPathIsCommitted(checkoutDir, relativePath) {
     `${relativePath} has uncommitted changes in ${checkoutDir} — ` +
       'commit them first so the manifest records the commit the vendored copy actually came from',
   );
+}
+
+// A `--from` checkout can be an arbitrary local clone, including a shallow
+// one — and in a shallow clone the grafted boundary commit shows every file
+// as newly added, so `git log -1 -- <path>` reports HEAD for every path
+// regardless of when it actually last changed, silently producing a false
+// provenance claim instead of the loud failure `readCommitHash` otherwise
+// guarantees. `cloneMarkpostInto` never produces a shallow clone itself
+// (see its own comment), so this only ever fires for a caller-supplied
+// `--from` directory.
+export function assertCheckoutIsNotShallow(checkoutDir) {
+  const isShallow = execFileSync(
+    'git',
+    ['rev-parse', '--is-shallow-repository'],
+    { cwd: checkoutDir, encoding: 'utf-8' },
+  ).trim();
+
+  if (isShallow === 'true') {
+    throw new Error(
+      `${checkoutDir} is a shallow git clone — per-path commit history would ` +
+        'be wrong for every file (every path would report HEAD). Run ' +
+        '"git fetch --unshallow" in it, or omit --from to let the sync ' +
+        'script clone fresh.',
+    );
+  }
 }
 
 // The commit that actually last touched `relativePath`, not just whatever
@@ -137,6 +168,33 @@ export function readSource(checkoutDir, relativePath) {
   return readFileSync(sourcePath, 'utf-8');
 }
 
+// Shared by every sync script's AST-based assertions/extractors
+// (assertFileHasNoImports, assertRequiredExportsPresent,
+// extractConflictStrategiesDeclaration, extractUserSettingsDefaults) so each
+// parses its input once instead of re-parsing the same source per assertion.
+export function parseTypeScriptSource(relativePath, source) {
+  return ts.createSourceFile(
+    relativePath,
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS,
+  );
+}
+
+// True for any top-level statement carrying an `export` modifier
+// (`export const foo = ...`, `export function foo() {}`, `export type Foo
+// = ...`, `export interface Foo {}`). Shared by the sync scripts' extractors
+// so "is this declaration exported" has one implementation instead of a
+// copy per script.
+export function hasExportModifier(statement) {
+  return (
+    statement.modifiers?.some(
+      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+    ) ?? false
+  );
+}
+
 // Writes a sync manifest recording which repo and commit(s) a vendored copy
 // came from, creating the vendor directory if needed. `syncedFiles` is an
 // array of `{ path, sourceCommit }` — one entry per source file the calling
@@ -156,6 +214,9 @@ export function writeManifest(manifestFile, sourceRepo, syncedFiles) {
 // or a fresh temporary clone, and guarantees the temporary clone (never a
 // caller-supplied `--from` directory) is removed afterwards even if
 // `syncFrom` throws partway through. Returns whatever `syncFrom` returns.
+// Rejects a shallow checkout (see assertCheckoutIsNotShallow) before calling
+// `syncFrom` — this only ever fires for a `--from` directory, since
+// `cloneInto`'s own clone is always full-history.
 //
 // `cloneInto` defaults to the real network clone but is overridable so
 // tests/scripts/markpost-checkout.test.ts can exercise the temp-dir
@@ -178,6 +239,8 @@ export function withMarkpostCheckout(
     }
 
     const checkoutDir = fromPath ?? temporaryCloneDir;
+
+    assertCheckoutIsNotShallow(checkoutDir);
 
     return syncFrom(checkoutDir);
   } finally {

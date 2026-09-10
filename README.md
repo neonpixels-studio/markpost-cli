@@ -157,19 +157,19 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 
 ### Scripts
 
-| Command                               | Description                                                   |
-| ------------------------------------- | ------------------------------------------------------------- |
-| `npm run build`                       | Compile TypeScript to `dist/`                                 |
-| `npm run watch`                       | Watch and recompile on changes                                |
-| `npm test`                            | Run tests with Vitest                                         |
-| `npm run test:ci`                     | Run tests once (CI mode)                                      |
-| `npm run test:ui`                     | Run tests with Vitest UI                                      |
-| `npm run lint`                        | Check formatting and linting                                  |
-| `npm run lint:fix`                    | Auto-fix formatting and linting issues                        |
-| `npm run sync:contract`               | Refresh the vendored markpost API contract (see below)        |
-| `npm run sync:markdown-serialization` | Refresh the vendored markpost serialization slice (see below) |
+| Command                               | Description                                                                   |
+| ------------------------------------- | ----------------------------------------------------------------------------- |
+| `npm run build`                       | Compile TypeScript to `dist/`                                                 |
+| `npm run watch`                       | Watch and recompile on changes                                                |
+| `npm test`                            | Run tests with Vitest                                                         |
+| `npm run test:ci`                     | Run tests once (CI mode)                                                      |
+| `npm run test:ui`                     | Run tests with Vitest UI                                                      |
+| `npm run lint`                        | Check formatting and linting                                                  |
+| `npm run lint:fix`                    | Auto-fix formatting and linting issues                                        |
+| `npm run sync:contract`               | Refresh the vendored markpost API contract (see below)                        |
+| `npm run sync:markdown-serialization` | Refresh the vendored markpost serialization slice (see below)                 |
 | `npm run sync:source-contract`        | Refresh the vendored markpost source-type/webhook-secret contract (see below) |
-| `npm run sync:settings-contract`      | Refresh the vendored markpost settings contract (see below)   |
+| `npm run sync:settings-contract`      | Refresh the vendored markpost settings contract (see below)                   |
 
 ### Contract sync
 
@@ -264,8 +264,12 @@ closes that gap the same way `sync:contract` and
 - **Refreshing it:** run `npm run sync:source-contract` and
   `npm run sync:settings-contract` (each optionally takes
   `-- --from <path-to-a-local-markpost-checkout>`; without `--from` they
-  shallow-clone markpost fresh). Like the other syncs these are **human-run**
-  steps, not part of CI — they need network access (or a local checkout).
+  clone markpost fresh — full history, blobless (`--filter=blob:none`), not
+  a shallow `--depth 1` clone, since per-path commit history needs the real
+  log). Like the other syncs these are **human-run** steps, not part of CI —
+  they need network access (or a local checkout). A `--from` checkout that
+  turns out to be shallow is rejected with a clear error rather than silently
+  recording the wrong commit for every vendored file.
   - `sync:source-contract` vendors markpost's `shared/utils/sourceTypes.ts`
     and `shared/utils/webhookSecrets.ts` verbatim (both are self-contained,
     with no imports) into `tests/types/vendor/markpost-source-types.generated.ts`
@@ -279,6 +283,7 @@ closes that gap the same way `sync:contract` and
 
   Both write a manifest recording the exact source commit(s) they synced
   from. Review the diff, run `npm test`, then commit.
+
 - **Catching drift:** `tests/types/sources.types.test.ts` and
   `tests/types/settings.types.test.ts` run on every `npm test` /
   `npm run test:ci` and compare the CLI's mirrored constants against the

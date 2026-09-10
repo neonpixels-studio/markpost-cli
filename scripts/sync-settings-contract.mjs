@@ -22,7 +22,7 @@
 // produces, then commit the result.
 //
 // Usage:
-//   npm run sync:settings-contract                     # shallow-clones markpost fresh
+//   npm run sync:settings-contract                     # clones markpost fresh (full history, blobless)
 //   npm run sync:settings-contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:settings-contract -- --from=<path>    # same, `=` form
 
@@ -34,6 +34,8 @@ import ts from 'typescript';
 import { parseFromPathArg } from './sync-contract.mjs';
 import {
   assertPathIsCommitted,
+  hasExportModifier,
+  parseTypeScriptSource,
   readCommitHash,
   readSource,
   resolveSourceRepo,
@@ -84,22 +86,36 @@ const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 
 `;
 
-function parseSource(sourceRelativePath, source) {
-  return ts.createSourceFile(
-    sourceRelativePath,
-    source,
-    ts.ScriptTarget.Latest,
-    /* setParentNodes */ true,
-    ts.ScriptKind.TS,
-  );
+function unwrapAsConstAssertion(expression) {
+  return ts.isAsExpression(expression) ? expression.expression : expression;
 }
 
-function isExported(statement) {
-  return (
-    statement.modifiers?.some(
-      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
-    ) ?? false
-  );
+// The declaration is vendored as verbatim statement text (see
+// extractConflictStrategiesDeclaration below), with nothing resolving its
+// references the way a bundler would — so if markpost ever rewrites
+// `CONFLICT_STRATEGIES` to reference another identifier (a shared constant,
+// a spread, a function call) instead of being a plain array of string
+// literals, a verbatim copy would compile to a `ReferenceError` in the
+// vendored file with no signal pointing at the actual cause. Fail loudly at
+// sync time instead.
+function assertConflictStrategiesIsSelfContained(declaration) {
+  const initializer =
+    declaration.initializer && unwrapAsConstAssertion(declaration.initializer);
+  const isArrayOfStringLiterals =
+    initializer !== undefined &&
+    ts.isArrayLiteralExpression(initializer) &&
+    initializer.elements.every((element) => ts.isStringLiteralLike(element));
+
+  if (!isArrayOfStringLiterals) {
+    throw new Error(
+      `${CONFLICT_STRATEGIES_SOURCE_PATH}'s ${CONFLICT_STRATEGIES_DECLARATION_NAME} ` +
+        'is no longer a plain array of string literals (e.g. it now references ' +
+        'another identifier, spreads another array, or is computed) — vendoring ' +
+        'it verbatim would produce a vendored file with a dangling reference. ' +
+        'Update scripts/sync-settings-contract.mjs to extract the referenced ' +
+        'identifier(s) too.',
+    );
+  }
 }
 
 // Extracts `export const CONFLICT_STRATEGIES = [...] as const;` verbatim
@@ -108,7 +124,10 @@ function isExported(statement) {
 // tests/scripts/sync-settings-contract.test.ts can exercise it without
 // touching the network.
 export function extractConflictStrategiesDeclaration(source) {
-  const sourceFile = parseSource(CONFLICT_STRATEGIES_SOURCE_PATH, source);
+  const sourceFile = parseTypeScriptSource(
+    CONFLICT_STRATEGIES_SOURCE_PATH,
+    source,
+  );
 
   const statement = sourceFile.statements.find(
     (node) =>
@@ -129,9 +148,23 @@ export function extractConflictStrategiesDeclaration(source) {
     );
   }
 
+  if (statement.declarationList.declarations.length !== 1) {
+    throw new Error(
+      `${CONFLICT_STRATEGIES_SOURCE_PATH} now declares ` +
+        `${CONFLICT_STRATEGIES_DECLARATION_NAME} alongside another declarator in ` +
+        'the same statement — vendoring the whole statement verbatim would carry ' +
+        'that declarator along too. Update scripts/sync-settings-contract.mjs to ' +
+        'extract just the one declaration.',
+    );
+  }
+
+  const [declaration] = statement.declarationList.declarations;
+
+  assertConflictStrategiesIsSelfContained(declaration);
+
   const text = statement.getText(sourceFile);
 
-  return isExported(statement) ? text : `export ${text}`;
+  return hasExportModifier(statement) ? text : `export ${text}`;
 }
 
 // Walks a column builder chain (e.g. `boolean("auto_sync").notNull().default(true)`)
@@ -210,7 +243,7 @@ function findUserSettingsColumns(sourceFile) {
 // tests/scripts/sync-settings-contract.test.ts can exercise it without
 // touching the network.
 export function extractUserSettingsDefaults(source) {
-  const sourceFile = parseSource(SCHEMA_SOURCE_PATH, source);
+  const sourceFile = parseTypeScriptSource(SCHEMA_SOURCE_PATH, source);
   const columns = findUserSettingsColumns(sourceFile);
 
   if (!columns) {

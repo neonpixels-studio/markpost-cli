@@ -78,6 +78,44 @@ describe('extractConflictStrategiesDeclaration', () => {
       /CONFLICT_STRATEGIES/,
     );
   });
+
+  // Regression coverage: the declaration is vendored as verbatim statement
+  // text with nothing resolving its references, so if markpost ever stops
+  // writing CONFLICT_STRATEGIES as a plain array of string literals (e.g. it
+  // starts referencing another constant), a verbatim copy would compile to a
+  // dangling reference in the vendored file.
+  it('throws loudly when CONFLICT_STRATEGIES references another identifier instead of a string literal', () => {
+    const referencesAnotherConst = RESPONSE_SOURCE.replace(
+      'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
+      'const SUFFIX = "suffix";\nexport const CONFLICT_STRATEGIES = [SUFFIX, "overwrite", "skip"] as const;',
+    );
+
+    expect(() =>
+      extractConflictStrategiesDeclaration(referencesAnotherConst),
+    ).toThrow(/plain array of string literals/);
+  });
+
+  it('throws loudly when CONFLICT_STRATEGIES is no longer an array literal', () => {
+    const notAnArray = RESPONSE_SOURCE.replace(
+      'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
+      'export const CONFLICT_STRATEGIES = Object.freeze(["suffix", "overwrite", "skip"]);',
+    );
+
+    expect(() => extractConflictStrategiesDeclaration(notAnArray)).toThrow(
+      /plain array of string literals/,
+    );
+  });
+
+  it('throws loudly when CONFLICT_STRATEGIES shares a statement with another declarator', () => {
+    const withSiblingDeclarator = RESPONSE_SOURCE.replace(
+      'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
+      'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const, OTHER = 1;',
+    );
+
+    expect(() =>
+      extractConflictStrategiesDeclaration(withSiblingDeclarator),
+    ).toThrow(/alongside another declarator/);
+  });
 });
 
 describe('extractUserSettingsDefaults', () => {

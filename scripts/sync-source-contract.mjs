@@ -16,7 +16,7 @@
 // review the diff it produces, then commit the result.
 //
 // Usage:
-//   npm run sync:source-contract                     # shallow-clones markpost fresh
+//   npm run sync:source-contract                     # clones markpost fresh (full history, blobless)
 //   npm run sync:source-contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:source-contract -- --from=<path>    # same, `=` form
 
@@ -28,6 +28,8 @@ import ts from 'typescript';
 import { parseFromPathArg } from './sync-contract.mjs';
 import {
   assertPathIsCommitted,
+  hasExportModifier,
+  parseTypeScriptSource,
   readCommitHash,
   readSource,
   resolveSourceRepo,
@@ -96,15 +98,9 @@ function vendorFileHeader(sourceRelativePath, description) {
 // leave a broken vendored file behind with only a follow-up compile error to
 // explain why. Fail loudly at sync time instead, the same way
 // assertContractIsTypeOnly in sync-contract.mjs guards its own vendored file.
-export function assertFileHasNoImports(source, sourceRelativePath) {
-  const sourceFile = ts.createSourceFile(
-    sourceRelativePath,
-    source,
-    ts.ScriptTarget.Latest,
-    /* setParentNodes */ false,
-    ts.ScriptKind.TS,
-  );
-
+// Takes an already-parsed `sourceFile` (see parseTypeScriptSource) so
+// resolveFilesToSync below parses each file once, not once per assertion.
+export function assertFileHasNoImports(sourceFile, sourceRelativePath) {
   const importStatements = sourceFile.statements.filter((statement) =>
     ts.isImportDeclaration(statement),
   );
@@ -121,19 +117,14 @@ export function assertFileHasNoImports(source, sourceRelativePath) {
 
 function exportedTopLevelNames(sourceFile) {
   return sourceFile.statements
-    .filter((statement) => {
-      const isExported = statement.modifiers?.some(
-        (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
-      );
-
-      return (
-        isExported &&
+    .filter(
+      (statement) =>
+        hasExportModifier(statement) &&
         (ts.isVariableStatement(statement) ||
           ts.isFunctionDeclaration(statement) ||
           ts.isTypeAliasDeclaration(statement) ||
-          ts.isInterfaceDeclaration(statement))
-      );
-    })
+          ts.isInterfaceDeclaration(statement)),
+    )
     .flatMap((statement) => {
       if (ts.isVariableStatement(statement)) {
         return statement.declarationList.declarations.map((declaration) =>
@@ -148,20 +139,13 @@ function exportedTopLevelNames(sourceFile) {
 // Confirms every name the drift test imports from the vendored file is still
 // exported, so a markpost rename/removal fails here — naming exactly what
 // changed — instead of as an opaque module-resolution error inside
-// tests/types/sources.types.test.ts.
+// tests/types/sources.types.test.ts. Takes an already-parsed `sourceFile`,
+// same reasoning as assertFileHasNoImports above.
 export function assertRequiredExportsPresent(
-  source,
+  sourceFile,
   sourceRelativePath,
   requiredExports,
 ) {
-  const sourceFile = ts.createSourceFile(
-    sourceRelativePath,
-    source,
-    ts.ScriptTarget.Latest,
-    /* setParentNodes */ false,
-    ts.ScriptKind.TS,
-  );
-
   const actualExports = new Set(exportedTopLevelNames(sourceFile));
   const missingExports = requiredExports.filter(
     (exportName) => !actualExports.has(exportName),
@@ -189,9 +173,14 @@ function resolveFilesToSync(checkoutDir) {
   return VENDORED_FILES.map(
     ({ sourceRelativePath, vendorFileName, description, requiredExports }) => {
       const source = readSource(checkoutDir, sourceRelativePath);
+      const sourceFile = parseTypeScriptSource(sourceRelativePath, source);
 
-      assertFileHasNoImports(source, sourceRelativePath);
-      assertRequiredExportsPresent(source, sourceRelativePath, requiredExports);
+      assertFileHasNoImports(sourceFile, sourceRelativePath);
+      assertRequiredExportsPresent(
+        sourceFile,
+        sourceRelativePath,
+        requiredExports,
+      );
       assertPathIsCommitted(checkoutDir, sourceRelativePath);
 
       return {

@@ -2,8 +2,8 @@
 // scripts/sync-source-contract.mjs without touching the network. The
 // end-to-end guard (the CLI's sourceTypes/webhookSecrets still matching
 // markpost's) lives in tests/types/sources.types.test.ts; this only proves
-// the self-contained-file assertion fails loudly the moment it no longer
-// holds.
+// the self-contained-file and required-exports assertions fail loudly the
+// moment they no longer hold.
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -11,41 +11,53 @@ import {
   assertRequiredExportsPresent,
   // @ts-expect-error -- plain .mjs, not part of the typed src/ tree.
 } from '../../scripts/sync-source-contract.mjs';
+import {
+  parseTypeScriptSource,
+  // @ts-expect-error -- plain .mjs, not part of the typed src/ tree.
+} from '../../scripts/lib/markpost-checkout.mjs';
 
 describe('assertFileHasNoImports', () => {
   it('accepts a file with no import statements', () => {
+    const sourceFile = parseTypeScriptSource(
+      'shared/utils/sourceTypes.ts',
+      `export const SOURCE_TYPES = ["webhook", "email"] as const;`,
+    );
+
     expect(() =>
-      assertFileHasNoImports(
-        `export const SOURCE_TYPES = ["webhook", "email"] as const;`,
-        'shared/utils/sourceTypes.ts',
-      ),
+      assertFileHasNoImports(sourceFile, 'shared/utils/sourceTypes.ts'),
     ).not.toThrow();
   });
 
   it('throws when the file has gained an import', () => {
+    const sourceFile = parseTypeScriptSource(
+      'shared/utils/sourceTypes.ts',
+      `import { z } from "zod";\nexport const SOURCE_TYPES = ["webhook"] as const;`,
+    );
+
     expect(() =>
-      assertFileHasNoImports(
-        `import { z } from "zod";\nexport const SOURCE_TYPES = ["webhook"] as const;`,
-        'shared/utils/sourceTypes.ts',
-      ),
+      assertFileHasNoImports(sourceFile, 'shared/utils/sourceTypes.ts'),
     ).toThrow(/now has an import/);
   });
 
   it('throws even for a type-only import', () => {
+    const sourceFile = parseTypeScriptSource(
+      'shared/utils/webhookSecrets.ts',
+      `import type { Foo } from "./foo";\nexport const SOURCE_TYPES = ["webhook"] as const;`,
+    );
+
     expect(() =>
-      assertFileHasNoImports(
-        `import type { Foo } from "./foo";\nexport const SOURCE_TYPES = ["webhook"] as const;`,
-        'shared/utils/webhookSecrets.ts',
-      ),
+      assertFileHasNoImports(sourceFile, 'shared/utils/webhookSecrets.ts'),
     ).toThrow(/now has an import/);
   });
 
   it('includes the offending file path in the error', () => {
+    const sourceFile = parseTypeScriptSource(
+      'shared/utils/webhookSecrets.ts',
+      `import "side-effect";`,
+    );
+
     expect(() =>
-      assertFileHasNoImports(
-        `import "side-effect";`,
-        'shared/utils/webhookSecrets.ts',
-      ),
+      assertFileHasNoImports(sourceFile, 'shared/utils/webhookSecrets.ts'),
     ).toThrow(/shared\/utils\/webhookSecrets\.ts/);
   });
 });
@@ -59,20 +71,27 @@ describe('assertRequiredExportsPresent', () => {
     }
   `;
 
+  function parse(source: string) {
+    return parseTypeScriptSource('shared/utils/sourceTypes.ts', source);
+  }
+
   it('accepts a file that exports every required name', () => {
     expect(() =>
-      assertRequiredExportsPresent(SOURCE, 'shared/utils/sourceTypes.ts', [
-        'SOURCE_TYPES',
-      ]),
+      assertRequiredExportsPresent(
+        parse(SOURCE),
+        'shared/utils/sourceTypes.ts',
+        ['SOURCE_TYPES'],
+      ),
     ).not.toThrow();
   });
 
   it('accepts an exported function or type alias, not just const', () => {
     expect(() =>
-      assertRequiredExportsPresent(SOURCE, 'shared/utils/sourceTypes.ts', [
-        'SourceType',
-        'isSourceType',
-      ]),
+      assertRequiredExportsPresent(
+        parse(SOURCE),
+        'shared/utils/sourceTypes.ts',
+        ['SourceType', 'isSourceType'],
+      ),
     ).not.toThrow();
   });
 
@@ -80,18 +99,21 @@ describe('assertRequiredExportsPresent', () => {
     const renamed = SOURCE.replace('SOURCE_TYPES', 'SUPPORTED_SOURCE_TYPES');
 
     expect(() =>
-      assertRequiredExportsPresent(renamed, 'shared/utils/sourceTypes.ts', [
-        'SOURCE_TYPES',
-      ]),
+      assertRequiredExportsPresent(
+        parse(renamed),
+        'shared/utils/sourceTypes.ts',
+        ['SOURCE_TYPES'],
+      ),
     ).toThrow(/no longer exports: SOURCE_TYPES/);
   });
 
   it('names every missing export, not just the first', () => {
     expect(() =>
-      assertRequiredExportsPresent(SOURCE, 'shared/utils/webhookSecrets.ts', [
-        'MANUAL_SECRET_PROVIDER_IDS',
-        'ROTATABLE_PROVIDER_IDS',
-      ]),
+      assertRequiredExportsPresent(
+        parse(SOURCE),
+        'shared/utils/webhookSecrets.ts',
+        ['MANUAL_SECRET_PROVIDER_IDS', 'ROTATABLE_PROVIDER_IDS'],
+      ),
     ).toThrow(/MANUAL_SECRET_PROVIDER_IDS, ROTATABLE_PROVIDER_IDS/);
   });
 
@@ -102,9 +124,11 @@ describe('assertRequiredExportsPresent', () => {
     );
 
     expect(() =>
-      assertRequiredExportsPresent(notExported, 'shared/utils/sourceTypes.ts', [
-        'SOURCE_TYPES',
-      ]),
+      assertRequiredExportsPresent(
+        parse(notExported),
+        'shared/utils/sourceTypes.ts',
+        ['SOURCE_TYPES'],
+      ),
     ).toThrow(/no longer exports: SOURCE_TYPES/);
   });
 });

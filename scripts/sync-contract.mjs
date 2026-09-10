@@ -24,9 +24,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
+
+import { resolveSourceRepo } from './lib/markpost-checkout.mjs';
 
 const MARKPOST_REPO_URL = 'https://github.com/neonpixels-studio/markpost';
 const CONTRACT_RELATIVE_PATH = 'server/types/api.types.ts';
@@ -156,22 +158,6 @@ function readCommitHash(checkoutDir) {
   }
 
   return commitHash;
-}
-
-// Resolves the checkout's real `origin` remote so a `--from` sync against a
-// fork or a local branch records provenance the manifest can actually be
-// verified against, instead of hardcoding `neonpixels-studio/markpost` for a commit
-// that may not exist there. Falls back to the absolute local path when the
-// checkout has no `origin` remote (e.g. a bare local clone).
-function resolveSourceRepo(checkoutDir) {
-  try {
-    return execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd: checkoutDir,
-      encoding: 'utf-8',
-    }).trim();
-  } catch {
-    return resolve(checkoutDir);
-  }
 }
 
 function readContractSource(checkoutDir) {
@@ -347,7 +333,10 @@ function main() {
 // (rather than a raw `file://` template) percent-encodes `process.argv[1]`
 // the same way `import.meta.url` already is, so this still matches on a
 // checkout path containing a space or other reserved character.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main();
 }
 
