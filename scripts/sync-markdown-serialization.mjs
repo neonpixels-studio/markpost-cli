@@ -18,7 +18,7 @@
 // markpost's markdown serialization changes, review the diff, then commit.
 //
 // Usage:
-//   npm run sync:markdown-serialization                     # shallow-clones markpost fresh
+//   npm run sync:markdown-serialization                     # clones markpost fresh (full history, blobless)
 //   npm run sync:markdown-serialization -- --from <path>    # copies from an existing local checkout
 //   npm run sync:markdown-serialization -- --from=<path>    # same, `=` form
 
@@ -32,11 +32,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 import { parseFromPathArg } from './sync-contract.mjs';
+import { resolveSourceRepo } from './lib/markpost-checkout.mjs';
 
 const MARKPOST_REPO_URL = 'https://github.com/neonpixels-studio/markpost';
 const SOURCE_RELATIVE_PATH = 'server/utils/markdown.ts';
@@ -44,8 +45,14 @@ const SOURCE_RELATIVE_PATH = 'server/utils/markdown.ts';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, '..');
 const VENDOR_DIR = join(REPO_ROOT, 'tests/libs/vendor');
-const VENDOR_FILE = join(VENDOR_DIR, 'markpost-markdown-serialization.generated.ts');
-const MANIFEST_FILE = join(VENDOR_DIR, 'markpost-markdown-serialization.manifest.json');
+const VENDOR_FILE = join(
+  VENDOR_DIR,
+  'markpost-markdown-serialization.generated.ts',
+);
+const MANIFEST_FILE = join(
+  VENDOR_DIR,
+  'markpost-markdown-serialization.manifest.json',
+);
 
 // The declarations pulled out of markdown.ts, in the order they are emitted.
 // Types first (so the functions that reference them resolve), then the four
@@ -61,7 +68,10 @@ const REQUIRED_FUNCTION_NAMES = [
 ];
 // The public entry points the drift test imports; force `export` onto them if
 // markpost ever stops exporting one, so the generated module stays importable.
-const PUBLIC_FUNCTION_NAMES = ['serializeFrontmatter', 'assembleMarkdownDocument'];
+const PUBLIC_FUNCTION_NAMES = [
+  'serializeFrontmatter',
+  'assembleMarkdownDocument',
+];
 
 const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 //
@@ -154,10 +164,18 @@ function extractSerializationSlice(source) {
   return declarations.join('\n\n');
 }
 
+// Full history (`--filter=blob:none`, not `--depth 1`): `readCommitHash`
+// below needs the real per-path log, and a shallow clone's single grafted
+// commit shows the source file as newly added, so it would report that
+// boundary commit as "last touched" regardless of when the file actually
+// last changed. Blobless keeps the clone cheap — only the commit graph and
+// trees download eagerly.
 function cloneMarkpostInto(cloneDir) {
-  execFileSync('git', ['clone', '--depth', '1', MARKPOST_REPO_URL, cloneDir], {
-    stdio: 'inherit',
-  });
+  execFileSync(
+    'git',
+    ['clone', '--filter=blob:none', MARKPOST_REPO_URL, cloneDir],
+    { stdio: 'inherit' },
+  );
 }
 
 function assertSourceIsCommitted(checkoutDir) {
@@ -192,17 +210,6 @@ function readCommitHash(checkoutDir) {
   }
 
   return commitHash;
-}
-
-function resolveSourceRepo(checkoutDir) {
-  try {
-    return execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd: checkoutDir,
-      encoding: 'utf-8',
-    }).trim();
-  } catch {
-    return resolve(checkoutDir);
-  }
 }
 
 function readMarkdownSource(checkoutDir) {
@@ -273,7 +280,10 @@ function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main();
 }
 
