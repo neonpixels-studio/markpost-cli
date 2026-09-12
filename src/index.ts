@@ -32,6 +32,7 @@ import {
   runRecordsCommand,
   USAGE as RECORDS_USAGE,
 } from '@/commands/records.js';
+import { runEventsCommand, USAGE as EVENTS_USAGE } from '@/commands/events.js';
 import { runConfigCommand, USAGE as CONFIG_USAGE } from '@/commands/config.js';
 import {
   runSettingsCommand,
@@ -130,6 +131,7 @@ const COMMANDS = new Map<string, Command>([
   ['get', { run: runGetCommand, usage: GET_USAGE }],
   ['sources', { run: runSourcesCommand, usage: SOURCES_USAGE }],
   ['records', { run: runRecordsCommand, usage: RECORDS_USAGE }],
+  ['events', { run: runEventsCommand, usage: EVENTS_USAGE }],
   ['config', { run: runConfigCommand, usage: CONFIG_USAGE }],
   ['settings', { run: runSettingsCommand, usage: SETTINGS_USAGE }],
 ]);
