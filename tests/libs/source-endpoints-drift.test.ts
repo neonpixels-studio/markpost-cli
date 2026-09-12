@@ -9,8 +9,6 @@
 // network: the vendored constants are refreshed by hand via
 // `npm run sync:source-endpoints` and reviewed like any other diff (see
 // README.md#source-endpoint-sync).
-import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -18,15 +16,12 @@ import {
   WEBHOOK_INGEST_BASE as cliWebhookIngestBase,
 } from '@/commands/sources.js';
 
-import {
-  EMAIL_DOMAIN as markpostEmailDomain,
-  WEBHOOK_INGEST_BASE as markpostWebhookIngestBase,
-} from './vendor/markpost-source-endpoints.generated.js';
+// Imported as a namespace (rather than destructuring the two names directly)
+// so the "exports exactly the expected constants" check below can inspect
+// every key the module actually has, not just the two this file already
+// knows to ask for.
+import * as generatedModule from './vendor/markpost-source-endpoints.generated.js';
 import manifest from './vendor/markpost-source-endpoints.manifest.json' with { type: 'json' };
-
-const VENDOR_FILE_PATH = fileURLToPath(
-  new URL('./vendor/markpost-source-endpoints.generated.ts', import.meta.url),
-);
 
 // The two names scripts/sync-source-endpoints.mjs's REQUIRED_CONSTANT_NAMES
 // vendors. Kept independent of the manifest (which only records provenance,
@@ -37,31 +32,31 @@ const VENDOR_FILE_PATH = fileURLToPath(
 const EXPECTED_EXPORTS = ['WEBHOOK_INGEST_BASE', 'EMAIL_DOMAIN'];
 
 describe('source endpoint drift', () => {
-  it('the vendored markpost constants are present and record their provenance', () => {
-    expect(existsSync(VENDOR_FILE_PATH)).toBe(true);
+  it('the manifest records the vendored constants provenance', () => {
+    // The generated-module and manifest imports above are static ESM
+    // imports: either one being missing fails this file's module
+    // resolution before any test body runs, so there is nothing further to
+    // assert about presence here — only about the manifest's contents.
     expect(manifest.sourceFiles).toHaveLength(1);
     expect(manifest.sourceFiles[0].path).toBe('app/composables/useSources.ts');
     expect(manifest.sourceFiles[0].sourceCommit).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it('the generated file exports exactly the expected constants', async () => {
+  it('the generated file exports exactly the expected constants', () => {
     // Catches a sync that leaves a stale extra export in the generated file
-    // (or drops one) — the static imports below only prove the *named*
-    // constants this test file expects still exist, not that nothing else
-    // (or fewer) got vendored.
-    const generatedModule =
-      await import('./vendor/markpost-source-endpoints.generated.js');
-
+    // (or drops one) — the byte-for-byte checks below only prove the
+    // *named* constants this test file expects still exist, not that
+    // nothing else (or fewer) got vendored.
     expect(Object.keys(generatedModule).sort()).toEqual(
       [...EXPECTED_EXPORTS].sort(),
     );
   });
 
   it('WEBHOOK_INGEST_BASE matches markpost byte-for-byte', () => {
-    expect(cliWebhookIngestBase).toBe(markpostWebhookIngestBase);
+    expect(cliWebhookIngestBase).toBe(generatedModule.WEBHOOK_INGEST_BASE);
   });
 
   it('EMAIL_DOMAIN matches markpost byte-for-byte', () => {
-    expect(cliEmailDomain).toBe(markpostEmailDomain);
+    expect(cliEmailDomain).toBe(generatedModule.EMAIL_DOMAIN);
   });
 });

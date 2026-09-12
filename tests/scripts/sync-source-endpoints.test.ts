@@ -184,7 +184,7 @@ describe('extractEndpointConstants', () => {
     );
   });
 
-  it('throws loudly (as a missing constant) when markpost uses a reassignable binding', () => {
+  it('throws loudly, distinct from a missing constant, when markpost uses a reassignable binding', () => {
     const letBinding = replaceOnce(
       MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
@@ -192,9 +192,13 @@ describe('extractEndpointConstants', () => {
     );
 
     // A `let`/`var` binding could hold a different value by the time
-    // anything reads it, so it must not be treated as a vendorable constant
-    // — this is reported the same way as a fully missing declaration.
-    expect(() => extractEndpointConstants(letBinding)).toThrow(/EMAIL_DOMAIN/);
+    // anything reads it, so it must not be treated as a vendorable constant.
+    // This must not be reported as a missing/renamed constant (see the test
+    // below) — that would send the operator hunting for a rename that never
+    // happened.
+    expect(() => extractEndpointConstants(letBinding)).toThrow(
+      /EMAIL_DOMAIN.*reassignable/,
+    );
   });
 
   it('throws loudly when markpost drops one of the constants', () => {

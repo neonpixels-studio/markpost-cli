@@ -78,18 +78,16 @@ const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 // Finds the `const NAME = ...` declarator for `name`, regardless of whether
 // it shares a `const a = ..., b = ...;` statement with other declarators —
 // returning the declarator (not the enclosing statement) means a sibling
-// declarator alongside it is never accidentally vendored too. Only matches a
-// `const` declaration list (not `let`/`var`) — a reassignable binding could
-// hold a different value by the time anything reads it, so vendoring its
-// initial initializer would silently record a value markpost may not
-// actually be using.
+// declarator alongside it is never accidentally vendored too. Throws loudly,
+// rather than reporting `name` as missing, when `name` exists but as a
+// `let`/`var` declarator — a reassignable binding could hold a different
+// value by the time anything reads it, so vendoring its initial initializer
+// would silently record a value markpost may not actually be using, and that
+// is a materially different problem for the operator to investigate than a
+// rename or removal.
 function findConstantDeclarator(sourceFile, name) {
   for (const statement of sourceFile.statements) {
-    const isConstDeclaration =
-      ts.isVariableStatement(statement) &&
-      (statement.declarationList.flags & ts.NodeFlags.Const) !== 0;
-
-    if (!isConstDeclaration) {
+    if (!ts.isVariableStatement(statement)) {
       continue;
     }
 
@@ -97,9 +95,22 @@ function findConstantDeclarator(sourceFile, name) {
       (candidate) => candidate.name.getText(sourceFile) === name,
     );
 
-    if (declarator) {
-      return declarator;
+    if (!declarator) {
+      continue;
     }
+
+    const isConstDeclaration =
+      (statement.declarationList.flags & ts.NodeFlags.Const) !== 0;
+
+    if (!isConstDeclaration) {
+      throw new Error(
+        `${SOURCE_RELATIVE_PATH}'s ${name} is declared with a reassignable ` +
+          'binding (let/var), not const — its value at read time may differ ' +
+          'from its initializer, so it cannot be vendored as a constant',
+      );
+    }
+
+    return declarator;
   }
 
   return undefined;
@@ -183,9 +194,14 @@ function writeVendoredConstants(constants) {
   writeFileSync(VENDOR_FILE, `${VENDOR_FILE_HEADER}${constants}\n`);
 }
 
-// Resolve everything that can fail (missing source, uncommitted changes,
-// extraction) before writing anything, so a mid-sync failure can't leave the
-// vendored constants and the manifest's `sourceCommit` disagreeing with each other.
+// Resolves everything that can fail on the *read* side (missing source,
+// uncommitted changes, extraction) before writing anything, so a bad
+// checkout or an upstream shape change never gets partway through a write.
+// This does not cover an I/O failure between the two writes below (e.g.
+// ENOSPC, a stale-permission manifest file) — that would still leave the
+// freshly regenerated constants paired with a manifest recording the
+// previous sync's commit, which the next `git diff` would surface as an
+// unexpected write to only one of the two files.
 function syncFrom(checkoutDir) {
   const source = readSource(checkoutDir, SOURCE_RELATIVE_PATH);
   const constants = extractEndpointConstants(source);
