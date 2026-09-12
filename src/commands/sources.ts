@@ -25,9 +25,10 @@ import {
 
 // Mirror the endpoint constants markpost's web app uses in
 // app/composables/useSources.ts so the CLI shows the same URL a user would
-// see there.
-const WEBHOOK_INGEST_BASE = 'https://ingest.markpost.io/v1/hooks';
-const EMAIL_DOMAIN = 'in.markpost.io';
+// see there. Exported so tests/libs/source-endpoints-drift.test.ts can guard
+// them against markpost's real values (see README.md#source-endpoint-sync).
+export const WEBHOOK_INGEST_BASE = 'https://ingest.markpost.io/v1/hooks';
+export const EMAIL_DOMAIN = 'in.markpost.io';
 
 export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret> [uuid]
 

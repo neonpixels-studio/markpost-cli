@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+// Human-run tool: vendors the two hardcoded ingest-endpoint constants
+// (`WEBHOOK_INGEST_BASE`, `EMAIL_DOMAIN`) out of markpost's
+// `app/composables/useSources.ts` into
+// `tests/libs/vendor/markpost-source-endpoints.generated.ts` so the drift
+// test can compare the CLI's hand-mirrored copies in `src/commands/sources.ts`
+// against markpost's real values and fail the moment they diverge.
+//
+// These are the exact URLs a user configures their webhook provider or email
+// forwarder against — a silent mismatch here means a source the CLI prints
+// simply doesn't work.
+//
+// This intentionally does NOT run in CI or the test suite — it needs network
+// access (or a local markpost checkout) to fetch the current source, and a
+// network-dependent test is flaky and fails offline. Run it by hand whenever
+// markpost's ingest endpoints change, review the diff, then commit.
+//
+// Usage:
+//   npm run sync:source-endpoints                     # clones markpost fresh (full history, blobless)
+//   npm run sync:source-endpoints -- --from <path>    # copies from an existing local checkout
+//   npm run sync:source-endpoints -- --from=<path>    # same, `=` form
+
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import ts from 'typescript';
+
+import {
+  assertPathIsCommitted,
+  parseTypeScriptSource,
+  readCommitHash,
+  readSource,
+  resolveSourceRepo,
+  withMarkpostCheckout,
+  writeManifest,
+} from './lib/markpost-checkout.mjs';
+import { parseFromPathArg } from './sync-contract.mjs';
+
+const SOURCE_RELATIVE_PATH = 'app/composables/useSources.ts';
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(SCRIPT_DIR, '..');
+const VENDOR_DIR = join(REPO_ROOT, 'tests/libs/vendor');
+const VENDOR_FILE = join(VENDOR_DIR, 'markpost-source-endpoints.generated.ts');
+const MANIFEST_FILE = join(
+  VENDOR_DIR,
+  'markpost-source-endpoints.manifest.json',
+);
+
+// The two constants pulled out of useSources.ts. Both names must exist in
+// markpost's source, and each must be a plain string literal — a rename,
+// removal, or a switch to a computed/templated value upstream fails the sync
+// loudly, which is itself the drift signal worth surfacing, rather than
+// silently vendoring something that doesn't parse as a standalone constant.
+const REQUIRED_CONSTANT_NAMES = ['WEBHOOK_INGEST_BASE', 'EMAIL_DOMAIN'];
+
+const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
+//
+// This is a copy of the two ingest-endpoint constants' string values from
+// markpost's \`${SOURCE_RELATIVE_PATH}\` (\`WEBHOOK_INGEST_BASE\`,
+// \`EMAIL_DOMAIN\`). markpost is the source of truth; the CLI's
+// \`src/commands/sources.ts\` hand-mirrors them, so the drift test at
+// \`tests/libs/source-endpoints-drift.test.ts\` compares this copy against the
+// mirror and fails if they stop matching.
+//
+// It lives under \`tests/\` so it never ships in the published \`dist/\`.
+//
+// Regenerate with \`npm run sync:source-endpoints\`
+// (see README.md#source-endpoint-sync). Review the diff, then commit.
+//
+// Source: neonpixels-studio/markpost @ ${SOURCE_RELATIVE_PATH}
+// See markpost-source-endpoints.manifest.json for the exact commit.
+
+/* eslint-disable */
+
+`;
+
+// Finds the `const NAME = ...` declarator for `name`, regardless of whether
+// it shares a `const a = ..., b = ...;` statement with other declarators —
+// returning the declarator (not the enclosing statement) means a sibling
+// declarator alongside it is never accidentally vendored too. Throws loudly,
+// rather than reporting `name` as missing, when `name` exists but as a
+// `let`/`var` declarator — a reassignable binding could hold a different
+// value by the time anything reads it, so vendoring its initial initializer
+// would silently record a value markpost may not actually be using, and that
+// is a materially different problem for the operator to investigate than a
+// rename or removal.
+function findConstantDeclarator(sourceFile, name) {
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) {
+      continue;
+    }
+
+    const declarator = statement.declarationList.declarations.find(
+      (candidate) => candidate.name.getText(sourceFile) === name,
+    );
+
+    if (!declarator) {
+      continue;
+    }
+
+    const isConstDeclaration =
+      (statement.declarationList.flags & ts.NodeFlags.Const) !== 0;
+
+    if (!isConstDeclaration) {
+      throw new Error(
+        `${SOURCE_RELATIVE_PATH}'s ${name} is declared with a reassignable ` +
+          'binding (let/var), not const — its value at read time may differ ' +
+          'from its initializer, so it cannot be vendored as a constant',
+      );
+    }
+
+    return declarator;
+  }
+
+  return undefined;
+}
+
+// Strips wrappers that don't change the runtime value — `as const`,
+// `satisfies SomeType`, and parentheses — so a value-preserving style change
+// upstream (e.g. markpost adding `as const`) isn't reported as drift just
+// because the initializer is no longer a bare string-literal node.
+function unwrapValuePreservingExpression(expression) {
+  let current = expression;
+
+  while (
+    ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isParenthesizedExpression(current)
+  ) {
+    current = current.expression;
+  }
+
+  return current;
+}
+
+// Renders one constant as a standalone, always-exported declaration built
+// from just its string value — never the declarator's raw source text — so a
+// sibling declarator, a non-literal initializer (a template literal with
+// interpolation, a call like `useRuntimeConfig()`), or an existing `export`
+// keyword can't leak through as something this generated file can't stand
+// alone without.
+function renderConstantDeclaration(name, declarator) {
+  const initializer = declarator.initializer;
+  const valueExpression =
+    initializer && unwrapValuePreservingExpression(initializer);
+
+  if (!valueExpression || !ts.isStringLiteralLike(valueExpression)) {
+    throw new Error(
+      `${SOURCE_RELATIVE_PATH}'s ${name} is not a plain string literal — ` +
+        'update scripts/sync-source-endpoints.mjs to handle its new shape ' +
+        '(and confirm src/commands/sources.ts still mirrors it correctly)',
+    );
+  }
+
+  return `export const ${name} = ${JSON.stringify(valueExpression.text)};`;
+}
+
+// Pulls the two ingest-endpoint constants out of useSources.ts as
+// independently-rendered declarations. Exported so
+// tests/scripts/sync-source-endpoints.test.ts can exercise the extraction
+// without touching the network.
+function extractEndpointConstants(source) {
+  const sourceFile = parseTypeScriptSource(SOURCE_RELATIVE_PATH, source);
+
+  // Resolve each name's declarator once, up front, so the missing-name check
+  // and the rendering step below both read from the same lookup instead of
+  // re-walking the AST for every name a second time.
+  const declaratorsByName = REQUIRED_CONSTANT_NAMES.map((name) => [
+    name,
+    findConstantDeclarator(sourceFile, name),
+  ]);
+  const missing = declaratorsByName
+    .filter(([, declarator]) => !declarator)
+    .map(([name]) => name);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `${SOURCE_RELATIVE_PATH} is missing expected constant(s): ${missing.join(', ')} — ` +
+        'markpost renamed or removed part of the ingest-endpoint config; update ' +
+        'scripts/sync-source-endpoints.mjs and src/commands/sources.ts to match',
+    );
+  }
+
+  const declarations = declaratorsByName.map(([name, declarator]) =>
+    renderConstantDeclaration(name, declarator),
+  );
+
+  return declarations.join('\n\n');
+}
+
+function writeVendoredConstants(constants) {
+  mkdirSync(VENDOR_DIR, { recursive: true });
+  writeFileSync(VENDOR_FILE, `${VENDOR_FILE_HEADER}${constants}\n`);
+}
+
+// Resolves everything that can fail on the *read* side (missing source,
+// uncommitted changes, extraction) before writing anything, so a bad
+// checkout or an upstream shape change never gets partway through a write.
+// This does not cover an I/O failure between the two writes below (e.g.
+// ENOSPC, a stale-permission manifest file) — that would still leave the
+// freshly regenerated constants paired with a manifest recording the
+// previous sync's commit, which the next `git diff` would surface as an
+// unexpected write to only one of the two files.
+function syncFrom(checkoutDir) {
+  const source = readSource(checkoutDir, SOURCE_RELATIVE_PATH);
+  const constants = extractEndpointConstants(source);
+
+  assertPathIsCommitted(checkoutDir, SOURCE_RELATIVE_PATH);
+  const sourceCommit = readCommitHash(checkoutDir, SOURCE_RELATIVE_PATH);
+  const sourceRepo = resolveSourceRepo(checkoutDir);
+
+  writeVendoredConstants(constants);
+  writeManifest(MANIFEST_FILE, sourceRepo, [
+    { path: SOURCE_RELATIVE_PATH, sourceCommit },
+  ]);
+}
+
+function main() {
+  const fromPath = parseFromPathArg(process.argv.slice(2));
+
+  withMarkpostCheckout(
+    fromPath,
+    'markpost-source-endpoints-sync-',
+    (checkoutDir) => {
+      syncFrom(checkoutDir);
+      console.log(`Synced ${VENDOR_FILE} from ${checkoutDir}`);
+      console.log('Review the diff, then run `npm test` before committing.');
+    },
+  );
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main();
+}
+
+export { extractEndpointConstants };

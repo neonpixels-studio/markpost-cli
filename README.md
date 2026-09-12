@@ -169,6 +169,7 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 | `npm run lint:fix`                    | Auto-fix formatting and linting issues                                        |
 | `npm run sync:contract`               | Refresh the vendored markpost API contract (see below)                        |
 | `npm run sync:markdown-serialization` | Refresh the vendored markpost serialization slice (see below)                 |
+| `npm run sync:source-endpoints`       | Refresh the vendored markpost ingest-endpoint constants (see below)           |
 | `npm run sync:source-contract`        | Refresh the vendored markpost source-type/webhook-secret contract (see below) |
 | `npm run sync:settings-contract`      | Refresh the vendored markpost settings contract (see below)                   |
 
@@ -246,6 +247,41 @@ test failing. This closes that gap the same way the contract sync does.
   would require network access at test time. Re-run
   `npm run sync:markdown-serialization` whenever a markpost markdown change is
   suspected.
+
+### Source endpoint sync
+
+`src/commands/sources.ts` hand-copies two constants from markpost's
+`app/composables/useSources.ts` — `WEBHOOK_INGEST_BASE` (the webhook ingest
+base URL) and `EMAIL_DOMAIN` (the email-forwarding domain). These are the
+exact endpoint URLs a user configures their provider or email forwarder
+against, so a silent drift here means the CLI prints a dead URL with nothing
+failing to catch it. This closes that gap the same way the contract and
+markdown serialization syncs do.
+
+- **Refreshing it:** run `npm run sync:source-endpoints` (optionally
+  `-- --from <path-to-a-local-markpost-checkout>`; without `--from` it
+  clones markpost fresh, full history and blobless). Like the other syncs this is a **human-run**
+  step, not part of CI — it needs network access (or a local checkout). It
+  extracts the two constants' string values from `useSources.ts` and writes them to
+  `tests/libs/vendor/markpost-source-endpoints.generated.ts`, alongside a
+  manifest recording the exact source commit. The file lives under `tests/` so
+  it never ships in the published `dist/`. Review the diff, run `npm test`,
+  then commit.
+- **Catching drift:** `tests/libs/source-endpoints-drift.test.ts` runs on
+  every `npm test` / `npm run test:ci` and fails if the CLI's
+  `WEBHOOK_INGEST_BASE` or `EMAIL_DOMAIN` stop matching the vendored copy
+  byte-for-byte. No network access needed. When markpost's endpoints change,
+  re-run the sync: the vendored constants update, and if the CLI mirror has
+  not been updated to match, this test goes red.
+- **What this does _not_ do:** it does not detect when markpost's upstream
+  endpoints have changed and the vendored copy has fallen behind — that would
+  require network access at test time. Re-run `npm run sync:source-endpoints`
+  periodically or whenever a markpost ingest-endpoint change is suspected. It
+  also only guards the two constants themselves, not how the CLI assembles a
+  URL from them (`buildEndpointUrl` in `src/commands/sources.ts`) — if
+  markpost changes the shape it builds around `WEBHOOK_INGEST_BASE` /
+  `EMAIL_DOMAIN` (e.g. an added path segment) without changing the constants,
+  this guard won't catch it.
 
 ### Source and settings contract sync
 

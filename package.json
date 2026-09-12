@@ -26,6 +26,7 @@
     "postpack": "node -e \"require('node:fs').accessSync('dist/index.js')\"",
     "sync:contract": "node scripts/sync-contract.mjs",
     "sync:markdown-serialization": "node scripts/sync-markdown-serialization.mjs",
+    "sync:source-endpoints": "node scripts/sync-source-endpoints.mjs",
     "sync:source-contract": "node scripts/sync-source-contract.mjs",
     "sync:settings-contract": "node scripts/sync-settings-contract.mjs"
   },
