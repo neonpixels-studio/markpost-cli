@@ -34,6 +34,24 @@ export function formatLastHit(lastHitAt: string | null): string {
 }
 `;
 
+// A plain `String.prototype.replace` silently returns the input unchanged
+// when `find` isn't present, so a fixture mutation that no longer matches
+// (e.g. after MARKPOST_SOURCE is reformatted) would leave the "mutated"
+// variant identical to the original — a positive assertion below could then
+// stay green without ever exercising the code path it claims to test. This
+// fails loudly instead.
+function replaceOnce(
+  source: string,
+  find: string,
+  replacement: string,
+): string {
+  if (!source.includes(find)) {
+    throw new Error(`fixture no longer contains: ${find}`);
+  }
+
+  return source.replace(find, replacement);
+}
+
 describe('extractEndpointConstants', () => {
   it('pulls both ingest-endpoint constants', () => {
     const constants = extractEndpointConstants(MARKPOST_SOURCE);
@@ -60,7 +78,8 @@ describe('extractEndpointConstants', () => {
   });
 
   it('does not duplicate an existing export keyword', () => {
-    const withExport = MARKPOST_SOURCE.replace(
+    const withExport = replaceOnce(
+      MARKPOST_SOURCE,
       'const WEBHOOK_INGEST_BASE',
       'export const WEBHOOK_INGEST_BASE',
     );
@@ -72,7 +91,8 @@ describe('extractEndpointConstants', () => {
   });
 
   it('extracts only the matching declarator when both constants share one statement', () => {
-    const combinedStatement = MARKPOST_SOURCE.replace(
+    const combinedStatement = replaceOnce(
+      MARKPOST_SOURCE,
       'const WEBHOOK_INGEST_BASE = "https://ingest.markpost.io/v1/hooks";\nconst EMAIL_DOMAIN = "in.markpost.io";',
       'const WEBHOOK_INGEST_BASE = "https://ingest.markpost.io/v1/hooks", EMAIL_DOMAIN = "in.markpost.io";',
     );
@@ -95,7 +115,8 @@ describe('extractEndpointConstants', () => {
   });
 
   it('ignores an unrelated sibling declarator in the same statement', () => {
-    const withSibling = MARKPOST_SOURCE.replace(
+    const withSibling = replaceOnce(
+      MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
       'const EMAIL_DOMAIN = "in.markpost.io", runtimeConfig = useRuntimeConfig();',
     );
@@ -110,7 +131,8 @@ describe('extractEndpointConstants', () => {
   });
 
   it('throws loudly when a constant is not a plain string literal', () => {
-    const templated = MARKPOST_SOURCE.replace(
+    const templated = replaceOnce(
+      MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
       'const EMAIL_DOMAIN = `${INGEST_HOST}`;',
     );
@@ -121,15 +143,18 @@ describe('extractEndpointConstants', () => {
   });
 
   it('unwraps value-preserving TypeScript wrappers around the string literal', () => {
-    const asConst = MARKPOST_SOURCE.replace(
+    const asConst = replaceOnce(
+      MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
       'const EMAIL_DOMAIN = "in.markpost.io" as const;',
     );
-    const satisfiesModifier = MARKPOST_SOURCE.replace(
+    const satisfiesModifier = replaceOnce(
+      MARKPOST_SOURCE,
       'const WEBHOOK_INGEST_BASE = "https://ingest.markpost.io/v1/hooks";',
       'const WEBHOOK_INGEST_BASE = "https://ingest.markpost.io/v1/hooks" satisfies string;',
     );
-    const parenthesized = MARKPOST_SOURCE.replace(
+    const parenthesized = replaceOnce(
+      MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
       'const EMAIL_DOMAIN = ("in.markpost.io");',
     );
@@ -146,7 +171,8 @@ describe('extractEndpointConstants', () => {
   });
 
   it('accepts a no-substitution template literal as a plain string value', () => {
-    const backtickValue = MARKPOST_SOURCE.replace(
+    const backtickValue = replaceOnce(
+      MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
       'const EMAIL_DOMAIN = `in.markpost.io`;',
     );
@@ -159,7 +185,8 @@ describe('extractEndpointConstants', () => {
   });
 
   it('throws loudly (as a missing constant) when markpost uses a reassignable binding', () => {
-    const letBinding = MARKPOST_SOURCE.replace(
+    const letBinding = replaceOnce(
+      MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
       'let EMAIL_DOMAIN = "in.markpost.io";',
     );
@@ -171,7 +198,8 @@ describe('extractEndpointConstants', () => {
   });
 
   it('throws loudly when markpost drops one of the constants', () => {
-    const withoutEmailDomain = MARKPOST_SOURCE.replace(
+    const withoutEmailDomain = replaceOnce(
+      MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
       '',
     );

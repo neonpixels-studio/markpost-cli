@@ -32,6 +32,7 @@ import {
   readSource,
   resolveSourceRepo,
   withMarkpostCheckout,
+  writeManifest,
 } from './lib/markpost-checkout.mjs';
 import { parseFromPathArg } from './sync-contract.mjs';
 
@@ -182,19 +183,6 @@ function writeVendoredConstants(constants) {
   writeFileSync(VENDOR_FILE, `${VENDOR_FILE_HEADER}${constants}\n`);
 }
 
-function writeManifest(sourceRepo, sourceCommit) {
-  const manifest = {
-    sourceRepo,
-    sourceFile: SOURCE_RELATIVE_PATH,
-    sourceCommit,
-    exportedDeclarations: [...REQUIRED_CONSTANT_NAMES],
-    syncedAt: new Date().toISOString(),
-  };
-
-  mkdirSync(VENDOR_DIR, { recursive: true });
-  writeFileSync(MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
 // Resolve everything that can fail (missing source, uncommitted changes,
 // extraction) before writing anything, so a mid-sync failure can't leave the
 // vendored constants and the manifest's `sourceCommit` disagreeing with each other.
@@ -207,7 +195,9 @@ function syncFrom(checkoutDir) {
   const sourceRepo = resolveSourceRepo(checkoutDir);
 
   writeVendoredConstants(constants);
-  writeManifest(sourceRepo, sourceCommit);
+  writeManifest(MANIFEST_FILE, sourceRepo, [
+    { path: SOURCE_RELATIVE_PATH, sourceCommit },
+  ]);
 }
 
 function main() {

@@ -28,30 +28,32 @@ const VENDOR_FILE_PATH = fileURLToPath(
   new URL('./vendor/markpost-source-endpoints.generated.ts', import.meta.url),
 );
 
+// The two names scripts/sync-source-endpoints.mjs's REQUIRED_CONSTANT_NAMES
+// vendors. Kept independent of the manifest (which only records provenance,
+// not the expected export list, since it now uses the shared
+// scripts/lib/markpost-checkout.mjs#writeManifest schema) so the two checks
+// below each have their own source of truth to compare against instead of
+// both deriving from the same value.
+const EXPECTED_EXPORTS = ['WEBHOOK_INGEST_BASE', 'EMAIL_DOMAIN'];
+
 describe('source endpoint drift', () => {
   it('the vendored markpost constants are present and record their provenance', () => {
     expect(existsSync(VENDOR_FILE_PATH)).toBe(true);
-    expect(manifest.sourceFile).toBe('app/composables/useSources.ts');
-    expect(manifest.sourceCommit).toMatch(/^[0-9a-f]{40}$/);
-    // Catches the sync script and the manifest falling out of step with each
-    // other (e.g. a constant added to one but not the other) — the static
-    // imports above only prove the *named* constants this file expects still
-    // exist, not that the manifest's own bookkeeping matches them.
-    expect(manifest.exportedDeclarations).toEqual([
-      'WEBHOOK_INGEST_BASE',
-      'EMAIL_DOMAIN',
-    ]);
+    expect(manifest.sourceFiles).toHaveLength(1);
+    expect(manifest.sourceFiles[0].path).toBe('app/composables/useSources.ts');
+    expect(manifest.sourceFiles[0].sourceCommit).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it('the generated file exports exactly what the manifest claims', async () => {
-    // Catches drift in the other direction from the check above: a sync that
-    // leaves a stale extra export in the generated file (or drops one) while
-    // the manifest's own bookkeeping still looks correct.
+  it('the generated file exports exactly the expected constants', async () => {
+    // Catches a sync that leaves a stale extra export in the generated file
+    // (or drops one) — the static imports below only prove the *named*
+    // constants this test file expects still exist, not that nothing else
+    // (or fewer) got vendored.
     const generatedModule =
       await import('./vendor/markpost-source-endpoints.generated.js');
 
     expect(Object.keys(generatedModule).sort()).toEqual(
-      [...manifest.exportedDeclarations].sort(),
+      [...EXPECTED_EXPORTS].sort(),
     );
   });
 
