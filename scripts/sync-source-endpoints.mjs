@@ -16,28 +16,22 @@
 // markpost's ingest endpoints change, review the diff, then commit.
 //
 // Usage:
-//   npm run sync:source-endpoints                     # shallow-clones markpost fresh
+//   npm run sync:source-endpoints                     # clones markpost fresh (full history, blobless)
 //   npm run sync:source-endpoints -- --from <path>    # copies from an existing local checkout
 //   npm run sync:source-endpoints -- --from=<path>    # same, `=` form
 
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 import {
   assertPathIsCommitted,
-  cloneMarkpostInto,
+  parseTypeScriptSource,
   readCommitHash,
+  readSource,
   resolveSourceRepo,
+  withMarkpostCheckout,
 } from './lib/markpost-checkout.mjs';
 import { parseFromPathArg } from './sync-contract.mjs';
 
@@ -155,13 +149,7 @@ function renderConstantDeclaration(name, declarator) {
 // tests/scripts/sync-source-endpoints.test.ts can exercise the extraction
 // without touching the network.
 function extractEndpointConstants(source) {
-  const sourceFile = ts.createSourceFile(
-    SOURCE_RELATIVE_PATH,
-    source,
-    ts.ScriptTarget.Latest,
-    /* setParentNodes */ true,
-    ts.ScriptKind.TS,
-  );
+  const sourceFile = parseTypeScriptSource(SOURCE_RELATIVE_PATH, source);
 
   // Resolve each name's declarator once, up front, so the missing-name check
   // and the rendering step below both read from the same lookup instead of
@@ -189,18 +177,6 @@ function extractEndpointConstants(source) {
   return declarations.join('\n\n');
 }
 
-function readEndpointSource(checkoutDir) {
-  const sourcePath = join(checkoutDir, SOURCE_RELATIVE_PATH);
-
-  if (!existsSync(sourcePath)) {
-    throw new Error(
-      `No ${SOURCE_RELATIVE_PATH} found in ${checkoutDir} — is this a markpost checkout?`,
-    );
-  }
-
-  return readFileSync(sourcePath, 'utf-8');
-}
-
 function writeVendoredConstants(constants) {
   mkdirSync(VENDOR_DIR, { recursive: true });
   writeFileSync(VENDOR_FILE, `${VENDOR_FILE_HEADER}${constants}\n`);
@@ -223,7 +199,7 @@ function writeManifest(sourceRepo, sourceCommit) {
 // extraction) before writing anything, so a mid-sync failure can't leave the
 // vendored constants and the manifest's `sourceCommit` disagreeing with each other.
 function syncFrom(checkoutDir) {
-  const source = readEndpointSource(checkoutDir);
+  const source = readSource(checkoutDir, SOURCE_RELATIVE_PATH);
   const constants = extractEndpointConstants(source);
 
   assertPathIsCommitted(checkoutDir, SOURCE_RELATIVE_PATH);
@@ -236,25 +212,16 @@ function syncFrom(checkoutDir) {
 
 function main() {
   const fromPath = parseFromPathArg(process.argv.slice(2));
-  const temporaryCloneDir = fromPath
-    ? undefined
-    : mkdtempSync(join(tmpdir(), 'markpost-source-endpoints-sync-'));
 
-  try {
-    if (temporaryCloneDir) {
-      cloneMarkpostInto(temporaryCloneDir);
-    }
-
-    const checkoutDir = fromPath ?? temporaryCloneDir;
-
-    syncFrom(checkoutDir);
-    console.log(`Synced ${VENDOR_FILE} from ${checkoutDir}`);
-    console.log('Review the diff, then run `npm test` before committing.');
-  } finally {
-    if (temporaryCloneDir) {
-      rmSync(temporaryCloneDir, { recursive: true, force: true });
-    }
-  }
+  withMarkpostCheckout(
+    fromPath,
+    'markpost-source-endpoints-sync-',
+    (checkoutDir) => {
+      syncFrom(checkoutDir);
+      console.log(`Synced ${VENDOR_FILE} from ${checkoutDir}`);
+      console.log('Review the diff, then run `npm test` before committing.');
+    },
+  );
 }
 
 if (

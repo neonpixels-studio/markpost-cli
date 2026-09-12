@@ -43,6 +43,18 @@ describe('source endpoint drift', () => {
     ]);
   });
 
+  it('the generated file exports exactly what the manifest claims', async () => {
+    // Catches drift in the other direction from the check above: a sync that
+    // leaves a stale extra export in the generated file (or drops one) while
+    // the manifest's own bookkeeping still looks correct.
+    const generatedModule =
+      await import('./vendor/markpost-source-endpoints.generated.js');
+
+    expect(Object.keys(generatedModule).sort()).toEqual(
+      [...manifest.exportedDeclarations].sort(),
+    );
+  });
+
   it('WEBHOOK_INGEST_BASE matches markpost byte-for-byte', () => {
     expect(cliWebhookIngestBase).toBe(markpostWebhookIngestBase);
   });
