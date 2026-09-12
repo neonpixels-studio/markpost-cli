@@ -36,10 +36,10 @@ import ts from 'typescript';
 import {
   assertPathIsCommitted,
   cloneMarkpostInto,
-  parseFromPathArg,
-  readCommitHashForPath,
+  readCommitHash,
   resolveSourceRepo,
 } from './lib/markpost-checkout.mjs';
+import { parseFromPathArg } from './sync-contract.mjs';
 
 const SOURCE_RELATIVE_PATH = 'app/composables/useSources.ts';
 
@@ -227,7 +227,7 @@ function syncFrom(checkoutDir) {
   const constants = extractEndpointConstants(source);
 
   assertPathIsCommitted(checkoutDir, SOURCE_RELATIVE_PATH);
-  const sourceCommit = readCommitHashForPath(checkoutDir, SOURCE_RELATIVE_PATH);
+  const sourceCommit = readCommitHash(checkoutDir, SOURCE_RELATIVE_PATH);
   const sourceRepo = resolveSourceRepo(checkoutDir);
 
   writeVendoredConstants(constants);

@@ -10,10 +10,11 @@
 // the diff it produces, then commit the result.
 //
 // Usage:
-//   npm run sync:contract                     # shallow-clones markpost fresh
+//   npm run sync:contract                     # clones markpost fresh (full history, blobless)
 //   npm run sync:contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:contract -- --from=<path>    # same, `=` form
 
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -27,14 +28,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
-import {
-  assertPathIsCommitted,
-  cloneMarkpostInto,
-  parseFromPathArg,
-  readCommitHashForPath,
-  resolveSourceRepo,
-} from './lib/markpost-checkout.mjs';
+import { resolveSourceRepo } from './lib/markpost-checkout.mjs';
 
+const MARKPOST_REPO_URL = 'https://github.com/neonpixels-studio/markpost';
 const CONTRACT_RELATIVE_PATH = 'server/types/api.types.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -58,6 +54,119 @@ const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 // See src/types/vendor/manifest.json for the exact commit this was synced from.
 
 `;
+
+// Accepts both `--from <path>` and `--from=<path>`. A typo'd flag (e.g.
+// `--form`, or a near-miss like `--fromage`) must fail loudly rather than
+// silently falling through to a network clone that overwrites the vendored
+// file from upstream `main` instead of the checkout the caller actually
+// meant, so this whitelists the exact `--from`/`--from=<path>` tokens (and
+// the path value immediately after a bare `--from`) rather than anything
+// merely prefixed with `--from`. This check runs unconditionally (not just
+// on the no-`--from` path) so `--from ../markpost --dry-run` doesn't
+// silently ignore the typo'd `--dry-run` and proceed.
+function parseFromPathArg(argv) {
+  const spaceFlagIndex = argv.indexOf('--from');
+  // The index directly after a bare `--from` is its path value, not a
+  // separate argument to validate — but only when `--from` is actually
+  // present (`-1 + 1 === 0` would otherwise wrongly exempt argv[0]).
+  const pathValueIndex = spaceFlagIndex === -1 ? undefined : spaceFlagIndex + 1;
+  const unrecognized = argv.filter(
+    (argument, index) =>
+      argument !== '--from' &&
+      !argument.startsWith('--from=') &&
+      index !== pathValueIndex,
+  );
+
+  if (unrecognized.length > 0) {
+    throw new Error(`Unrecognized argument(s): ${unrecognized.join(', ')}`);
+  }
+
+  // A duplicated `--from` (either form, or a mix of both) must not silently
+  // pick one occurrence and drop the other — that's the same
+  // wrong-checkout-gets-vendored risk the whitelist above exists to prevent.
+  const fromOccurrences = argv.filter(
+    (argument) => argument === '--from' || argument.startsWith('--from='),
+  ).length;
+
+  if (fromOccurrences > 1) {
+    throw new Error('--from may only be given once');
+  }
+
+  const equalsFlag = argv.find((argument) => argument.startsWith('--from='));
+
+  if (!equalsFlag && spaceFlagIndex === -1) {
+    return undefined;
+  }
+
+  const fromPath = equalsFlag
+    ? equalsFlag.slice('--from='.length)
+    : argv[spaceFlagIndex + 1];
+
+  if (!fromPath || fromPath.startsWith('--')) {
+    throw new Error('--from requires a path to a local markpost checkout');
+  }
+
+  if (!existsSync(fromPath)) {
+    throw new Error(`--from path does not exist: ${fromPath}`);
+  }
+
+  return fromPath;
+}
+
+// Full history (`--filter=blob:none`, not `--depth 1`): `readCommitHash`
+// below needs the real per-path log, and a shallow clone's single grafted
+// commit shows the contract file as newly added, so it would report that
+// boundary commit as "last touched" regardless of when the file actually
+// last changed. Blobless keeps the clone cheap — only the commit graph and
+// trees download eagerly.
+function cloneMarkpostInto(cloneDir) {
+  execFileSync(
+    'git',
+    ['clone', '--filter=blob:none', MARKPOST_REPO_URL, cloneDir],
+    { stdio: 'inherit' },
+  );
+}
+
+function assertContractIsCommitted(checkoutDir) {
+  const status = execFileSync(
+    'git',
+    ['status', '--porcelain', '--', CONTRACT_RELATIVE_PATH],
+    { cwd: checkoutDir, encoding: 'utf-8' },
+  ).trim();
+
+  if (!status) {
+    return;
+  }
+
+  throw new Error(
+    `${CONTRACT_RELATIVE_PATH} has uncommitted changes in ${checkoutDir} — ` +
+      'commit them first so manifest.json records the commit the vendored file actually came from',
+  );
+}
+
+// The commit that actually last touched the contract file, not just
+// whatever HEAD happens to be — keeps the manifest diff stable across
+// upstream commits that don't touch `server/types/api.types.ts`. `git log`
+// exits 0 with empty stdout when the path has no commits in this checkout
+// (e.g. the file is present but git-ignored, or this isn't the checkout's
+// repo root) — that's exactly the case the manifest's provenance claim
+// needs to fail on, not silently record as `sourceCommit: ""`.
+function readCommitHash(checkoutDir) {
+  const commitHash = execFileSync(
+    'git',
+    ['log', '-1', '--format=%H', '--', CONTRACT_RELATIVE_PATH],
+    { cwd: checkoutDir, encoding: 'utf-8' },
+  ).trim();
+
+  if (!commitHash) {
+    throw new Error(
+      `No commit history found for ${CONTRACT_RELATIVE_PATH} in ${checkoutDir} — ` +
+        'is this a markpost git checkout?',
+    );
+  }
+
+  return commitHash;
+}
 
 function readContractSource(checkoutDir) {
   const contractSourcePath = join(checkoutDir, CONTRACT_RELATIVE_PATH);
@@ -190,11 +299,8 @@ function writeManifest(sourceRepo, sourceCommit) {
 function syncFrom(checkoutDir) {
   const contractSource = readContractSource(checkoutDir);
 
-  assertPathIsCommitted(checkoutDir, CONTRACT_RELATIVE_PATH);
-  const sourceCommit = readCommitHashForPath(
-    checkoutDir,
-    CONTRACT_RELATIVE_PATH,
-  );
+  assertContractIsCommitted(checkoutDir);
+  const sourceCommit = readCommitHash(checkoutDir);
   const sourceRepo = resolveSourceRepo(checkoutDir);
 
   writeVendoredContract(contractSource);

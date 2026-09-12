@@ -9,45 +9,49 @@ import {
   SOURCE_TYPES,
 } from '@/types/sources.types.js';
 
-// Locks SOURCE_TYPES to the set markpost's server accepts (see the rationale
-// on SOURCE_TYPES in src/types/sources.types.ts), so any addition — most
-// pointedly reintroducing the dropped `rss` type (markpost#116, issue #78) —
-// is a deliberate edit that must also update this list. Order-insensitive:
-// the contract is which types are offered, not their prompt display order.
-const ACCEPTED_SOURCE_TYPES = [
-  'webhook',
-  'email',
-  'stripe',
-  'github',
-  'zapier',
-  'shortcuts',
-] as const;
+import { SOURCE_TYPES as MARKPOST_SOURCE_TYPES } from './vendor/markpost-source-types.generated.js';
+import {
+  MANUAL_SECRET_PROVIDER_IDS as MARKPOST_MANUAL_SECRET_PROVIDER_IDS,
+  ROTATABLE_PROVIDER_IDS as MARKPOST_ROTATABLE_PROVIDER_IDS,
+  SECRET_BACKED_PROVIDER_IDS as MARKPOST_SECRET_BACKED_PROVIDER_IDS,
+} from './vendor/markpost-webhook-secrets.generated.js';
 
+// Locks SOURCE_TYPES to the vendored copy of markpost's real
+// shared/utils/sourceTypes.ts (see the rationale on SOURCE_TYPES in
+// src/types/sources.types.ts), refreshed by hand via
+// `npm run sync:source-contract` (README.md#source-and-settings-contract-sync)
+// instead of a hardcoded literal — a hand-typed duplicate here is exactly
+// what let this file list a source type (`rss`) markpost had already dropped
+// (markpost#116, issue #78) with green tests. Order-insensitive: the
+// contract is which types are offered, not their prompt display order.
 describe('SOURCE_TYPES', () => {
   it('offers exactly the source types markpost accepts, and no others', () => {
-    expect([...SOURCE_TYPES].sort()).toEqual([...ACCEPTED_SOURCE_TYPES].sort());
+    expect([...SOURCE_TYPES].sort()).toEqual([...MARKPOST_SOURCE_TYPES].sort());
   });
 });
 
-// Locks the provider-classification sets to markpost's
+// Locks the provider-classification sets to the vendored copy of markpost's
 // shared/utils/webhookSecrets.ts (MANUAL_SECRET_PROVIDER_IDS /
-// SECRET_BACKED_PROVIDER_IDS / ROTATABLE_PROVIDER_IDS). A drift here means the
-// rotate-secret command prompts for a secret on the wrong provider — or offers
-// rotation on a source markpost has no rotatable secret for.
+// SECRET_BACKED_PROVIDER_IDS / ROTATABLE_PROVIDER_IDS), refreshed by hand via
+// `npm run sync:source-contract`. A drift here means the rotate-secret
+// command prompts for a secret on the wrong provider — or offers rotation on
+// a source markpost has no rotatable secret for.
 describe('rotatable provider sets', () => {
-  it('classifies stripe as the only manual-secret provider', () => {
-    expect([...MANUAL_SECRET_PROVIDERS].sort()).toEqual(['stripe']);
-  });
-
-  it('classifies github/zapier/shortcuts as the generated secret-backed providers', () => {
-    expect([...SECRET_BACKED_PROVIDERS].sort()).toEqual(
-      ['github', 'shortcuts', 'zapier'],
+  it('classifies the same providers as manual-secret as markpost does', () => {
+    expect([...MANUAL_SECRET_PROVIDERS].sort()).toEqual(
+      [...MARKPOST_MANUAL_SECRET_PROVIDER_IDS].sort(),
     );
   });
 
-  it('treats every manual and generated provider as rotatable, and nothing else', () => {
+  it('classifies the same providers as generated secret-backed as markpost does', () => {
+    expect([...SECRET_BACKED_PROVIDERS].sort()).toEqual(
+      [...MARKPOST_SECRET_BACKED_PROVIDER_IDS].sort(),
+    );
+  });
+
+  it('treats the same providers as rotatable as markpost does, and nothing else', () => {
     expect([...ROTATABLE_PROVIDERS].sort()).toEqual(
-      ['github', 'shortcuts', 'stripe', 'zapier'],
+      [...MARKPOST_ROTATABLE_PROVIDER_IDS].sort(),
     );
   });
 

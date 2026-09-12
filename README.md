@@ -24,6 +24,7 @@ server-side records.
 | `markpost get <uuid> [--json]`                                                           | Fetch and display a single record; pass `--json` for machine-readable output                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `markpost sources <list\|create\|update\|delete\|rotate-secret> [uuid] [--yes]`          | Manage sources; `sources list --json` prints machine-readable output. `sources delete` asks to confirm first (deleting a source is irreversible — it drops the ingest config and one-time signing secret) and needs an interactive terminal; in scripts pass a uuid with `--yes` (`sources delete <uuid> --yes`) to skip the prompt. `sources create` and `sources update` also need an interactive terminal — they always prompt (for source details, or the route folder) and have no `--yes` equivalent, so they exit with an error rather than hang under a pipe or cron job. `rotate-secret [uuid]` mints/replaces the signing secret of a provider source (github/zapier/shortcuts reveal a fresh secret once; stripe prompts for the new value); it isn't guarded yet — it can still hang waiting on a prompt (a picker with no uuid, or the stripe secret prompt), so run it interactively |
 | `markpost records list [--source <type>] [--status <status>] [--search <text>] [--json]` | List records without deleting them, optionally filtered by source, status, or search text; pass `--json` for machine-readable output                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `markpost events list [--json]`                                                          | List the ingestion activity log (ok/dim/warn/err entries), newest first — the diagnostic counterpart to `records list`: a source that silently stops ingesting shows up here even when it produced no record. Pass `--json` for machine-readable output                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `markpost config <get\|set\|path> [key] [value]`                                         | View or change the stored API token and output directory                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `markpost settings <get\|set> [key=value ...]`                                           | View or change server-side sync settings (`autoSync`, `autoDelete`, `frontmatter`, `conflictStrategy`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `markpost help`                                                                          | Show aggregated usage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -34,7 +35,7 @@ The destructive fetch/write/delete sync runs only under the explicit
 
 ### JSON failure contract
 
-Commands that accept `--json` (`get`, `sources list`, `records list`) emit a
+Commands that accept `--json` (`get`, `sources list`, `records list`, `events list`) emit a
 single, uniform failure shape so a script can parse **any** failure the same
 way. On failure the CLI writes nothing to stdout (stdout stays the clean
 `--json | jq` data channel), sets a non-zero exit code, and prints one JSON
@@ -157,18 +158,20 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 
 ### Scripts
 
-| Command                               | Description                                                         |
-| ------------------------------------- | ------------------------------------------------------------------- |
-| `npm run build`                       | Compile TypeScript to `dist/`                                       |
-| `npm run watch`                       | Watch and recompile on changes                                      |
-| `npm test`                            | Run tests with Vitest                                               |
-| `npm run test:ci`                     | Run tests once (CI mode)                                            |
-| `npm run test:ui`                     | Run tests with Vitest UI                                            |
-| `npm run lint`                        | Check formatting and linting                                        |
-| `npm run lint:fix`                    | Auto-fix formatting and linting issues                              |
-| `npm run sync:contract`               | Refresh the vendored markpost API contract (see below)              |
-| `npm run sync:markdown-serialization` | Refresh the vendored markpost serialization slice (see below)       |
-| `npm run sync:source-endpoints`       | Refresh the vendored markpost ingest-endpoint constants (see below) |
+| Command                               | Description                                                                   |
+| ------------------------------------- | ----------------------------------------------------------------------------- |
+| `npm run build`                       | Compile TypeScript to `dist/`                                                 |
+| `npm run watch`                       | Watch and recompile on changes                                                |
+| `npm test`                            | Run tests with Vitest                                                         |
+| `npm run test:ci`                     | Run tests once (CI mode)                                                      |
+| `npm run test:ui`                     | Run tests with Vitest UI                                                      |
+| `npm run lint`                        | Check formatting and linting                                                  |
+| `npm run lint:fix`                    | Auto-fix formatting and linting issues                                        |
+| `npm run sync:contract`               | Refresh the vendored markpost API contract (see below)                        |
+| `npm run sync:markdown-serialization` | Refresh the vendored markpost serialization slice (see below)                 |
+| `npm run sync:source-endpoints`       | Refresh the vendored markpost ingest-endpoint constants (see below)           |
+| `npm run sync:source-contract`        | Refresh the vendored markpost source-type/webhook-secret contract (see below) |
+| `npm run sync:settings-contract`      | Refresh the vendored markpost settings contract (see below)                   |
 
 ### Contract sync
 
@@ -183,7 +186,7 @@ re-exports the generic envelope types (`ApiError`, `ApiRequest`,
 
 - **Refreshing it:** run `npm run sync:contract` (optionally
   `-- --from <path-to-a-local-markpost-checkout>`; without `--from` it
-  shallow-clones markpost fresh). This is a **human-run** step, not part of
+  clones markpost fresh, full history and blobless). This is a **human-run** step, not part of
   CI — it needs network access (or a local checkout) to fetch the current
   contract, and a test that depends on network access would be flaky and fail
   offline. Review the resulting diff, run `npm run build` and `npm test`, then
@@ -222,7 +225,7 @@ test failing. This closes that gap the same way the contract sync does.
 
 - **Refreshing it:** run `npm run sync:markdown-serialization` (optionally
   `-- --from <path-to-a-local-markpost-checkout>`; without `--from` it
-  shallow-clones markpost fresh). Like the contract sync this is a
+  clones markpost fresh, full history and blobless). Like the contract sync this is a
   **human-run** step, not part of CI — it needs network access (or a local
   checkout). It extracts just the serialization slice of `markdown.ts` (the
   four functions above plus the two types they use, leaving the
@@ -257,7 +260,7 @@ markdown serialization syncs do.
 
 - **Refreshing it:** run `npm run sync:source-endpoints` (optionally
   `-- --from <path-to-a-local-markpost-checkout>`; without `--from` it
-  shallow-clones markpost fresh). Like the other syncs this is a **human-run**
+  clones markpost fresh, full history and blobless). Like the other syncs this is a **human-run**
   step, not part of CI — it needs network access (or a local checkout). It
   extracts the two constants' string values from `useSources.ts` and writes them to
   `tests/libs/vendor/markpost-source-endpoints.generated.ts`, alongside a
@@ -279,6 +282,54 @@ markdown serialization syncs do.
   markpost changes the shape it builds around `WEBHOOK_INGEST_BASE` /
   `EMAIL_DOMAIN` (e.g. an added path segment) without changing the constants,
   this guard won't catch it.
+
+### Source and settings contract sync
+
+`src/types/sources.types.ts` (`SOURCE_TYPES`, `MANUAL_SECRET_PROVIDERS`,
+`SECRET_BACKED_PROVIDERS`, `ROTATABLE_PROVIDERS`) and
+`src/types/settings.types.ts` (`CONFLICT_STRATEGIES`,
+`DEFAULT_CONFLICT_STRATEGY`, `DEFAULT_AUTO_DELETE`, `DEFAULT_AUTO_SYNC`,
+`DEFAULT_FRONTMATTER_ENABLED`) hand-mirror markpost's real source-type,
+webhook-secret, and settings contracts. Until now those two files had no
+vendored copy and no drift test — just a test that hardcoded today's values,
+which is exactly what let `sources.types.ts` list a source type (`rss`) that
+markpost had already dropped (markpost#116, issue #78): the hardcoded
+expectation drifted right alongside the mirror instead of catching it. This
+closes that gap the same way `sync:contract` and
+`sync:markdown-serialization` do.
+
+- **Refreshing it:** run `npm run sync:source-contract` and
+  `npm run sync:settings-contract` (each optionally takes
+  `-- --from <path-to-a-local-markpost-checkout>`; without `--from` they
+  clone markpost fresh — full history, blobless (`--filter=blob:none`), not
+  a shallow `--depth 1` clone, since per-path commit history needs the real
+  log). Like the other syncs these are **human-run** steps, not part of CI —
+  they need network access (or a local checkout). A `--from` checkout that
+  turns out to be shallow is rejected with a clear error rather than silently
+  recording the wrong commit for every vendored file.
+  - `sync:source-contract` vendors markpost's `shared/utils/sourceTypes.ts`
+    and `shared/utils/webhookSecrets.ts` verbatim (both are self-contained,
+    with no imports) into `tests/types/vendor/markpost-source-types.generated.ts`
+    and `tests/types/vendor/markpost-webhook-secrets.generated.ts`.
+  - `sync:settings-contract` extracts just `CONFLICT_STRATEGIES` from
+    markpost's `server/utils/response.ts` and just the `autoSync` /
+    `autoDelete` / `frontmatter` / `conflictStrategy` column defaults from the
+    `userSettings` table in `server/db/schema.ts` (the rest of both files is
+    irrelevant to the CLI) into
+    `tests/types/vendor/markpost-settings-contract.generated.ts`.
+
+  Both write a manifest recording the exact source commit(s) they synced
+  from. Review the diff, run `npm test`, then commit.
+
+- **Catching drift:** `tests/types/sources.types.test.ts` and
+  `tests/types/settings.types.test.ts` run on every `npm test` /
+  `npm run test:ci` and compare the CLI's mirrored constants against the
+  vendored copies, failing the moment they diverge. No network access needed.
+- **What this does _not_ do:** like the other syncs, it does not detect when
+  markpost's upstream contract has changed and the vendored copy has fallen
+  behind — that would require network access at test time. Re-run both sync
+  scripts periodically or whenever a markpost source/webhook/settings change
+  is suspected.
 
 ## Security scanning
 

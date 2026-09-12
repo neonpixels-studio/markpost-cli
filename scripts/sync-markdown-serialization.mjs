@@ -18,10 +18,11 @@
 // markpost's markdown serialization changes, review the diff, then commit.
 //
 // Usage:
-//   npm run sync:markdown-serialization                     # shallow-clones markpost fresh
+//   npm run sync:markdown-serialization                     # clones markpost fresh (full history, blobless)
 //   npm run sync:markdown-serialization -- --from <path>    # copies from an existing local checkout
 //   npm run sync:markdown-serialization -- --from=<path>    # same, `=` form
 
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -35,14 +36,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
-import {
-  assertPathIsCommitted,
-  cloneMarkpostInto,
-  parseFromPathArg,
-  readCommitHashForPath,
-  resolveSourceRepo,
-} from './lib/markpost-checkout.mjs';
+import { parseFromPathArg } from './sync-contract.mjs';
+import { resolveSourceRepo } from './lib/markpost-checkout.mjs';
 
+const MARKPOST_REPO_URL = 'https://github.com/neonpixels-studio/markpost';
 const SOURCE_RELATIVE_PATH = 'server/utils/markdown.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -167,6 +164,54 @@ function extractSerializationSlice(source) {
   return declarations.join('\n\n');
 }
 
+// Full history (`--filter=blob:none`, not `--depth 1`): `readCommitHash`
+// below needs the real per-path log, and a shallow clone's single grafted
+// commit shows the source file as newly added, so it would report that
+// boundary commit as "last touched" regardless of when the file actually
+// last changed. Blobless keeps the clone cheap — only the commit graph and
+// trees download eagerly.
+function cloneMarkpostInto(cloneDir) {
+  execFileSync(
+    'git',
+    ['clone', '--filter=blob:none', MARKPOST_REPO_URL, cloneDir],
+    { stdio: 'inherit' },
+  );
+}
+
+function assertSourceIsCommitted(checkoutDir) {
+  const status = execFileSync(
+    'git',
+    ['status', '--porcelain', '--', SOURCE_RELATIVE_PATH],
+    { cwd: checkoutDir, encoding: 'utf-8' },
+  ).trim();
+
+  if (!status) {
+    return;
+  }
+
+  throw new Error(
+    `${SOURCE_RELATIVE_PATH} has uncommitted changes in ${checkoutDir} — ` +
+      'commit them first so the manifest records the commit the vendored slice actually came from',
+  );
+}
+
+function readCommitHash(checkoutDir) {
+  const commitHash = execFileSync(
+    'git',
+    ['log', '-1', '--format=%H', '--', SOURCE_RELATIVE_PATH],
+    { cwd: checkoutDir, encoding: 'utf-8' },
+  ).trim();
+
+  if (!commitHash) {
+    throw new Error(
+      `No commit history found for ${SOURCE_RELATIVE_PATH} in ${checkoutDir} — ` +
+        'is this a markpost git checkout?',
+    );
+  }
+
+  return commitHash;
+}
+
 function readMarkdownSource(checkoutDir) {
   const sourcePath = join(checkoutDir, SOURCE_RELATIVE_PATH);
 
@@ -204,8 +249,8 @@ function syncFrom(checkoutDir) {
   const source = readMarkdownSource(checkoutDir);
   const slice = extractSerializationSlice(source);
 
-  assertPathIsCommitted(checkoutDir, SOURCE_RELATIVE_PATH);
-  const sourceCommit = readCommitHashForPath(checkoutDir, SOURCE_RELATIVE_PATH);
+  assertSourceIsCommitted(checkoutDir);
+  const sourceCommit = readCommitHash(checkoutDir);
   const sourceRepo = resolveSourceRepo(checkoutDir);
 
   writeVendoredSlice(slice);

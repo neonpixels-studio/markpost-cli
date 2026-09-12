@@ -750,7 +750,28 @@ export const fetchRecord = async (uuid: string): Promise<Record | null> => {
   }
 };
 
-export const deleteRecords = async (
+// markpost's bulk delete handler (server/api/records/index.delete.ts) caps
+// each DELETE /api/records request at this many uuids (`MAX_DELETE_BATCH_SIZE`
+// in shared/utils/records.ts, which DELETE and PATCH currently share); a
+// larger `uuids[]` array is rejected with a 422. The CLI chunks to this size
+// (mirroring `MAX_MARK_SYNCED_BATCH_SIZE`/`markRecordsSynced`) so settling
+// over 100 records doesn't fail the whole delete outright, leaving every one
+// of them to be re-fetched and re-written as duplicate files (issue #158).
+export const MAX_DELETE_BATCH_SIZE = 100;
+
+// Identifies a chunk/run by its uuid range rather than listing every uuid —
+// shared by `deleteRecordsChunk`'s failure log and `logPartialSettle` so a
+// large batch (up to MAX_DELETE_BATCH_SIZE uuids per chunk, or the whole
+// input for the run-level summary) never dumps a several-thousand-character
+// line to stderr.
+const uuidRangeLabel = (prefix: string, uuids: string[]): string =>
+  `${prefix}[${uuids[0]}..${uuids[uuids.length - 1]}, ${uuids.length} uuid(s)]`;
+
+// DELETEs one chunk (<= MAX_DELETE_BATCH_SIZE uuids). A systemic auth/5xx
+// failure (or a timeout) is re-thrown so it dooms the whole run immediately;
+// any other failure is logged and reported as `null` so a later,
+// independently-built chunk still gets a chance to succeed.
+const deleteRecordsChunk = async (
   uuids: string[],
 ): Promise<ApiDeleteMeta | null> => {
   try {
@@ -779,8 +800,86 @@ export const deleteRecords = async (
       throw error;
     }
 
-    logApiFailure(`deleteRecords["${uuids.join(', ')}"]`, error);
+    logApiFailure(uuidRangeLabel('deleteRecords', uuids), error);
 
     return null;
   }
+};
+
+// Any chunk failure — plain or systemic/timeout — leaves `uuids`' overall
+// outcome as `null` (see `deleteRecords`), but SOME chunk in the run may
+// still have deleted its records server-side (an earlier one, before a
+// thrown systemic failure aborted the run; or any chunk, since a plain
+// failure doesn't abort and a later chunk can succeed after an earlier one
+// failed). Logs that reconciled count so it isn't silently lost: the
+// caller's own failure message treats `null` as "nothing was deleted", which
+// would otherwise be the only record of this run and would undercount what
+// actually happened. Deliberately doesn't claim WHICH chunks succeeded
+// (`totalDeleted` is a sum, not tied to a position) — that's why the message
+// stays position-neutral rather than saying "before a chunk failed".
+const logPartialSettle = (uuids: string[], totalDeleted: number): void => {
+  if (totalDeleted === 0) {
+    return;
+  }
+
+  logErrorMessage(
+    uuidRangeLabel('deleteRecords', uuids),
+    `Partially settled: ${totalDeleted}/${uuids.length} uuids confirmed deleted; the remainder are unconfirmed and may still be on the server.`,
+  );
+};
+
+// Chunks `uuids` into `ceil(N / MAX_DELETE_BATCH_SIZE)` sequential DELETE
+// requests so a bulk delete over the server's cap settles instead of failing
+// outright. A timeout or systemic failure (auth/rate-limit/5xx) re-throws out
+// of `deleteRecordsChunk`; caught here so any already-deleted count from
+// earlier chunks can be logged (`logPartialSettle`) before the error
+// propagates and aborts every remaining chunk (those uuids stay pending). A
+// plain per-chunk failure does NOT abort — the chunks are independent, so a
+// later one may still succeed — but since the endpoint only returns a count
+// (no per-uuid diff like bulk PATCH), a failed chunk can't be reconciled into
+// a trustworthy partial total: any chunk failure makes the WHOLE result
+// `null` rather than reporting a partial delete as a full success, preserving
+// the original contract every caller (and existing test) relies on —
+// non-null means every requested uuid was confirmed deleted.
+export const deleteRecords = async (
+  uuids: string[],
+): Promise<ApiDeleteMeta | null> => {
+  if (uuids.length === 0) {
+    return { deleted: 0 };
+  }
+
+  let totalDeleted = 0;
+  let anyChunkFailed = false;
+
+  for (let start = 0; start < uuids.length; start += MAX_DELETE_BATCH_SIZE) {
+    const chunk = uuids.slice(start, start + MAX_DELETE_BATCH_SIZE);
+    let chunkMeta: ApiDeleteMeta | null;
+
+    try {
+      chunkMeta = await deleteRecordsChunk(chunk);
+    } catch (error) {
+      logPartialSettle(uuids, totalDeleted);
+      throw error;
+    }
+
+    // A malformed 2xx (missing/non-numeric `meta.deleted`) is as untrustworthy
+    // as a `null` chunk: treat it as a chunk failure rather than letting
+    // `totalDeleted` accumulate `NaN`/`undefined`, which would otherwise
+    // poison the WHOLE sum (`NaN` from one chunk propagates through every
+    // later `+=`) into a falsy-looking-truthy result the caller can't
+    // distinguish from success.
+    if (!chunkMeta || !Number.isFinite(chunkMeta.deleted)) {
+      anyChunkFailed = true;
+      continue;
+    }
+
+    totalDeleted += chunkMeta.deleted;
+  }
+
+  if (anyChunkFailed) {
+    logPartialSettle(uuids, totalDeleted);
+    return null;
+  }
+
+  return { deleted: totalDeleted };
 };
