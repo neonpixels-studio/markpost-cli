@@ -22,7 +22,8 @@ import { config } from '@/libs/config.js';
 import { expandHomeDirectory } from '@/libs/paths.js';
 import {
   buildRecordDocument,
-  extractFrontmatterDocument,
+  extractFrontmatterTags,
+  stripFrontmatterDocument,
 } from '@/libs/frontmatter.js';
 import { Record } from '@/types/records.types.js';
 import {
@@ -826,10 +827,9 @@ export const buildWritePreview = (
 // `# ` heading writeMarkdown added. Strip them here so pushing the file back
 // sends only the body — otherwise markpost would treat the frontmatter+heading
 // as content and wrap it in a second frontmatter block on ingestion. The same
-// block's `tags:` line is extracted alongside it (extractFrontmatterDocument,
-// a single parse of the document) so a pulled-edited-repushed file forwards
-// its tags to createRecord instead of them being discarded along with the
-// rest of the stripped block (issue #170).
+// block's `tags:` line is extracted separately (extractFrontmatterTags) so a
+// pulled-edited-repushed file forwards its tags to createRecord instead of
+// them being discarded along with the rest of the stripped block (issue #170).
 export const readMarkdown = (
   filePath: string,
 ): { title: string; content: string; tags: string[] } => {
@@ -838,11 +838,10 @@ export const readMarkdown = (
   }
 
   const rawContent = readFileSync(filePath, 'utf-8');
-  const { content, tags } = extractFrontmatterDocument(rawContent);
 
   return {
     title: basename(filePath, extname(filePath)),
-    content,
-    tags,
+    content: stripFrontmatterDocument(rawContent),
+    tags: extractFrontmatterTags(rawContent),
   };
 };

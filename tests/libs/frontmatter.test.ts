@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleMarkdownDocument,
   buildRecordDocument,
-  extractFrontmatterDocument,
   extractFrontmatterTags,
   serializeFrontmatter,
   stripFrontmatterDocument,
@@ -609,30 +608,22 @@ describe('extractFrontmatterTags', () => {
 
     expect(extractFrontmatterTags(document)).toEqual(['ci']);
   });
-});
 
-// extractFrontmatterDocument is the single-parse combination
-// stripFrontmatterDocument and extractFrontmatterTags are both defined in
-// terms of; readMarkdown calls it directly so a pushed file's frontmatter is
-// only parsed once.
-describe('extractFrontmatterDocument', () => {
-  it('returns both the stripped body and the extracted tags in one call', () => {
+  // Issue #170's real-world scenario is pull -> edit in an editor -> repush,
+  // and an editor re-save is exactly what can turn a pulled file's line
+  // endings to CRLF (see the equivalent stripFrontmatterDocument coverage
+  // above) — tags must still be recovered from that same normalized block.
+  it('extracts tags from a CRLF-re-saved pulled file', () => {
     const document = assembleMarkdownDocument({
       title: 'Production deploy succeeded',
       body: 'Commit a1f9c20 shipped to prod.',
       frontmatter,
-    });
+    }).replace(/\n/g, '\r\n');
 
-    expect(extractFrontmatterDocument(document)).toEqual({
-      content: 'Commit a1f9c20 shipped to prod.',
-      tags: ['ci', 'deploy', 'incoming'],
-    });
-  });
-
-  it('returns the original content and no tags for a non-markpost document', () => {
-    expect(extractFrontmatterDocument('Just some text.')).toEqual({
-      content: 'Just some text.',
-      tags: [],
-    });
+    expect(extractFrontmatterTags(document)).toEqual([
+      'ci',
+      'deploy',
+      'incoming',
+    ]);
   });
 });

@@ -262,7 +262,9 @@ const parseFrontmatterDocument = (
 // IS stripped the returned body is LF-normalized — the document was a
 // markpost-composed LF file, so this only affects a copy an editor re-encoded.
 export const stripFrontmatterDocument = (content: string): string => {
-  return extractFrontmatterDocument(content).content;
+  const parsed = parseFrontmatterDocument(content);
+
+  return parsed ? parsed.body : content;
 };
 
 // True when the `"` at `index` is escaped, i.e. preceded by an ODD run of
@@ -338,32 +340,6 @@ const parseTagsLine = (serializedTags: string): string[] => {
     .filter((tag) => tag !== '');
 };
 
-export type ExtractedFrontmatterDocument = {
-  content: string;
-  tags: string[];
-};
-
-// Single-parse combination of stripFrontmatterDocument + extractFrontmatterTags,
-// for a caller (readMarkdown) that always wants both: parsing the same document
-// twice (BOM/CRLF normalization, indexOf, slice, split) is wasted work on a bulk
-// push of many/large files. Both single-value exports below are defined in
-// terms of this one, so there's a single source of truth for what counts as a
-// markpost-composed document.
-export const extractFrontmatterDocument = (
-  content: string,
-): ExtractedFrontmatterDocument => {
-  const parsed = parseFrontmatterDocument(content);
-
-  if (!parsed) {
-    return { content, tags: [] };
-  }
-
-  return {
-    content: parsed.body,
-    tags: parseTagsLine(lineValue(parsed.blockLines, TAGS_LINE_INDEX)),
-  };
-};
-
 // Companion to stripFrontmatterDocument: extracts the tags markpost's own
 // frontmatter block carried, so a pulled-edited-repushed file forwards its
 // tags to createRecord instead of silently dropping them (issue #170). Scoped
@@ -372,7 +348,13 @@ export const extractFrontmatterDocument = (
 // carrying markpost tags. Returns [] for any document with no markpost
 // frontmatter, matching what a tagless record would round-trip to.
 export const extractFrontmatterTags = (content: string): string[] => {
-  return extractFrontmatterDocument(content).tags;
+  const parsed = parseFrontmatterDocument(content);
+
+  if (!parsed) {
+    return [];
+  }
+
+  return parseTagsLine(lineValue(parsed.blockLines, TAGS_LINE_INDEX));
 };
 
 const isPlainObject = (value: unknown): value is { [key: string]: unknown } => {
