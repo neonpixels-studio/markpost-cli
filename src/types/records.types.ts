@@ -49,3 +49,25 @@ export type RecordResource = ApiResourceObject & {
 export type RecordApiResponse = ApiResponse<RecordResource | null>;
 
 export type RecordListApiResponse = ApiResponse<RecordResource[]>;
+
+// Mirrors markpost's `RecordExportRow` (server/utils/recordExport.ts) — the
+// shape `GET /api/records/export` returns for each record. Copied by hand
+// like `Frontmatter` above: this is a `server/utils` export, not part of the
+// vendored `server/types/api.types.ts` contract `scripts/sync-contract.mjs`
+// keeps in sync automatically, and the export response isn't JSON:API-wrapped
+// (see server/api/records/export.get.ts), so it has no `RecordResource`
+// counterpart either.
+export type RecordExportRow = {
+  uuid: string;
+  createdAt: string;
+  title: string;
+  content: string;
+  source: string | null;
+  sourceId: string | null;
+  status: string;
+  filePath: string | null;
+  tags: unknown;
+  frontmatter: unknown;
+  syncedAt: string | null;
+  errorMessage: string | null;
+};
