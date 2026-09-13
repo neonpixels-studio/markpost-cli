@@ -547,6 +547,62 @@ describe('runGetCommand', () => {
       expect(console.error).toHaveBeenCalledTimes(2);
       expect(process.exitCode).toBe(1);
     });
+
+    it('writes nothing to stdout when the very first uuid of a --json batch hits a systemic failure', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(fetchRecord).mockRejectedValue(
+        new ApiRequestError('Invalid or missing API token', 401),
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('fetches a repeated uuid only once', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'abc-123']);
+
+      expect(fetchRecord).toHaveBeenCalledTimes(1);
+      // A single distinct uuid, even given twice, keeps the single-uuid text
+      // shape: one printed record, not two.
+      const titleCalls = vi
+        .mocked(console.log)
+        .mock.calls.filter(([arg]) => arg === 'Test Title');
+      expect(titleCalls).toHaveLength(1);
+    });
+
+    it('keeps the single-uuid --json shape when a repeated uuid dedupes to one', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'abc-123', '--json']);
+
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls[0][0] as string;
+      expect(Array.isArray(JSON.parse(output))).toBe(false);
+    });
+  });
+
+  // Pins that a lone uuid's text output has no leading blank line — the
+  // `printedFirst` threading in `printTextResult` is the multi-uuid separator
+  // mechanism, and this guards against it accidentally printing a leading gap
+  // for the single-uuid case the original command never had.
+  it('prints no leading blank line for a single uuid', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    expect(vi.mocked(console.log).mock.calls[0][0]).toBe('Test Title');
   });
 
   describe('--json failure contract', () => {

@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { fetchRecord } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, logErrorMessage } from '@/libs/errors.js';
 import {
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
@@ -51,8 +51,23 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
         results.push({ uuid, record: await fetchRecord(uuid) });
       }
     } finally {
+      // Reporting runs inside `finally` so a mid-batch abort still surfaces
+      // whatever was fetched (see comment above), but that means a failure
+      // *while reporting* (e.g. a non-serializable record reaching `printJson`)
+      // must not replace the real systemic error this `finally` is unwinding
+      // for — it's logged on its own line rather than left to clobber the
+      // `catch` below.
       if (results.length > 0) {
-        reportResults(results, json, uuids.length);
+        try {
+          reportResults(results, json, uuids.length);
+        } catch (reportError) {
+          logErrorMessage(
+            'get',
+            reportError instanceof Error
+              ? reportError.message
+              : String(reportError),
+          );
+        }
       }
     }
   } catch (error) {
@@ -66,9 +81,11 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 
 // `parseArgs` accepts any number of uuids and `--json` in either order and
 // throws on an unknown flag (the command's outer catch surfaces it). Every
-// positional is a requested uuid — none are silently dropped (issue #173).
-// Positionals are filtered for blanks so a stray empty-string argument can't
-// masquerade as a requested uuid.
+// distinct positional is a requested uuid — none are silently dropped
+// (issue #173). Positionals are filtered for blanks so a stray empty-string
+// argument can't masquerade as a requested uuid, and deduplicated (`Set`
+// preserves insertion order) so a repeated uuid — e.g. from a copy-paste or a
+// shell glob — is fetched and printed once, not once per repetition.
 const parseGetArgs = (args: string[]): { uuids: string[] } => {
   // `--json` is still declared so `parseArgs` accepts it rather than rejecting
   // it as unknown; its value is read from argv by `hasJsonFlag` in the caller,
@@ -81,7 +98,11 @@ const parseGetArgs = (args: string[]): { uuids: string[] } => {
     },
   });
 
-  return { uuids: positionals.filter((positional) => positional.length > 0) };
+  const requestedUuids = positionals.filter(
+    (positional) => positional.length > 0,
+  );
+
+  return { uuids: [...new Set(requestedUuids)] };
 };
 
 // One requested uuid's outcome: the record it resolved to, or `null` when
@@ -138,11 +159,9 @@ const reportJsonResults = (
     return;
   }
 
-  for (const result of results) {
-    if (!result.record) {
-      reportMissing(result.uuid, true);
-    }
-  }
+  results
+    .filter((result) => !result.record)
+    .forEach((result) => reportMissing(result.uuid, true));
 
   const records = results
     .filter((result): result is GetResult & { record: Record } =>
@@ -161,25 +180,29 @@ const reportJsonResults = (
   printJson(records);
 };
 
-const reportTextResults = (results: GetResult[]): void => {
-  let printedFirst = false;
-
-  for (const result of results) {
-    if (!result.record) {
-      reportMissing(result.uuid, false);
-      continue;
-    }
-
-    // Separate multiple printed records with a blank line; the very first one
-    // (and the only one, in the single-uuid case) prints with no leading gap,
-    // matching the prior single-uuid output exactly.
-    if (printedFirst) {
-      console.log('');
-    }
-
-    printRecord(result.record);
-    printedFirst = true;
+// Prints one result and returns whether a record has now been printed at
+// least once — the caller threads that through `reduce` so a missing result
+// (which prints nothing) doesn't shift when the next printed record's leading
+// blank-line separator appears.
+const printTextResult = (printedFirst: boolean, result: GetResult): boolean => {
+  if (!result.record) {
+    reportMissing(result.uuid, false);
+    return printedFirst;
   }
+
+  // Separate multiple printed records with a blank line; the very first one
+  // (and the only one, in the single-uuid case) prints with no leading gap,
+  // matching the prior single-uuid output exactly.
+  if (printedFirst) {
+    console.log('');
+  }
+
+  printRecord(result.record);
+  return true;
+};
+
+const reportTextResults = (results: GetResult[]): void => {
+  results.reduce(printTextResult, false);
 };
 
 // Every field here comes from the untrusted API response, so each is stripped
