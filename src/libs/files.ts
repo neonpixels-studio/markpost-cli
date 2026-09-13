@@ -111,7 +111,9 @@ const statOrSkip = (
 // the moment something actually opens it — statSync doesn't check permission
 // bits, only accessSync does. Pre-checking here means an unreadable file is
 // classified as skipped at resolve time, before preview or push ever attempt
-// the real read that would throw EACCES mid-run.
+// the real read that would throw EACCES mid-run. Advisory, not a guarantee:
+// permissions can change between this check and the read, so pushFile's
+// catch (src/commands/push.ts) still owns the EACCES path for that race.
 const isReadableFile = (path: string): boolean => {
   try {
     accessSync(path, constants.R_OK);
@@ -158,7 +160,10 @@ function collectFromDirectory(
 // Classify one path found during traversal (a directory entry or a glob
 // match), recursing directories and taking only markdown files. A glob is a
 // bulk selector, not an explicit name, so a `*` never sweeps in unrelated
-// non-markdown files.
+// non-markdown files. A markdown-named entry that isn't a readable regular
+// file (a FIFO/socket/device, or a permission-denied file) is recorded as
+// skipped rather than silently dropped, matching the explicit-file case in
+// resolveInput below.
 function collectFromPath(path: string, accumulator: WalkAccumulator): void {
   const stats = statOrSkip(path, accumulator);
 
@@ -171,16 +176,16 @@ function collectFromPath(path: string, accumulator: WalkAccumulator): void {
     return;
   }
 
-  if (!stats.isFile() || !isMarkdownFile(path)) {
+  if (!isMarkdownFile(path)) {
     return;
   }
 
-  if (isReadableFile(path)) {
-    accumulator.files.push(path);
+  if (!stats.isFile() || !isReadableFile(path)) {
+    accumulator.skipped.push(path);
     return;
   }
 
-  accumulator.skipped.push(path);
+  accumulator.files.push(path);
 }
 
 const collectFromGlob = (
