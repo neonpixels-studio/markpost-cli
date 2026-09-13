@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleMarkdownDocument,
   buildRecordDocument,
+  extractFrontmatterTags,
   serializeFrontmatter,
   stripFrontmatterDocument,
 } from '@/libs/frontmatter.js';
@@ -226,7 +227,9 @@ describe('buildRecordDocument', () => {
       frontmatter: { ...frontmatter, tags: ['ci', 42, 'deploy'] },
     } as unknown as Record;
 
-    expect(buildRecordDocument(mixedTagsRecord)).toContain('tags: [ci, deploy]');
+    expect(buildRecordDocument(mixedTagsRecord)).toContain(
+      'tags: [ci, deploy]',
+    );
   });
 
   it('treats a non-object frontmatter value as no metadata', () => {
@@ -264,7 +267,8 @@ describe('stripFrontmatterDocument', () => {
   });
 
   it('preserves a body that itself contains blank lines and a horizontal rule', () => {
-    const body = 'First paragraph.\n\nSecond paragraph.\n\n---\n\nAfter a rule.';
+    const body =
+      'First paragraph.\n\nSecond paragraph.\n\n---\n\nAfter a rule.';
     const document = assembleMarkdownDocument({
       title: 'My Note',
       body,
@@ -444,5 +448,102 @@ describe('stripFrontmatterDocument', () => {
     const document = buildRecordDocument(carriageReturnTitleRecord);
 
     expect(stripFrontmatterDocument(document)).toBe('Body intact.');
+  });
+});
+
+// Regression coverage for issue #170: readMarkdown's sole read path stripped
+// markpost's own frontmatter (including its `tags:` line) with no extraction
+// step, so a pulled-edited-repushed note silently lost its tags on push even
+// though POST /api/records accepts a tags array. extractFrontmatterTags is
+// the companion read that recovers them from the same block
+// stripFrontmatterDocument strips.
+describe('extractFrontmatterTags', () => {
+  it('extracts tags from a markpost-composed document', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Production deploy succeeded',
+      body: 'Commit a1f9c20 shipped to prod.',
+      frontmatter,
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual([
+      'ci',
+      'deploy',
+      'incoming',
+    ]);
+  });
+
+  it("round-trips a synced record's tags exactly as buildRecordDocument wrote them", () => {
+    const document = buildRecordDocument(recordWithFrontmatter);
+
+    expect(extractFrontmatterTags(document)).toEqual(
+      recordWithFrontmatter.tags,
+    );
+  });
+
+  it('returns an empty array for an empty tags line', () => {
+    const document = assembleMarkdownDocument({
+      title: 'No tags here',
+      body: 'Body.',
+      frontmatter: { ...frontmatter, title: 'No tags here', tags: [] },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual([]);
+  });
+
+  it('unquotes a tag that needed YAML quoting for a comma', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Comma tag',
+      body: 'Body.',
+      frontmatter: {
+        ...frontmatter,
+        title: 'Comma tag',
+        tags: ['a,b', 'plain'],
+      },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual(['a,b', 'plain']);
+  });
+
+  it('unquotes a tag that needed YAML quoting for a bracket', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Bracket tag',
+      body: 'Body.',
+      frontmatter: { ...frontmatter, title: 'Bracket tag', tags: ['a]b'] },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual(['a]b']);
+  });
+
+  it('returns an empty array for bare content with no frontmatter', () => {
+    expect(extractFrontmatterTags('Just some text.')).toEqual([]);
+  });
+
+  it("returns an empty array for a note whose own frontmatter is not markpost's", () => {
+    const note =
+      '---\n' +
+      'aliases: [x]\n' +
+      'author: Jane\n' +
+      '---\n\n' +
+      '# My heading\n\n' +
+      'Body the user wrote.';
+
+    expect(extractFrontmatterTags(note)).toEqual([]);
+  });
+
+  it('returns an empty array when the heading is not the mirrored title', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ops, urgent]\n' +
+      '---\n\n' +
+      '# Prerequisites\n\n' +
+      'Install the CLI first.';
+
+    // Same disqualification stripFrontmatterDocument applies: the heading
+    // doesn't mirror the title, so this isn't a markpost-composed document
+    // and its tags-shaped line must not be trusted as real tags.
+    expect(extractFrontmatterTags(document)).toEqual([]);
   });
 });

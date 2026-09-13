@@ -346,9 +346,34 @@ export const fetchPaginatedRecords = async (
   }
 };
 
+// markpost's POST /api/records validates `tags` as an array when present
+// (server/api/records/index.post.ts validateTagsShape) but treats it as fully
+// optional — an absent key is not the same as an empty array to the caller
+// (`push` created a record with no tags key at all before issue #170), so an
+// empty/absent `tags` is omitted here rather than sent as `[]`, preserving
+// that prior shape for the common tagless push.
+type CreateRecordAttributes = {
+  title: string;
+  content: string;
+  tags?: string[];
+};
+
+const buildCreateRecordAttributes = (
+  title: string,
+  content: string,
+  tags: string[],
+): CreateRecordAttributes => {
+  if (tags.length === 0) {
+    return { title, content };
+  }
+
+  return { title, content, tags };
+};
+
 export const createRecord = async (
   title: string,
   content: string,
+  tags: string[] = [],
 ): Promise<Record | null> => {
   try {
     const body = (await authedRequest('/api/records', {
@@ -359,10 +384,7 @@ export const createRecord = async (
       body: JSON.stringify({
         data: {
           type: 'records',
-          attributes: {
-            title,
-            content,
-          },
+          attributes: buildCreateRecordAttributes(title, content, tags),
         },
       }),
     })) as RecordApiResponse;

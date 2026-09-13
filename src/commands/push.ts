@@ -67,8 +67,8 @@ const toMessage = (error: unknown): string => {
 
 const pushFile = async (filePath: string): Promise<PushResult> => {
   try {
-    const { title, content } = readMarkdown(filePath);
-    const record = await createRecord(title, content);
+    const { title, content, tags } = readMarkdown(filePath);
+    const record = await createRecord(title, content, tags);
 
     if (!record) {
       console.error(

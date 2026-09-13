@@ -1761,6 +1761,36 @@ describe('readMarkdown', () => {
 
     expect(result.content).toBe('Commit shipped.');
   });
+
+  // Regression coverage for issue #170: the frontmatter block's `tags:` line
+  // was discarded along with the rest of the stripped block, so a
+  // pulled-edited-repushed file never forwarded its tags to createRecord.
+  it('extracts the tags from a previously-pulled file frontmatter block', () => {
+    const pulledDocument =
+      '---\n' +
+      'title: Deploy\n' +
+      'source: webhook/github\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci, deploy]\n' +
+      '---\n\n' +
+      '# Deploy\n\n' +
+      'Commit shipped.';
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(pulledDocument);
+
+    const result = readMarkdown('./notes/deploy.md');
+
+    expect(result.tags).toEqual(['ci', 'deploy']);
+  });
+
+  it('returns an empty tags array for a file with no markpost frontmatter', () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(mockRecord.content);
+
+    const result = readMarkdown('./notes/Test Title.md');
+
+    expect(result.tags).toEqual([]);
+  });
 });
 
 describe('buildWritePreview', () => {

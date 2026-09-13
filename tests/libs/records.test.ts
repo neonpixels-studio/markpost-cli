@@ -496,7 +496,7 @@ describe('fetchAllRecords', () => {
     );
   });
 
-  it('extracts the cursor when links.next percent-encodes the key, matching markpost\'s own link builder', async () => {
+  it("extracts the cursor when links.next percent-encodes the key, matching markpost's own link builder", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -903,6 +903,66 @@ describe('createRecord', () => {
   it('returns null on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await createRecord('Test Title', 'Test Content')).toBeNull();
+  });
+
+  // Regression coverage for issue #170: push previously called createRecord
+  // with only title/content, so a pulled-edited-repushed note's frontmatter
+  // tags never reached markpost even though POST /api/records accepts a
+  // tags array (server/api/records/index.post.ts).
+  it('includes tags in the request body when provided', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await createRecord('Test Title', 'Test Content', ['ci', 'deploy']);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes: {
+              title: 'Test Title',
+              content: 'Test Content',
+              tags: ['ci', 'deploy'],
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  // markpost's POST /api/records treats `tags` as fully optional — an absent
+  // key is not the same as an empty array — so an empty tags list is omitted
+  // rather than sent as `[]`, preserving the request shape a tagless push
+  // sent before issue #170.
+  it('omits tags from the request body when the list is empty', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await createRecord('Test Title', 'Test Content', []);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes: { title: 'Test Title', content: 'Test Content' },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('omits tags from the request body when no tags argument is given', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await createRecord('Test Title', 'Test Content');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes: { title: 'Test Title', content: 'Test Content' },
+          },
+        }),
+      }),
+    );
   });
 
   // A per-file 4xx (the payload's fault) must stay a null return so a bulk
@@ -1559,9 +1619,9 @@ describe('markRecordsSynced', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(chunkSizes()).toEqual([100, 100, 50]);
     // No chunk may ever exceed the server cap.
-    expect(chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE)).toBe(
-      true,
-    );
+    expect(
+      chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE),
+    ).toBe(true);
     expect(result.outcomes).toHaveLength(250);
     expect(result.abortReason).toBe(null);
   });
@@ -1719,7 +1779,10 @@ describe('markRecordsSynced', () => {
   it('does not crash on a non-array data object, falling back to meta.updated', async () => {
     // A single resource object (the old per-uuid shape) must not throw a
     // TypeError through the catch; meta.updated confirms the whole chunk.
-    mockFetch({ data: { attributes: { uuid: 'uuid-0' } }, meta: { updated: 2 } });
+    mockFetch({
+      data: { attributes: { uuid: 'uuid-0' } },
+      meta: { updated: 2 },
+    });
     const result = await markRecordsSynced(items(2));
     expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED]);
   });
@@ -1850,7 +1913,9 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
@@ -1865,7 +1930,9 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
