@@ -360,6 +360,130 @@ describe('runGetCommand', () => {
   // The unified --json failure contract: an argument error, a not-found fetch,
   // and a thrown fetch error all surface as one parseable { error, message }
   // shape on stderr (never stdout) so a script can parse any failure uniformly.
+  // Batch lookup: `markpost get uuid1 uuid2` must fetch and report both, not
+  // silently keep only the first (issue #173).
+  describe('multiple uuids', () => {
+    const secondRecord: Record = {
+      uuid: 'def-456',
+      title: 'Second Title',
+      content: 'Second Content',
+      createdAt: '2024-02-01T00:00:00Z',
+    };
+
+    it('fetches every uuid given, not just the first', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : secondRecord,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456']);
+
+      expect(fetchRecord).toHaveBeenCalledTimes(2);
+      expect(fetchRecord).toHaveBeenNthCalledWith(1, 'abc-123');
+      expect(fetchRecord).toHaveBeenNthCalledWith(2, 'def-456');
+      expect(console.log).toHaveBeenCalledWith('Test Title');
+      expect(console.log).toHaveBeenCalledWith('Second Title');
+    });
+
+    it('prints every found record as a single JSON array with --json', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : secondRecord,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', '--json']);
+
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls[0][0] as string;
+      const parsed = JSON.parse(output);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0]).toMatchObject({ uuid: 'abc-123' });
+      expect(parsed[1]).toMatchObject({ uuid: 'def-456' });
+      expect(process.exitCode).not.toBe(1);
+    });
+
+    it('reports a missing uuid without dropping the rest of the batch', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : null,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'missing-uuid']);
+
+      expect(console.log).toHaveBeenCalledWith('Test Title');
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to fetch record "missing-uuid".'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('omits a missing uuid from the --json array but still fails loud', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : null,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'missing-uuid', '--json']);
+
+      const stdoutOutput = vi
+        .mocked(console.log)
+        .mock.calls.map(([arg]) => arg as string);
+      expect(stdoutOutput).toHaveLength(1);
+      const parsed = JSON.parse(stdoutOutput[0]);
+      expect(parsed).toEqual([expect.objectContaining({ uuid: 'abc-123' })]);
+      const parsedError = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsedError).toMatchObject({
+        error: 'fetch_failed',
+        message: 'Failed to fetch record "missing-uuid".',
+      });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('separates multiple printed records with a blank line', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : secondRecord,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456']);
+
+      const calls = vi.mocked(console.log).mock.calls.map(([arg]) => arg);
+      const blankLineIndex = calls.indexOf('');
+      const secondTitleIndex = calls.indexOf('Second Title');
+      expect(blankLineIndex).toBeGreaterThan(-1);
+      expect(secondTitleIndex).toBeGreaterThan(blankLineIndex);
+    });
+
+    it('aborts remaining uuids on a systemic failure, matching the single-uuid path', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) => {
+        if (uuid === 'abc-123') {
+          return mockRecord;
+        }
+        throw new ApiRequestError('Invalid or missing API token', 401);
+      });
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', 'ghi-789']);
+
+      expect(fetchRecord).toHaveBeenCalledTimes(2);
+      expect(fetchRecord).not.toHaveBeenCalledWith('ghi-789');
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Authentication failed (HTTP 401)'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+  });
+
   describe('--json failure contract', () => {
     // clearAllMocks (outer beforeEach) keeps mock implementations, so a prior
     // test's checkConfig rejection would leak in — pin it back to a passing
