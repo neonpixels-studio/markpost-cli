@@ -38,17 +38,23 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
     // Fetch every uuid, one at a time (mirroring push's per-file loop): a
     // batch lookup is cheap since `fetchRecord` is already a single-uuid
     // request, and sequential requests keep output ordered and the server
-    // unhammered. A systemic failure (auth/5xx) re-throws from `fetchRecord`
-    // and propagates straight out of this loop to the outer catch below,
+    // unhammered. A systemic failure (auth/5xx) re-throws from `fetchRecord`,
     // aborting any not-yet-fetched uuids exactly like the single-uuid path
-    // already did.
+    // already did — but the `finally` still reports whatever was already
+    // fetched before the throw, so a real result already paid for isn't
+    // thrown away along with the abort (the outer catch below then reports
+    // the systemic failure itself, after these partial results are out).
     const results: GetResult[] = [];
 
-    for (const uuid of uuids) {
-      results.push({ uuid, record: await fetchRecord(uuid) });
+    try {
+      for (const uuid of uuids) {
+        results.push({ uuid, record: await fetchRecord(uuid) });
+      }
+    } finally {
+      if (results.length > 0) {
+        reportResults(results, json, uuids.length);
+      }
     }
-
-    reportResults(results, json);
   } catch (error) {
     // A systemic auth/5xx failure now re-throws from fetchRecord (issue #89):
     // surface its classified, actionable message with a non-zero exit rather
@@ -90,32 +96,45 @@ const reportMissing = (uuid: string, json: boolean): void => {
   failWithMessage(`Failed to fetch record "${uuid}".`, json);
 };
 
-// A single requested uuid keeps the original, unwrapped shapes (one printed
+// A single *requested* uuid keeps the original, unwrapped shapes (one printed
 // record, or nothing on stdout when it's missing) so an existing
 // `markpost get <uuid> --json | jq '.title'` script or a single-record
-// terminal read keeps working unchanged. Two or more uuids print every found
-// record — as a JSON array in `--json` mode, or one after another separated
-// by a blank line in text mode — and report each missing uuid without
-// dropping the rest of the batch.
-const reportResults = (results: GetResult[], json: boolean): void => {
+// terminal read keeps working unchanged. Two or more requested uuids print
+// every found record — as a JSON array in `--json` mode, or one after another
+// separated by a blank line in text mode — and report each missing uuid
+// without dropping the rest of the batch. The shape decision is keyed on how
+// many uuids were *requested*, not how many results are in hand yet: a
+// systemic failure can abort the batch after only one of several requested
+// uuids resolved, and that partial result must still report as an array, not
+// silently collapse into the single-uuid shape.
+const reportResults = (
+  results: GetResult[],
+  json: boolean,
+  requestedCount: number,
+): void => {
   if (json) {
-    reportJsonResults(results);
+    reportJsonResults(results, requestedCount);
     return;
   }
 
   reportTextResults(results);
 };
 
-const reportJsonResults = (results: GetResult[]): void => {
-  const [single] = results;
+const reportSingleJsonResult = ({ uuid, record }: GetResult): void => {
+  if (!record) {
+    reportMissing(uuid, true);
+    return;
+  }
 
-  if (results.length === 1) {
-    if (!single.record) {
-      reportMissing(single.uuid, true);
-      return;
-    }
+  printJson(record);
+};
 
-    printJson(single.record);
+const reportJsonResults = (
+  results: GetResult[],
+  requestedCount: number,
+): void => {
+  if (requestedCount === 1) {
+    reportSingleJsonResult(results[0]);
     return;
   }
 
@@ -130,6 +149,14 @@ const reportJsonResults = (results: GetResult[]): void => {
       Boolean(result.record),
     )
     .map((result) => result.record);
+
+  // Mirrors the single-uuid failure contract: a batch that resolved no
+  // records yet (every uuid so far missing, or aborted before any success)
+  // writes nothing to stdout rather than an empty `[]` a script might
+  // mistake for "found nothing" instead of "failed".
+  if (records.length === 0) {
+    return;
+  }
 
   printJson(records);
 };
