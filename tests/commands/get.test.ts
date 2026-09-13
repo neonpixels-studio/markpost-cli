@@ -578,7 +578,11 @@ describe('runGetCommand', () => {
       expect(titleCalls).toHaveLength(1);
     });
 
-    it('keeps the single-uuid --json shape when a repeated uuid dedupes to one', async () => {
+    // The single-object-vs-array shape depends only on how many uuids were
+    // typed, not on whether fetching happened to collapse them: two
+    // positionals in means array out, even when they're the same uuid twice
+    // and only one fetch (and one array entry) results.
+    it('still emits a --json array (of one entry) when two positionals dedupe to one uuid', async () => {
       const { fetchRecord } = await import('@/libs/records.js');
       vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
       const { runGetCommand } = await import('@/commands/get.js');
@@ -587,7 +591,40 @@ describe('runGetCommand', () => {
 
       expect(console.log).toHaveBeenCalledTimes(1);
       const output = vi.mocked(console.log).mock.calls[0][0] as string;
-      expect(Array.isArray(JSON.parse(output))).toBe(false);
+      const parsed = JSON.parse(output);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toEqual([expect.objectContaining({ uuid: 'abc-123' })]);
+    });
+
+    // The `printedFirst` threading through `printTextResult` exists so a
+    // missing result never emits a stray leading blank line — pin the case
+    // where the missing uuid comes *first*, not last.
+    it('prints no leading blank line when the missing uuid comes before a found one', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : null,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['missing-uuid', 'abc-123']);
+
+      expect(vi.mocked(console.log).mock.calls[0][0]).toBe('Test Title');
+    });
+
+    // A failure while reporting (not while fetching) must still fail loud —
+    // `printJson` throws on a non-serializable value, and that must surface
+    // as a classified, non-zero-exit failure rather than a silent exit 0.
+    it('fails loud when reporting itself throws', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const circular: Record & { self?: unknown } = { ...mockRecord };
+      circular.self = circular;
+      vi.mocked(fetchRecord).mockResolvedValue(circular as Record);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', '--json']);
+
+      expect(console.error).toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     });
   });
 

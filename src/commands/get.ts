@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { fetchRecord } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, logErrorMessage } from '@/libs/errors.js';
+import { failWithMessage } from '@/libs/errors.js';
 import {
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
@@ -24,9 +24,9 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   const json = hasJsonFlag(args);
 
   try {
-    const { uuids } = parseGetArgs(args);
+    const { uuids, requestedCount } = parseGetArgs(args);
 
-    if (uuids.length === 0) {
+    if (requestedCount === 0) {
       failWithUsage('No uuid given.', USAGE, json);
       return;
     }
@@ -51,24 +51,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
         results.push({ uuid, record: await fetchRecord(uuid) });
       }
     } finally {
-      // Reporting runs inside `finally` so a mid-batch abort still surfaces
-      // whatever was fetched (see comment above), but that means a failure
-      // *while reporting* (e.g. a non-serializable record reaching `printJson`)
-      // must not replace the real systemic error this `finally` is unwinding
-      // for — it's logged on its own line rather than left to clobber the
-      // `catch` below.
-      if (results.length > 0) {
-        try {
-          reportResults(results, json, uuids.length);
-        } catch (reportError) {
-          logErrorMessage(
-            'get',
-            reportError instanceof Error
-              ? reportError.message
-              : String(reportError),
-          );
-        }
-      }
+      reportResultsSafely(results, json, requestedCount);
     }
   } catch (error) {
     // A systemic auth/5xx failure now re-throws from fetchRecord (issue #89):
@@ -83,10 +66,17 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 // throws on an unknown flag (the command's outer catch surfaces it). Every
 // distinct positional is a requested uuid — none are silently dropped
 // (issue #173). Positionals are filtered for blanks so a stray empty-string
-// argument can't masquerade as a requested uuid, and deduplicated (`Set`
+// argument can't masquerade as a requested uuid (matching push's identical
+// blank-filtering of its own positionals). `uuids` is deduplicated (`Set`
 // preserves insertion order) so a repeated uuid — e.g. from a copy-paste or a
-// shell glob — is fetched and printed once, not once per repetition.
-const parseGetArgs = (args: string[]): { uuids: string[] } => {
+// shell glob — is fetched and printed once, not once per repetition; but
+// `requestedCount` stays the pre-dedupe count, because it drives the
+// `--json` single-object-vs-array shape decision below and that shape must
+// depend only on how many uuids the caller *typed*, not on whether any of
+// them happened to collide after fetching.
+const parseGetArgs = (
+  args: string[],
+): { uuids: string[]; requestedCount: number } => {
   // `--json` is still declared so `parseArgs` accepts it rather than rejecting
   // it as unknown; its value is read from argv by `hasJsonFlag` in the caller,
   // which also survives an unrelated bad flag that makes this throw.
@@ -102,7 +92,10 @@ const parseGetArgs = (args: string[]): { uuids: string[] } => {
     (positional) => positional.length > 0,
   );
 
-  return { uuids: [...new Set(requestedUuids)] };
+  return {
+    uuids: [...new Set(requestedUuids)],
+    requestedCount: requestedUuids.length,
+  };
 };
 
 // One requested uuid's outcome: the record it resolved to, or `null` when
@@ -115,6 +108,38 @@ interface GetResult {
 
 const reportMissing = (uuid: string, json: boolean): void => {
   failWithMessage(`Failed to fetch record "${uuid}".`, json);
+};
+
+// Reporting runs from the fetch loop's `finally` so a mid-batch abort still
+// surfaces whatever was already fetched (see the loop's comment) — but a
+// failure *while reporting* (e.g. a non-serializable record reaching
+// `printJson`) must still fail loud with a non-zero exit, exactly like a
+// throw straight under the outer `try` used to, rather than being swallowed
+// as a log line that leaves the command exiting 0 with a stray stderr line.
+// `failWithMessage` only sets `process.exitCode` and never throws, so it
+// can't itself clobber a systemic error already unwinding through this
+// `finally`.
+const reportResultsSafely = (
+  results: GetResult[],
+  json: boolean,
+  requestedCount: number,
+): void => {
+  if (results.length === 0) {
+    return;
+  }
+
+  try {
+    reportResults(results, json, requestedCount);
+  } catch (reportError) {
+    failWithMessage(
+      sanitizeForTerminal(
+        reportError instanceof Error
+          ? reportError.message
+          : String(reportError),
+      ),
+      json,
+    );
+  }
 };
 
 // A single *requested* uuid keeps the original, unwrapped shapes (one printed
