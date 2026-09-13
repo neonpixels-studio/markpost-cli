@@ -96,7 +96,9 @@ describe('resolveMarkdownInputs', () => {
   it('treats an existing directory with no markdown as an unmatched input', () => {
     mkdirSync(join(workspace, 'empty'), { recursive: true });
 
-    const { files, missing } = resolveMarkdownInputs([join(workspace, 'empty')]);
+    const { files, missing } = resolveMarkdownInputs([
+      join(workspace, 'empty'),
+    ]);
 
     expect(files).toEqual([]);
     expect(missing).toEqual([join(workspace, 'empty')]);
@@ -160,11 +162,42 @@ describe('resolveMarkdownInputs', () => {
     expect(skipped).toEqual(['/dev/null']);
   });
 
+  it.skipIf(runningAsRoot)('records an unreadable directory as skipped', () => {
+    const locked = join(workspace, 'locked');
+    mkdirSync(locked);
+    chmodSync(locked, 0o000);
+
+    try {
+      const { files, skipped } = resolveMarkdownInputs([locked]);
+
+      expect(files).toEqual([]);
+      expect(skipped).toEqual([locked]);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  });
+
   it.skipIf(runningAsRoot)(
-    'records an unreadable directory as skipped',
+    'deduplicates an unreadable directory reached through overlapping inputs',
     () => {
       const locked = join(workspace, 'locked');
       mkdirSync(locked);
+      chmodSync(locked, 0o000);
+
+      try {
+        const { skipped } = resolveMarkdownInputs([workspace, locked]);
+
+        expect(skipped).toEqual([locked]);
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
+
+  it.skipIf(runningAsRoot)(
+    'skips an unreadable regular file named explicitly',
+    () => {
+      const locked = createFile('locked.md');
       chmodSync(locked, 0o000);
 
       try {
@@ -179,15 +212,38 @@ describe('resolveMarkdownInputs', () => {
   );
 
   it.skipIf(runningAsRoot)(
-    'deduplicates an unreadable directory reached through overlapping inputs',
+    'skips an unreadable regular file reached through a directory walk',
     () => {
-      const locked = join(workspace, 'locked');
-      mkdirSync(locked);
+      const readable = createFile('vault/readable.md');
+      const locked = createFile('vault/locked.md');
       chmodSync(locked, 0o000);
 
       try {
-        const { skipped } = resolveMarkdownInputs([workspace, locked]);
+        const { files, skipped } = resolveMarkdownInputs([
+          join(workspace, 'vault'),
+        ]);
 
+        expect(files).toEqual([readable]);
+        expect(skipped).toEqual([locked]);
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
+
+  it.skipIf(runningAsRoot)(
+    'skips an unreadable regular file reached through a glob',
+    () => {
+      const readable = createFile('readable.md');
+      const locked = createFile('locked.md');
+      chmodSync(locked, 0o000);
+
+      try {
+        const { files, skipped } = resolveMarkdownInputs([
+          join(workspace, '*.md'),
+        ]);
+
+        expect(files).toEqual([readable]);
         expect(skipped).toEqual([locked]);
       } finally {
         chmodSync(locked, 0o700);

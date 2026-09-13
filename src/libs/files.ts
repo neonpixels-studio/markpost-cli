@@ -1,4 +1,6 @@
 import {
+  accessSync,
+  constants,
   existsSync,
   globSync,
   readdirSync,
@@ -105,6 +107,20 @@ const statOrSkip = (
   }
 };
 
+// A file can stat fine (mode 000 still reports as a regular file) yet fail
+// the moment something actually opens it — statSync doesn't check permission
+// bits, only accessSync does. Pre-checking here means an unreadable file is
+// classified as skipped at resolve time, before preview or push ever attempt
+// the real read that would throw EACCES mid-run.
+const isReadableFile = (path: string): boolean => {
+  try {
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // Recurse a directory, collecting every markdown file beneath it so a whole
 // vault can be pushed by naming its folder. An unreadable directory is
 // recorded and skipped rather than aborting the traversal, and an
@@ -155,9 +171,16 @@ function collectFromPath(path: string, accumulator: WalkAccumulator): void {
     return;
   }
 
-  if (stats.isFile() && isMarkdownFile(path)) {
-    accumulator.files.push(path);
+  if (!stats.isFile() || !isMarkdownFile(path)) {
+    return;
   }
+
+  if (isReadableFile(path)) {
+    accumulator.files.push(path);
+    return;
+  }
+
+  accumulator.skipped.push(path);
 }
 
 const collectFromGlob = (
@@ -171,9 +194,10 @@ const collectFromGlob = (
 
 // Resolve one argument into the accumulator. An existing regular file named
 // directly is taken as-is (the user was explicit, so its extension is not
-// second-guessed); an existing directory is recursed; a non-regular file
-// (device, FIFO) is skipped rather than handed to a reader that would block
-// or read garbage; anything that does not exist is treated as a glob.
+// second-guessed) once confirmed readable; an existing directory is recursed;
+// a non-regular file (device, FIFO) is skipped rather than handed to a reader
+// that would block or read garbage; anything that does not exist is treated
+// as a glob.
 const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
   if (!existsSync(input)) {
     collectFromGlob(input, accumulator);
@@ -192,6 +216,11 @@ const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
   }
 
   if (!stats.isFile()) {
+    accumulator.skipped.push(input);
+    return;
+  }
+
+  if (!isReadableFile(input)) {
     accumulator.skipped.push(input);
     return;
   }
