@@ -609,6 +609,41 @@ describe('extractFrontmatterTags', () => {
     expect(extractFrontmatterTags(document)).toEqual(['ci']);
   });
 
+  // An unbalanced quote means every comma from that point on was swallowed
+  // into one token by splitTagList — not a real tag list, so this must bail
+  // to [] rather than forward the merged garbage as a single fabricated tag.
+  it('returns an empty array when a hand-edited tags line has an unbalanced quote', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci", deploy]\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTags(document)).toEqual([]);
+  });
+
+  // An editor re-save can leave trailing whitespace after the closing bracket
+  // without touching anything else in the block; that's still exactly
+  // serializeTagsLine's own output plus incidental whitespace, unlike
+  // `tags: urgent`, so it must still parse rather than silently drop to [].
+  it('extracts tags despite trailing whitespace after the closing bracket', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci, deploy] \n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTags(document)).toEqual(['ci', 'deploy']);
+  });
+
   // Issue #170's real-world scenario is pull -> edit in an editor -> repush,
   // and an editor re-save is exactly what can turn a pulled file's line
   // endings to CRLF (see the equivalent stripFrontmatterDocument coverage

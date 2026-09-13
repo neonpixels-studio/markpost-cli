@@ -289,7 +289,10 @@ const isEscapedQuote = (tagList: string, index: number): boolean => {
 // a quoted tag containing its own comma (quoteYamlScalar quotes any tag with a
 // comma) isn't split mid-value. Mirrors quoteYamlScalar's own escaping: a `"`
 // only toggles quote state when it isn't itself escaped (see isEscapedQuote).
-const splitTagList = (tagList: string): string[] => {
+// Returns null when a quote is left unclosed at the end of the list — that
+// means every comma from the unclosed quote onward was swallowed into one
+// token, which is not a real tag list to begin with (see parseTagsLine).
+const splitTagList = (tagList: string): string[] | null => {
   const tokens: string[] = [];
   let current = '';
   let insideQuotes = false;
@@ -310,6 +313,10 @@ const splitTagList = (tagList: string): string[] => {
     current += character;
   }
 
+  if (insideQuotes) {
+    return null;
+  }
+
   tokens.push(current);
 
   return tokens;
@@ -318,24 +325,33 @@ const splitTagList = (tagList: string): string[] => {
 // Inverse of serializeTagsLine: parses a serialized `tags: [...]` value (the
 // part after the `tags: ` prefix) back into the original string array,
 // unquoting each entry with unquoteYamlScalar. Only a genuine flow-sequence
-// value (`[...]`) is parsed — a hand-edited tags line that no longer has that
-// shape (e.g. `tags: urgent` or a trailing comment) still passes the block's
-// other shape checks, so this guards against parsing partial garbage out of
-// it and forwarding it to createRecord as a fabricated tag. An empty token
-// (`tags: [ci, ]` or `tags: [ci,,deploy]`, both reachable from a hand-edited
-// file) is dropped rather than forwarded as a blank tag.
+// value (`[...]`, allowing for incidental surrounding whitespace an editor may
+// leave) is parsed — a hand-edited tags line that no longer has that shape
+// (e.g. `tags: urgent`, a trailing comment, or an unbalanced quote) still
+// passes the block's other shape checks, so this guards against parsing
+// partial garbage out of it and forwarding it to createRecord as a fabricated
+// tag. An empty token (`tags: [ci, ]` or `tags: [ci,,deploy]`, both reachable
+// from a hand-edited file) is dropped rather than forwarded as a blank tag.
 const parseTagsLine = (serializedTags: string): string[] => {
-  if (!serializedTags.startsWith('[') || !serializedTags.endsWith(']')) {
+  const trimmedValue = serializedTags.trim();
+
+  if (!trimmedValue.startsWith('[') || !trimmedValue.endsWith(']')) {
     return [];
   }
 
-  const tagList = serializedTags.slice(1, -1).trim();
+  const tagList = trimmedValue.slice(1, -1).trim();
 
   if (tagList === '') {
     return [];
   }
 
-  return splitTagList(tagList)
+  const tokens = splitTagList(tagList);
+
+  if (!tokens) {
+    return [];
+  }
+
+  return tokens
     .map((token) => unquoteYamlScalar(token.trim()))
     .filter((tag) => tag !== '');
 };
