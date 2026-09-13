@@ -237,6 +237,19 @@ describe('resolveMarkdownInputs', () => {
     },
   );
 
+  it('skips a non-regular markdown entry found by a directory walk', () => {
+    const readable = createFile('vault/readable.md');
+    const devicePath = join(workspace, 'vault/device.md');
+    symlinkSync('/dev/null', devicePath);
+
+    const { files, skipped } = resolveMarkdownInputs([
+      join(workspace, 'vault'),
+    ]);
+
+    expect(files).toEqual([readable]);
+    expect(skipped).toEqual([devicePath]);
+  });
+
   it.skipIf(skipPermissionTests)(
     'reports a directory of only unreadable files as skipped, not missing',
     () => {

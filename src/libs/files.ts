@@ -220,12 +220,7 @@ const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
     return;
   }
 
-  if (!stats.isFile()) {
-    accumulator.skipped.push(input);
-    return;
-  }
-
-  if (!isReadableFile(input)) {
+  if (!stats.isFile() || !isReadableFile(input)) {
     accumulator.skipped.push(input);
     return;
   }
