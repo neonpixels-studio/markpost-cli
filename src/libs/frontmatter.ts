@@ -262,15 +262,31 @@ const parseFrontmatterDocument = (
 // IS stripped the returned body is LF-normalized — the document was a
 // markpost-composed LF file, so this only affects a copy an editor re-encoded.
 export const stripFrontmatterDocument = (content: string): string => {
-  const parsed = parseFrontmatterDocument(content);
+  return extractFrontmatterDocument(content).content;
+};
 
-  return parsed ? parsed.body : content;
+// True when the `"` at `index` is escaped, i.e. preceded by an ODD run of
+// backslashes. quoteYamlScalar escapes a literal `\` as `\\` before wrapping
+// in quotes, so a tag ending in a backslash serializes with `\\` immediately
+// before the closing `"` — an EVEN run, meaning that closing quote is NOT
+// escaped even though it's preceded by a backslash. Checking only the single
+// preceding character (rather than the full run's parity) would misread that
+// closing quote as escaped, leave `insideQuotes` stuck true, and swallow every
+// later comma into one corrupted tag.
+const isEscapedQuote = (tagList: string, index: number): boolean => {
+  let backslashCount = 0;
+
+  for (let scan = index - 1; tagList[scan] === '\\'; scan -= 1) {
+    backslashCount += 1;
+  }
+
+  return backslashCount % 2 === 1;
 };
 
 // Splits a bracketed tag list on commas that aren't inside a quoted scalar, so
 // a quoted tag containing its own comma (quoteYamlScalar quotes any tag with a
 // comma) isn't split mid-value. Mirrors quoteYamlScalar's own escaping: a `"`
-// only toggles quote state when it isn't itself escaped by a preceding `\`.
+// only toggles quote state when it isn't itself escaped (see isEscapedQuote).
 const splitTagList = (tagList: string): string[] => {
   const tokens: string[] = [];
   let current = '';
@@ -278,9 +294,8 @@ const splitTagList = (tagList: string): string[] => {
 
   for (let index = 0; index < tagList.length; index += 1) {
     const character = tagList[index];
-    const isEscapedQuote = character === '"' && tagList[index - 1] === '\\';
 
-    if (character === '"' && !isEscapedQuote) {
+    if (character === '"' && !isEscapedQuote(tagList, index)) {
       insideQuotes = !insideQuotes;
     }
 
@@ -300,15 +315,53 @@ const splitTagList = (tagList: string): string[] => {
 
 // Inverse of serializeTagsLine: parses a serialized `tags: [...]` value (the
 // part after the `tags: ` prefix) back into the original string array,
-// unquoting each entry with unquoteYamlScalar.
+// unquoting each entry with unquoteYamlScalar. Only a genuine flow-sequence
+// value (`[...]`) is parsed — a hand-edited tags line that no longer has that
+// shape (e.g. `tags: urgent` or a trailing comment) still passes the block's
+// other shape checks, so this guards against parsing partial garbage out of
+// it and forwarding it to createRecord as a fabricated tag. An empty token
+// (`tags: [ci, ]` or `tags: [ci,,deploy]`, both reachable from a hand-edited
+// file) is dropped rather than forwarded as a blank tag.
 const parseTagsLine = (serializedTags: string): string[] => {
+  if (!serializedTags.startsWith('[') || !serializedTags.endsWith(']')) {
+    return [];
+  }
+
   const tagList = serializedTags.slice(1, -1).trim();
 
   if (tagList === '') {
     return [];
   }
 
-  return splitTagList(tagList).map((token) => unquoteYamlScalar(token.trim()));
+  return splitTagList(tagList)
+    .map((token) => unquoteYamlScalar(token.trim()))
+    .filter((tag) => tag !== '');
+};
+
+export type ExtractedFrontmatterDocument = {
+  content: string;
+  tags: string[];
+};
+
+// Single-parse combination of stripFrontmatterDocument + extractFrontmatterTags,
+// for a caller (readMarkdown) that always wants both: parsing the same document
+// twice (BOM/CRLF normalization, indexOf, slice, split) is wasted work on a bulk
+// push of many/large files. Both single-value exports below are defined in
+// terms of this one, so there's a single source of truth for what counts as a
+// markpost-composed document.
+export const extractFrontmatterDocument = (
+  content: string,
+): ExtractedFrontmatterDocument => {
+  const parsed = parseFrontmatterDocument(content);
+
+  if (!parsed) {
+    return { content, tags: [] };
+  }
+
+  return {
+    content: parsed.body,
+    tags: parseTagsLine(lineValue(parsed.blockLines, TAGS_LINE_INDEX)),
+  };
 };
 
 // Companion to stripFrontmatterDocument: extracts the tags markpost's own
@@ -319,13 +372,7 @@ const parseTagsLine = (serializedTags: string): string[] => {
 // carrying markpost tags. Returns [] for any document with no markpost
 // frontmatter, matching what a tagless record would round-trip to.
 export const extractFrontmatterTags = (content: string): string[] => {
-  const parsed = parseFrontmatterDocument(content);
-
-  if (!parsed) {
-    return [];
-  }
-
-  return parseTagsLine(lineValue(parsed.blockLines, TAGS_LINE_INDEX));
+  return extractFrontmatterDocument(content).tags;
 };
 
 const isPlainObject = (value: unknown): value is { [key: string]: unknown } => {

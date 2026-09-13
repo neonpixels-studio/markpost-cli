@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleMarkdownDocument,
   buildRecordDocument,
+  extractFrontmatterDocument,
   extractFrontmatterTags,
   serializeFrontmatter,
   stripFrontmatterDocument,
@@ -227,9 +228,7 @@ describe('buildRecordDocument', () => {
       frontmatter: { ...frontmatter, tags: ['ci', 42, 'deploy'] },
     } as unknown as Record;
 
-    expect(buildRecordDocument(mixedTagsRecord)).toContain(
-      'tags: [ci, deploy]',
-    );
+    expect(buildRecordDocument(mixedTagsRecord)).toContain('tags: [ci, deploy]');
   });
 
   it('treats a non-object frontmatter value as no metadata', () => {
@@ -267,8 +266,7 @@ describe('stripFrontmatterDocument', () => {
   });
 
   it('preserves a body that itself contains blank lines and a horizontal rule', () => {
-    const body =
-      'First paragraph.\n\nSecond paragraph.\n\n---\n\nAfter a rule.';
+    const body = 'First paragraph.\n\nSecond paragraph.\n\n---\n\nAfter a rule.';
     const document = assembleMarkdownDocument({
       title: 'My Note',
       body,
@@ -514,6 +512,39 @@ describe('extractFrontmatterTags', () => {
     expect(extractFrontmatterTags(document)).toEqual(['a]b']);
   });
 
+  // A tag ending in a backslash serializes with an escaped `\\` immediately
+  // before the closing quote (quoteYamlScalar escapes `\` before wrapping);
+  // naively treating that closing quote as escaped-by-the-preceding-backslash
+  // would leave the parser stuck "inside quotes" and swallow every later tag
+  // into one corrupted value.
+  it('unquotes a tag ending in a backslash without corrupting later tags', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Backslash tag',
+      body: 'Body.',
+      frontmatter: {
+        ...frontmatter,
+        title: 'Backslash tag',
+        tags: ['C:\\', 'deploy'],
+      },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual(['C:\\', 'deploy']);
+  });
+
+  it('unquotes a tag containing an escaped quote', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Quote tag',
+      body: 'Body.',
+      frontmatter: {
+        ...frontmatter,
+        title: 'Quote tag',
+        tags: ['say "hi"', 'plain'],
+      },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual(['say "hi"', 'plain']);
+  });
+
   it('returns an empty array for bare content with no frontmatter', () => {
     expect(extractFrontmatterTags('Just some text.')).toEqual([]);
   });
@@ -545,5 +576,63 @@ describe('extractFrontmatterTags', () => {
     // doesn't mirror the title, so this isn't a markpost-composed document
     // and its tags-shaped line must not be trusted as real tags.
     expect(extractFrontmatterTags(document)).toEqual([]);
+  });
+
+  // A hand-edited tags line that no longer carries a flow-sequence value still
+  // passes every other block/heading check (isFrontmatterBlock only checks the
+  // `tags: ` prefix, not the value's shape), so parseTagsLine must not slice
+  // into it as if it were still `[...]` and forward garbage as a real tag.
+  it('returns an empty array when a hand-edited tags line is no longer a bracketed list', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: urgent\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTags(document)).toEqual([]);
+  });
+
+  it('drops an empty tag left by a hand-edited trailing comma', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci, ]\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTags(document)).toEqual(['ci']);
+  });
+});
+
+// extractFrontmatterDocument is the single-parse combination
+// stripFrontmatterDocument and extractFrontmatterTags are both defined in
+// terms of; readMarkdown calls it directly so a pushed file's frontmatter is
+// only parsed once.
+describe('extractFrontmatterDocument', () => {
+  it('returns both the stripped body and the extracted tags in one call', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Production deploy succeeded',
+      body: 'Commit a1f9c20 shipped to prod.',
+      frontmatter,
+    });
+
+    expect(extractFrontmatterDocument(document)).toEqual({
+      content: 'Commit a1f9c20 shipped to prod.',
+      tags: ['ci', 'deploy', 'incoming'],
+    });
+  });
+
+  it('returns the original content and no tags for a non-markpost document', () => {
+    expect(extractFrontmatterDocument('Just some text.')).toEqual({
+      content: 'Just some text.',
+      tags: [],
+    });
   });
 });

@@ -496,7 +496,7 @@ describe('fetchAllRecords', () => {
     );
   });
 
-  it("extracts the cursor when links.next percent-encodes the key, matching markpost's own link builder", async () => {
+  it('extracts the cursor when links.next percent-encodes the key, matching markpost\'s own link builder', async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -1619,9 +1619,9 @@ describe('markRecordsSynced', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(chunkSizes()).toEqual([100, 100, 50]);
     // No chunk may ever exceed the server cap.
-    expect(
-      chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE),
-    ).toBe(true);
+    expect(chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE)).toBe(
+      true,
+    );
     expect(result.outcomes).toHaveLength(250);
     expect(result.abortReason).toBe(null);
   });
@@ -1779,10 +1779,7 @@ describe('markRecordsSynced', () => {
   it('does not crash on a non-array data object, falling back to meta.updated', async () => {
     // A single resource object (the old per-uuid shape) must not throw a
     // TypeError through the catch; meta.updated confirms the whole chunk.
-    mockFetch({
-      data: { attributes: { uuid: 'uuid-0' } },
-      meta: { updated: 2 },
-    });
+    mockFetch({ data: { attributes: { uuid: 'uuid-0' } }, meta: { updated: 2 } });
     const result = await markRecordsSynced(items(2));
     expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED]);
   });
@@ -1913,9 +1910,7 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes
-        .slice(100, 200)
-        .every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
@@ -1930,9 +1925,7 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes
-        .slice(100, 200)
-        .every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
