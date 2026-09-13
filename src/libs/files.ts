@@ -160,10 +160,11 @@ function collectFromDirectory(
 // Classify one path found during traversal (a directory entry or a glob
 // match), recursing directories and taking only markdown files. A glob is a
 // bulk selector, not an explicit name, so a `*` never sweeps in unrelated
-// non-markdown files. A markdown-named entry that isn't a readable regular
-// file (a FIFO/socket/device, or a permission-denied file) is recorded as
-// skipped rather than silently dropped, matching the explicit-file case in
-// resolveInput below.
+// non-markdown files. Once a path is markdown-named, it is only ever taken
+// (isFile + readable) or recorded as skipped — never silently dropped for
+// those two reasons — matching the explicit-file case in resolveInput below.
+// (A stat failure on the path itself is handled earlier by statOrSkip,
+// independent of the markdown-name check.)
 function collectFromPath(path: string, accumulator: WalkAccumulator): void {
   const stats = statOrSkip(path, accumulator);
 

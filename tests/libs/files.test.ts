@@ -11,11 +11,10 @@ import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // chmod-based permission tests are meaningless when the suite runs as root
-// (root bypasses the mode bits) or on Windows (chmod doesn't remove read
-// access and accessSync doesn't consult ACLs), so they are skipped in
-// either case.
-const skipPermissionTests =
-  process.platform === 'win32' || process.getuid?.() === 0;
+// (root bypasses the mode bits), so they are skipped in that case. The whole
+// file is POSIX-only already (see the /dev/null and symlink tests below), so
+// this guard doesn't attempt to also cover Windows.
+const skipPermissionTests = process.getuid?.() === 0;
 
 import { resolveMarkdownInputs } from '@/libs/files.js';
 
