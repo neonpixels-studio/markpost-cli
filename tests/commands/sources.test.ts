@@ -1234,13 +1234,14 @@ describe('runSourcesCommand', () => {
       expect(secretMentions).toHaveLength(1);
     });
 
-    // `rotate-secret` is deliberately left out of the create/update/delete TTY
-    // guard added for #148 (see the `@todo` in sources.ts) — a uuid'd rotation
-    // of a generated provider needs no prompt at all, so it must keep working
-    // on a non-TTY. This pins that the broader `!isInteractive` check doesn't
-    // sweep rotate-secret in by accident; it is not an endorsement of piping
-    // this (the secret still lands in whatever stdout is redirected to).
-    it('still rotates by uuid on a non-TTY (deliberately unguarded for now)', async () => {
+    // A uuid'd rotation of a generated provider (github/zapier/shortcuts) never
+    // prompts — `collectRotateInput` returns `{}` immediately for a
+    // non-manual-secret provider — so it must keep working on a non-TTY,
+    // unlike the picker (#172) and manual-secret-provider (#172) cases guarded
+    // below. This pins that the invocation-level `!isInteractive` check
+    // doesn't sweep this case in by accident; it is not an endorsement of
+    // piping this (the secret still lands in whatever stdout is redirected to).
+    it('still rotates by uuid on a non-TTY when the provider needs no prompt', async () => {
       process.stdin.isTTY = false;
       process.stdout.isTTY = false;
       const { fetchSources, rotateSourceSecret } =
@@ -1291,6 +1292,54 @@ describe('runSourcesCommand', () => {
         expect.stringContaining('shown once'),
       );
       expect(loggedText()).not.toContain('whsec_echoed_by_server');
+    });
+
+    // The picker can decide `collectRotateInput` never even gets to the
+    // manual-secret check, but a uuid'd rotation of a manual-secret provider
+    // (stripe) reaches the password prompt directly — which isn't known to be
+    // needed until fetchSources resolves the target's provider, so this guard
+    // lives inside collectRotateInput rather than the invocation-level checks.
+    it('fails loudly on a non-TTY rotate-secret for a manual-secret provider instead of hanging on the password prompt', async () => {
+      process.stdin.isTTY = false;
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
+      const { password } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'str-123']);
+
+      // fetchSources having run (unlike the picker guard's tests below, which
+      // bail before it) is what proves this is the in-collectRotateInput
+      // guard rather than a spillover from the invocation-level picker guard.
+      expect(fetchSources).toHaveBeenCalled();
+      expect(password).not.toHaveBeenCalled();
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('to enter the new signing secret'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Same guard, redirected stdout: hides the password prompt even with a
+    // TTY stdin, so it must be rejected the same way.
+    it('fails loudly on a redirected-stdout rotate-secret for a manual-secret provider', async () => {
+      process.stdout.isTTY = false;
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
+      const { password } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret', 'str-123']);
+
+      expect(fetchSources).toHaveBeenCalled();
+      expect(password).not.toHaveBeenCalled();
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('to enter the new signing secret'),
+      );
+      expect(process.exitCode).toBe(1);
     });
 
     it('does not raise the missing-secret alarm for a manual provider (its response has none)', async () => {
@@ -1400,6 +1449,48 @@ describe('runSourcesCommand', () => {
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('None of your sources have a rotatable secret'),
       );
+    });
+
+    // Without a uuid, `rotate-secret` opens the same interactive picker as
+    // `update`; on a non-TTY stdin that picker can't render an answerable
+    // prompt, so it must fail loud instead of hanging — same guard shape as
+    // update's non-TTY, no-uuid case.
+    it('fails loudly on a non-TTY stdin rotate-secret with no uuid instead of opening the picker', async () => {
+      process.stdin.isTTY = false;
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
+      const { select } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('pick a source when no uuid is given'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Redirected stdout hides the picker even with a TTY stdin, so a bare
+    // `rotate-secret` piped to a file must be rejected the same way.
+    it('fails loudly on a redirected-stdout rotate-secret with no uuid instead of opening the picker', async () => {
+      process.stdout.isTTY = false;
+      const { fetchSources, rotateSourceSecret } =
+        await import('@/libs/sources.js');
+      const { select } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['rotate-secret']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
+      expect(rotateSourceSecret).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('pick a source when no uuid is given'),
+      );
+      expect(process.exitCode).toBe(1);
     });
 
     it('falls back to the plain empty message when there are no sources at all', async () => {

@@ -78,3 +78,13 @@ export function sanitizeForTerminal(value: unknown): string {
 export function sanitizeBlockForTerminal(value: unknown): string {
   return sanitize(value, true);
 }
+
+// True when stdin and stdout are both a live terminal — the minimum inquirer
+// needs to render a prompt and read an answer. A redirected/piped stream on
+// either side leaves a prompt unanswerable, which is what every non-TTY guard
+// in the CLI (sources create/update/delete/rotate-secret) checks for.
+// Isolated here, alongside the rest of terminal.ts, so the check has one
+// definition instead of being reimplemented inline in each command.
+export function isInteractiveTerminal(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  isInteractiveTerminal,
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
 } from '@/libs/terminal.js';
@@ -92,5 +93,43 @@ describe('sanitizeBlockForTerminal', () => {
     const result = sanitizeBlockForTerminal(`X${control}Y`);
     expect(result).toBe('X Y');
     expect(result.includes(control)).toBe(false);
+  });
+});
+
+describe('isInteractiveTerminal', () => {
+  const originalStdinIsTTY = process.stdin.isTTY;
+  const originalStdoutIsTTY = process.stdout.isTTY;
+
+  afterEach(() => {
+    process.stdin.isTTY = originalStdinIsTTY;
+    process.stdout.isTTY = originalStdoutIsTTY;
+  });
+
+  it('is true when both stdin and stdout are a TTY', () => {
+    process.stdin.isTTY = true;
+    process.stdout.isTTY = true;
+
+    expect(isInteractiveTerminal()).toBe(true);
+  });
+
+  it('is false when stdin is redirected', () => {
+    process.stdin.isTTY = false;
+    process.stdout.isTTY = true;
+
+    expect(isInteractiveTerminal()).toBe(false);
+  });
+
+  it('is false when stdout is redirected', () => {
+    process.stdin.isTTY = true;
+    process.stdout.isTTY = false;
+
+    expect(isInteractiveTerminal()).toBe(false);
+  });
+
+  it('is false when neither stream is a TTY', () => {
+    process.stdin.isTTY = false;
+    process.stdout.isTTY = false;
+
+    expect(isInteractiveTerminal()).toBe(false);
   });
 });
