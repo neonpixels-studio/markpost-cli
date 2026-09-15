@@ -97,6 +97,7 @@ describe('runPushCommand', () => {
     vi.mocked(readMarkdown).mockReturnValue({
       title: 'Test Title',
       content: 'Test Content',
+      tags: [],
     });
     vi.mocked(createRecord).mockResolvedValue(mockRecord);
     const { runPushCommand } = await import('@/commands/push.js');
@@ -105,11 +106,40 @@ describe('runPushCommand', () => {
 
     expect(checkConfig).toHaveBeenCalled();
     expect(readMarkdown).toHaveBeenCalledWith('./notes/test-title.md');
-    expect(createRecord).toHaveBeenCalledWith('Test Title', 'Test Content');
+    expect(createRecord).toHaveBeenCalledWith('Test Title', 'Test Content', []);
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Pushed "Test Title" (abc-123)'),
     );
     expect(process.exitCode).toBeUndefined();
+  });
+
+  // Regression coverage for issue #170: readMarkdown extracts markpost's own
+  // `tags:` frontmatter line before push strips the block, so a
+  // pulled-edited-repushed file must forward those tags to createRecord
+  // instead of silently dropping them.
+  it('forwards frontmatter tags extracted by readMarkdown to createRecord', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['./notes/test-title.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'Test Title',
+      content: 'Test Content',
+      tags: ['ci', 'deploy'],
+    });
+    vi.mocked(createRecord).mockResolvedValue(mockRecord);
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['./notes/test-title.md']);
+
+    expect(createRecord).toHaveBeenCalledWith('Test Title', 'Test Content', [
+      'ci',
+      'deploy',
+    ]);
   });
 
   // checkConfig signals failure by resolving false rather than terminating the
@@ -141,8 +171,8 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     vi.mocked(readMarkdown)
-      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
-      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] });
     vi.mocked(createRecord)
       .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
       .mockResolvedValueOnce(recordFor('B', 'uuid-b'));
@@ -173,8 +203,8 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     vi.mocked(readMarkdown)
-      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
-      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] });
 
     let releaseFirst: () => void = () => {};
     const firstPending = new Promise<Record>((resolvePromise) => {
@@ -206,9 +236,9 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     vi.mocked(readMarkdown)
-      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
-      .mockReturnValueOnce({ title: 'B', content: 'Content B' })
-      .mockReturnValueOnce({ title: 'C', content: 'Content C' });
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] })
+      .mockReturnValueOnce({ title: 'C', content: 'Content C', tags: [] });
     vi.mocked(createRecord)
       .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
       .mockResolvedValueOnce(null)
@@ -246,7 +276,7 @@ describe('runPushCommand', () => {
       .mockImplementationOnce(() => {
         throw Error('boom');
       })
-      .mockReturnValueOnce({ title: 'Good', content: 'Content' });
+      .mockReturnValueOnce({ title: 'Good', content: 'Content', tags: [] });
     vi.mocked(createRecord).mockResolvedValue(recordFor('Good', 'uuid-good'));
     const { runPushCommand } = await import('@/commands/push.js');
 
@@ -277,8 +307,8 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     vi.mocked(readMarkdown)
-      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
-      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] });
     vi.mocked(createRecord).mockRejectedValueOnce(
       new ApiTimeoutError('https://example.com/api/records'),
     );
@@ -324,6 +354,7 @@ describe('runPushCommand', () => {
     vi.mocked(readMarkdown).mockReturnValue({
       title: 'Real',
       content: 'Content',
+      tags: [],
     });
     vi.mocked(createRecord).mockResolvedValue(recordFor('Real', 'uuid-real'));
     const { runPushCommand } = await import('@/commands/push.js');
@@ -370,6 +401,7 @@ describe('runPushCommand', () => {
     vi.mocked(readMarkdown).mockReturnValue({
       title: 'Ok',
       content: 'Content',
+      tags: [],
     });
     vi.mocked(createRecord).mockResolvedValue(recordFor('Ok', 'uuid-ok'));
     const { runPushCommand } = await import('@/commands/push.js');
@@ -396,9 +428,9 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     vi.mocked(readMarkdown)
-      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
-      .mockReturnValueOnce({ title: 'B', content: 'Content B' })
-      .mockReturnValueOnce({ title: 'C', content: 'Content C' });
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] })
+      .mockReturnValueOnce({ title: 'C', content: 'Content C', tags: [] });
     vi.mocked(createRecord)
       .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
       .mockRejectedValueOnce(
@@ -433,7 +465,11 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     const { ApiRequestError } = await import('@/libs/api.js');
-    vi.mocked(readMarkdown).mockReturnValue({ title: 'A', content: 'Content' });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'A',
+      content: 'Content',
+      tags: [],
+    });
     vi.mocked(createRecord).mockRejectedValue(
       new ApiRequestError('Invalid or missing token', 401),
     );
@@ -461,7 +497,11 @@ describe('runPushCommand', () => {
       missing: [],
       skipped: [],
     });
-    vi.mocked(readMarkdown).mockReturnValue({ title: 'A', content: 'Content' });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'A',
+      content: 'Content',
+      tags: [],
+    });
     vi.mocked(createRecord).mockRejectedValue(
       new ApiRequestError('Too many requests', 429),
     );
@@ -489,8 +529,8 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     vi.mocked(readMarkdown)
-      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
-      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] });
     vi.mocked(createRecord)
       .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
       .mockRejectedValueOnce(
@@ -522,8 +562,8 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     vi.mocked(readMarkdown)
-      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
-      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] });
     vi.mocked(createRecord)
       .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
       .mockRejectedValueOnce(new ApiRequestError('Server fell over', 500));
@@ -555,8 +595,8 @@ describe('runPushCommand', () => {
       skipped: [],
     });
     vi.mocked(readMarkdown)
-      .mockReturnValueOnce({ title: 'A', content: 'Content A' })
-      .mockReturnValueOnce({ title: 'B', content: 'Content B' });
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] });
     vi.mocked(createRecord)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(recordFor('B', 'uuid-b'));
@@ -716,7 +756,11 @@ describe('runPushCommand', () => {
       missing: [],
       skipped: [],
     });
-    vi.mocked(readMarkdown).mockReturnValue({ title: 'A', content: 'Content' });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'A',
+      content: 'Content',
+      tags: [],
+    });
     vi.mocked(createRecord).mockResolvedValue(
       recordFor('Sneaky\u001b[2KTitle', 'uuid-a'),
     );

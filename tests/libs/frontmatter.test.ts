@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleMarkdownDocument,
   buildRecordDocument,
+  extractFrontmatterTags,
   serializeFrontmatter,
   stripFrontmatterDocument,
 } from '@/libs/frontmatter.js';
@@ -444,5 +445,220 @@ describe('stripFrontmatterDocument', () => {
     const document = buildRecordDocument(carriageReturnTitleRecord);
 
     expect(stripFrontmatterDocument(document)).toBe('Body intact.');
+  });
+});
+
+// Regression coverage for issue #170: readMarkdown's sole read path stripped
+// markpost's own frontmatter (including its `tags:` line) with no extraction
+// step, so a pulled-edited-repushed note silently lost its tags on push even
+// though POST /api/records accepts a tags array. extractFrontmatterTags is
+// the companion read that recovers them from the same block
+// stripFrontmatterDocument strips.
+describe('extractFrontmatterTags', () => {
+  it('extracts tags from a markpost-composed document', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Production deploy succeeded',
+      body: 'Commit a1f9c20 shipped to prod.',
+      frontmatter,
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual([
+      'ci',
+      'deploy',
+      'incoming',
+    ]);
+  });
+
+  it("round-trips a synced record's tags exactly as buildRecordDocument wrote them", () => {
+    const document = buildRecordDocument(recordWithFrontmatter);
+
+    expect(extractFrontmatterTags(document)).toEqual(
+      recordWithFrontmatter.tags,
+    );
+  });
+
+  it('returns an empty array for an empty tags line', () => {
+    const document = assembleMarkdownDocument({
+      title: 'No tags here',
+      body: 'Body.',
+      frontmatter: { ...frontmatter, title: 'No tags here', tags: [] },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual([]);
+  });
+
+  it('unquotes a tag that needed YAML quoting for a comma', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Comma tag',
+      body: 'Body.',
+      frontmatter: {
+        ...frontmatter,
+        title: 'Comma tag',
+        tags: ['a,b', 'plain'],
+      },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual(['a,b', 'plain']);
+  });
+
+  it('unquotes a tag that needed YAML quoting for a bracket', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Bracket tag',
+      body: 'Body.',
+      frontmatter: { ...frontmatter, title: 'Bracket tag', tags: ['a]b'] },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual(['a]b']);
+  });
+
+  // A tag ending in a backslash serializes with an escaped `\\` immediately
+  // before the closing quote (quoteYamlScalar escapes `\` before wrapping);
+  // naively treating that closing quote as escaped-by-the-preceding-backslash
+  // would leave the parser stuck "inside quotes" and swallow every later tag
+  // into one corrupted value.
+  it('unquotes a tag ending in a backslash without corrupting later tags', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Backslash tag',
+      body: 'Body.',
+      frontmatter: {
+        ...frontmatter,
+        title: 'Backslash tag',
+        tags: ['C:\\', 'deploy'],
+      },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual(['C:\\', 'deploy']);
+  });
+
+  it('unquotes a tag containing an escaped quote', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Quote tag',
+      body: 'Body.',
+      frontmatter: {
+        ...frontmatter,
+        title: 'Quote tag',
+        tags: ['say "hi"', 'plain'],
+      },
+    });
+
+    expect(extractFrontmatterTags(document)).toEqual(['say "hi"', 'plain']);
+  });
+
+  it('returns an empty array for bare content with no frontmatter', () => {
+    expect(extractFrontmatterTags('Just some text.')).toEqual([]);
+  });
+
+  it("returns an empty array for a note whose own frontmatter is not markpost's", () => {
+    const note =
+      '---\n' +
+      'aliases: [x]\n' +
+      'author: Jane\n' +
+      '---\n\n' +
+      '# My heading\n\n' +
+      'Body the user wrote.';
+
+    expect(extractFrontmatterTags(note)).toEqual([]);
+  });
+
+  it('returns an empty array when the heading is not the mirrored title', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ops, urgent]\n' +
+      '---\n\n' +
+      '# Prerequisites\n\n' +
+      'Install the CLI first.';
+
+    // Same disqualification stripFrontmatterDocument applies: the heading
+    // doesn't mirror the title, so this isn't a markpost-composed document
+    // and its tags-shaped line must not be trusted as real tags.
+    expect(extractFrontmatterTags(document)).toEqual([]);
+  });
+
+  // A hand-edited tags line that no longer carries a flow-sequence value still
+  // passes every other block/heading check (isFrontmatterBlock only checks the
+  // `tags: ` prefix, not the value's shape), so parseTagsLine must not slice
+  // into it as if it were still `[...]` and forward garbage as a real tag.
+  it('returns an empty array when a hand-edited tags line is no longer a bracketed list', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: urgent\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTags(document)).toEqual([]);
+  });
+
+  it('drops an empty tag left by a hand-edited trailing comma', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci, ]\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTags(document)).toEqual(['ci']);
+  });
+
+  // An unbalanced quote means every comma from that point on was swallowed
+  // into one token by splitTagList — not a real tag list, so this must bail
+  // to [] rather than forward the merged garbage as a single fabricated tag.
+  it('returns an empty array when a hand-edited tags line has an unbalanced quote', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci", deploy]\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTags(document)).toEqual([]);
+  });
+
+  // An editor re-save can leave trailing whitespace after the closing bracket
+  // without touching anything else in the block; that's still exactly
+  // serializeTagsLine's own output plus incidental whitespace, unlike
+  // `tags: urgent`, so it must still parse rather than silently drop to [].
+  it('extracts tags despite trailing whitespace after the closing bracket', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci, deploy] \n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTags(document)).toEqual(['ci', 'deploy']);
+  });
+
+  // Issue #170's real-world scenario is pull -> edit in an editor -> repush,
+  // and an editor re-save is exactly what can turn a pulled file's line
+  // endings to CRLF (see the equivalent stripFrontmatterDocument coverage
+  // above) — tags must still be recovered from that same normalized block.
+  it('extracts tags from a CRLF-re-saved pulled file', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Production deploy succeeded',
+      body: 'Commit a1f9c20 shipped to prod.',
+      frontmatter,
+    }).replace(/\n/g, '\r\n');
+
+    expect(extractFrontmatterTags(document)).toEqual([
+      'ci',
+      'deploy',
+      'incoming',
+    ]);
   });
 });

@@ -31,6 +31,7 @@ const FRONTMATTER_KEY_PREFIXES = [
 ] as const;
 const TITLE_LINE_INDEX = 0;
 const CREATED_LINE_INDEX = 2;
+const TAGS_LINE_INDEX = 3;
 // markpost's `created` is always an ISO-8601 string (resolveCreatedDate →
 // toISOString). Used both to reject a malformed `created` when building a
 // document (asTimestamp) and to confirm a block's `created` line is markpost's
@@ -195,6 +196,60 @@ const bodyAfterMirroredHeading = (
   return afterHeading.replace(/^\n{0,2}/, '');
 };
 
+type ParsedFrontmatterDocument = {
+  blockLines: string[];
+  body: string;
+};
+
+// Shared by stripFrontmatterDocument and extractFrontmatterTags: both need to
+// confirm a document carries the exact block+heading shape markpost itself
+// writes before trusting anything inside it (see stripFrontmatterDocument's
+// doc comment for what disqualifies a document). Returns null for anything
+// that isn't a complete markpost-composed document, so both callers fall back
+// identically instead of drifting on what counts as "markpost's".
+const parseFrontmatterDocument = (
+  content: string,
+): ParsedFrontmatterDocument | null => {
+  const normalized = normalizeForStrip(content);
+
+  if (!normalized.startsWith(FRONTMATTER_OPENING)) {
+    return null;
+  }
+
+  const closingIndex = normalized.indexOf(
+    FRONTMATTER_CLOSING,
+    FRONTMATTER_OPENING.length,
+  );
+
+  if (closingIndex === -1) {
+    return null;
+  }
+
+  const blockLines = normalized
+    .slice(FRONTMATTER_OPENING.length, closingIndex)
+    .split('\n');
+
+  if (!isFrontmatterBlock(blockLines)) {
+    return null;
+  }
+
+  const afterFrontmatter = normalized.slice(
+    closingIndex + FRONTMATTER_CLOSING.length,
+  );
+  const body = bodyAfterMirroredHeading(
+    afterFrontmatter,
+    serializedTitleOf(blockLines),
+  );
+
+  // No mirrored heading means this isn't a markpost-composed document; leave it
+  // whole rather than trusting a block that may be a note's own frontmatter.
+  if (body === null) {
+    return null;
+  }
+
+  return { blockLines, body };
+};
+
 // Inverse of assembleMarkdownDocument. A record pulled to disk is stored as
 // `<frontmatter>\n\n# <title>\n\n<body>`; pushing that file back unchanged
 // would send the whole thing as the body and markpost would wrap it in a
@@ -207,44 +262,115 @@ const bodyAfterMirroredHeading = (
 // IS stripped the returned body is LF-normalized — the document was a
 // markpost-composed LF file, so this only affects a copy an editor re-encoded.
 export const stripFrontmatterDocument = (content: string): string => {
-  const normalized = normalizeForStrip(content);
+  const parsed = parseFrontmatterDocument(content);
 
-  if (!normalized.startsWith(FRONTMATTER_OPENING)) {
-    return content;
+  return parsed ? parsed.body : content;
+};
+
+// True when the `"` at `index` is escaped, i.e. preceded by an ODD run of
+// backslashes. quoteYamlScalar escapes a literal `\` as `\\` before wrapping
+// in quotes, so a tag ending in a backslash serializes with `\\` immediately
+// before the closing `"` — an EVEN run, meaning that closing quote is NOT
+// escaped even though it's preceded by a backslash. Checking only the single
+// preceding character (rather than the full run's parity) would misread that
+// closing quote as escaped, leave `insideQuotes` stuck true, and swallow every
+// later comma into one corrupted tag.
+const isEscapedQuote = (tagList: string, index: number): boolean => {
+  let backslashCount = 0;
+
+  for (let scan = index - 1; tagList[scan] === '\\'; scan -= 1) {
+    backslashCount += 1;
   }
 
-  const closingIndex = normalized.indexOf(
-    FRONTMATTER_CLOSING,
-    FRONTMATTER_OPENING.length,
-  );
+  return backslashCount % 2 === 1;
+};
 
-  if (closingIndex === -1) {
-    return content;
+// Splits a bracketed tag list on commas that aren't inside a quoted scalar, so
+// a quoted tag containing its own comma (quoteYamlScalar quotes any tag with a
+// comma) isn't split mid-value. Mirrors quoteYamlScalar's own escaping: a `"`
+// only toggles quote state when it isn't itself escaped (see isEscapedQuote).
+// Returns null when a quote is left unclosed at the end of the list — that
+// means every comma from the unclosed quote onward was swallowed into one
+// token, which is not a real tag list to begin with (see parseTagsLine).
+const splitTagList = (tagList: string): string[] | null => {
+  const tokens: string[] = [];
+  let current = '';
+  let insideQuotes = false;
+
+  for (let index = 0; index < tagList.length; index += 1) {
+    const character = tagList[index];
+
+    if (character === '"' && !isEscapedQuote(tagList, index)) {
+      insideQuotes = !insideQuotes;
+    }
+
+    if (character === ',' && !insideQuotes) {
+      tokens.push(current);
+      current = '';
+      continue;
+    }
+
+    current += character;
   }
 
-  const blockLines = normalized
-    .slice(FRONTMATTER_OPENING.length, closingIndex)
-    .split('\n');
-
-  if (!isFrontmatterBlock(blockLines)) {
-    return content;
+  if (insideQuotes) {
+    return null;
   }
 
-  const afterFrontmatter = normalized.slice(
-    closingIndex + FRONTMATTER_CLOSING.length,
-  );
-  const body = bodyAfterMirroredHeading(
-    afterFrontmatter,
-    serializedTitleOf(blockLines),
-  );
+  tokens.push(current);
 
-  // No mirrored heading means this isn't a markpost-composed document; leave it
-  // whole rather than stripping a block that may be a note's own frontmatter.
-  if (body === null) {
-    return content;
+  return tokens;
+};
+
+// Inverse of serializeTagsLine: parses a serialized `tags: [...]` value (the
+// part after the `tags: ` prefix) back into the original string array,
+// unquoting each entry with unquoteYamlScalar. Only a genuine flow-sequence
+// value (`[...]`, allowing for incidental surrounding whitespace an editor may
+// leave) is parsed — a hand-edited tags line that no longer has that shape
+// (e.g. `tags: urgent`, a trailing comment, or an unbalanced quote) still
+// passes the block's other shape checks, so this guards against parsing
+// partial garbage out of it and forwarding it to createRecord as a fabricated
+// tag. An empty token (`tags: [ci, ]` or `tags: [ci,,deploy]`, both reachable
+// from a hand-edited file) is dropped rather than forwarded as a blank tag.
+const parseTagsLine = (serializedTags: string): string[] => {
+  const trimmedValue = serializedTags.trim();
+
+  if (!trimmedValue.startsWith('[') || !trimmedValue.endsWith(']')) {
+    return [];
   }
 
-  return body;
+  const tagList = trimmedValue.slice(1, -1).trim();
+
+  if (tagList === '') {
+    return [];
+  }
+
+  const tokens = splitTagList(tagList);
+
+  if (!tokens) {
+    return [];
+  }
+
+  return tokens
+    .map((token) => unquoteYamlScalar(token.trim()))
+    .filter((tag) => tag !== '');
+};
+
+// Companion to stripFrontmatterDocument: extracts the tags markpost's own
+// frontmatter block carried, so a pulled-edited-repushed file forwards its
+// tags to createRecord instead of silently dropping them (issue #170). Scoped
+// to the same complete block+heading shape stripFrontmatterDocument requires
+// — a note whose frontmatter merely resembles markpost's is never misread as
+// carrying markpost tags. Returns [] for any document with no markpost
+// frontmatter, matching what a tagless record would round-trip to.
+export const extractFrontmatterTags = (content: string): string[] => {
+  const parsed = parseFrontmatterDocument(content);
+
+  if (!parsed) {
+    return [];
+  }
+
+  return parseTagsLine(lineValue(parsed.blockLines, TAGS_LINE_INDEX));
 };
 
 const isPlainObject = (value: unknown): value is { [key: string]: unknown } => {
