@@ -59,6 +59,10 @@ vi.mock('@/commands/events.js', () => ({
   runEventsCommand: vi.fn(),
   USAGE: 'Usage: markpost events <list>',
 }));
+vi.mock('@/commands/export.js', () => ({
+  runExportCommand: vi.fn(),
+  USAGE: 'Usage: markpost export [options]',
+}));
 vi.mock('@/commands/config.js', () => ({
   runConfigCommand: vi.fn(),
   USAGE: 'Usage: markpost config <get|set|path> [key] [value]',
@@ -194,6 +198,20 @@ describe('index', () => {
     expect(mockSpinner.start).not.toHaveBeenCalled();
   });
 
+  it('dispatches to runExportCommand and skips the sync flow when the "export" command is given', async () => {
+    process.argv = [...originalArgv.slice(0, 2), 'export', '--json'];
+    const { runExportCommand } = await import('@/commands/export.js');
+    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+
+    await import('@/index.js');
+
+    expect(runExportCommand).toHaveBeenCalledWith(['--json']);
+    expect(fetchAllRecords).not.toHaveBeenCalled();
+    expect(mockSpinner.start).not.toHaveBeenCalled();
+  });
+
   it('dispatches to runPushCommand and skips the default sync when the push command is given', async () => {
     process.argv = ['node', 'index.js', 'push', './notes/test.md'];
     const { runPushCommand } = await import('@/commands/push.js');
@@ -297,6 +315,9 @@ describe('index', () => {
       );
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('Usage: markpost events'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost export'),
       );
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(deleteRecords).not.toHaveBeenCalled();
@@ -508,6 +529,7 @@ describe('index', () => {
     ['sources', '--help'],
     ['records', '-h'],
     ['events', '--help'],
+    ['export', '-h'],
   ])(
     'prints %s usage for "%s %s" without invoking the command handler',
     async (name, helpFlag) => {
@@ -517,6 +539,7 @@ describe('index', () => {
       const sourcesModule = await import('@/commands/sources.js');
       const recordsModule = await import('@/commands/records.js');
       const eventsModule = await import('@/commands/events.js');
+      const exportModule = await import('@/commands/export.js');
 
       await import('@/index.js');
 
@@ -530,6 +553,7 @@ describe('index', () => {
       expect(sourcesModule.runSourcesCommand).not.toHaveBeenCalled();
       expect(recordsModule.runRecordsCommand).not.toHaveBeenCalled();
       expect(eventsModule.runEventsCommand).not.toHaveBeenCalled();
+      expect(exportModule.runExportCommand).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
     },
   );
