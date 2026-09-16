@@ -360,6 +360,288 @@ describe('runGetCommand', () => {
   // The unified --json failure contract: an argument error, a not-found fetch,
   // and a thrown fetch error all surface as one parseable { error, message }
   // shape on stderr (never stdout) so a script can parse any failure uniformly.
+  // Batch lookup: `markpost get uuid1 uuid2` must fetch and report both, not
+  // silently keep only the first (issue #173).
+  describe('multiple uuids', () => {
+    const secondRecord: Record = {
+      uuid: 'def-456',
+      title: 'Second Title',
+      content: 'Second Content',
+      createdAt: '2024-02-01T00:00:00Z',
+    };
+
+    it('fetches every uuid given, not just the first', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : secondRecord,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456']);
+
+      expect(fetchRecord).toHaveBeenCalledTimes(2);
+      expect(fetchRecord).toHaveBeenNthCalledWith(1, 'abc-123');
+      expect(fetchRecord).toHaveBeenNthCalledWith(2, 'def-456');
+      expect(console.log).toHaveBeenCalledWith('Test Title');
+      expect(console.log).toHaveBeenCalledWith('Second Title');
+    });
+
+    it('prints every found record as a single JSON array with --json', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : secondRecord,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', '--json']);
+
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls[0][0] as string;
+      const parsed = JSON.parse(output);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0]).toMatchObject({ uuid: 'abc-123' });
+      expect(parsed[1]).toMatchObject({ uuid: 'def-456' });
+      expect(process.exitCode).not.toBe(1);
+    });
+
+    it('reports a missing uuid without dropping the rest of the batch', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : null,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'missing-uuid']);
+
+      expect(console.log).toHaveBeenCalledWith('Test Title');
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to fetch record "missing-uuid".'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('omits a missing uuid from the --json array but still fails loud', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : null,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'missing-uuid', '--json']);
+
+      const stdoutOutput = vi
+        .mocked(console.log)
+        .mock.calls.map(([arg]) => arg as string);
+      expect(stdoutOutput).toHaveLength(1);
+      const parsed = JSON.parse(stdoutOutput[0]);
+      expect(parsed).toEqual([expect.objectContaining({ uuid: 'abc-123' })]);
+      const parsedError = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsedError).toMatchObject({
+        error: 'fetch_failed',
+        message: 'Failed to fetch record "missing-uuid".',
+      });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('separates multiple printed records with a blank line', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : secondRecord,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456']);
+
+      const calls = vi.mocked(console.log).mock.calls.map(([arg]) => arg);
+      const blankLineIndex = calls.indexOf('');
+      const secondTitleIndex = calls.indexOf('Second Title');
+      expect(blankLineIndex).toBeGreaterThan(-1);
+      expect(secondTitleIndex).toBeGreaterThan(blankLineIndex);
+    });
+
+    it('aborts remaining uuids on a systemic failure, matching the single-uuid path', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) => {
+        if (uuid === 'abc-123') {
+          return mockRecord;
+        }
+        throw new ApiRequestError('Invalid or missing API token', 401);
+      });
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', 'ghi-789']);
+
+      expect(fetchRecord).toHaveBeenCalledTimes(2);
+      expect(fetchRecord).not.toHaveBeenCalledWith('ghi-789');
+      // The uuid fetched before the abort must still be reported, not thrown
+      // away along with the aborted remainder.
+      expect(console.log).toHaveBeenCalledWith('Test Title');
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Authentication failed (HTTP 401)'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Same abort as above, but --json: the partial result must still report
+    // as an array (matching the 3-uuid batch shape), not collapse into the
+    // single-uuid unwrapped-object shape just because only one resolved
+    // before the abort.
+    it('reports a pre-abort partial result as a JSON array, not a single object', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) => {
+        if (uuid === 'abc-123') {
+          return mockRecord;
+        }
+        throw new ApiRequestError('Invalid or missing API token', 401);
+      });
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', 'ghi-789', '--json']);
+
+      const stdoutOutput = vi
+        .mocked(console.log)
+        .mock.calls.map(([arg]) => arg as string);
+      expect(stdoutOutput).toHaveLength(1);
+      const parsed = JSON.parse(stdoutOutput[0]);
+      expect(parsed).toEqual([expect.objectContaining({ uuid: 'abc-123' })]);
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('ignores blank positionals and fetches the real uuid', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['', 'abc-123']);
+
+      expect(fetchRecord).toHaveBeenCalledTimes(1);
+      expect(fetchRecord).toHaveBeenCalledWith('abc-123');
+    });
+
+    it('reports no uuid given when every positional is blank', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['']);
+
+      expect(fetchRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('No uuid given.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('writes nothing to stdout for a --json batch where every uuid is missing', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue(null);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['missing-1', 'missing-2', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledTimes(2);
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('writes nothing to stdout when the very first uuid of a --json batch hits a systemic failure', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(fetchRecord).mockRejectedValue(
+        new ApiRequestError('Invalid or missing API token', 401),
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('fetches a repeated uuid only once', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'abc-123']);
+
+      expect(fetchRecord).toHaveBeenCalledTimes(1);
+      // A single distinct uuid, even given twice, keeps the single-uuid text
+      // shape: one printed record, not two.
+      const titleCalls = vi
+        .mocked(console.log)
+        .mock.calls.filter(([arg]) => arg === 'Test Title');
+      expect(titleCalls).toHaveLength(1);
+    });
+
+    // The single-object-vs-array shape depends only on how many uuids were
+    // typed, not on whether fetching happened to collapse them: two
+    // positionals in means array out, even when they're the same uuid twice
+    // and only one fetch (and one array entry) results.
+    it('still emits a --json array (of one entry) when two positionals dedupe to one uuid', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'abc-123', '--json']);
+
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls[0][0] as string;
+      const parsed = JSON.parse(output);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toEqual([expect.objectContaining({ uuid: 'abc-123' })]);
+    });
+
+    // The `printedFirst` threading through `printTextResult` exists so a
+    // missing result never emits a stray leading blank line — pin the case
+    // where the missing uuid comes *first*, not last.
+    it('prints no leading blank line when the missing uuid comes before a found one', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
+        uuid === 'abc-123' ? mockRecord : null,
+      );
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['missing-uuid', 'abc-123']);
+
+      expect(vi.mocked(console.log).mock.calls[0][0]).toBe('Test Title');
+    });
+
+    // A failure while reporting (not while fetching) must still fail loud —
+    // `printJson` throws on a non-serializable value, and that must surface
+    // as a classified, non-zero-exit failure rather than a silent exit 0.
+    it('fails loud when reporting itself throws', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const circular: Record & { self?: unknown } = { ...mockRecord };
+      circular.self = circular;
+      vi.mocked(fetchRecord).mockResolvedValue(circular as Record);
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', 'def-456', '--json']);
+
+      expect(console.error).toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+  });
+
+  // Pins that a lone uuid's text output has no leading blank line — the
+  // `printedFirst` threading in `printTextResult` is the multi-uuid separator
+  // mechanism, and this guards against it accidentally printing a leading gap
+  // for the single-uuid case the original command never had.
+  it('prints no leading blank line for a single uuid', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    expect(vi.mocked(console.log).mock.calls[0][0]).toBe('Test Title');
+  });
+
   describe('--json failure contract', () => {
     // clearAllMocks (outer beforeEach) keeps mock implementations, so a prior
     // test's checkConfig rejection would leak in — pin it back to a passing

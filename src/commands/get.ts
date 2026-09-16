@@ -12,10 +12,10 @@ import { failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
-export const USAGE = `Usage: markpost get <uuid> [--json]
+export const USAGE = `Usage: markpost get <uuid...> [--json]
 
-  uuid    UUID of the record to fetch and display
-  --json  Print the record as JSON instead of formatted text`;
+  uuid    One or more UUIDs of records to fetch and display
+  --json  Print the record(s) as JSON instead of formatted text`;
 
 export const runGetCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below — including an
@@ -24,9 +24,9 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   const json = hasJsonFlag(args);
 
   try {
-    const { uuid } = parseGetArgs(args);
+    const { uuids, requestedCount } = parseGetArgs(args);
 
-    if (!uuid) {
+    if (requestedCount === 0) {
       failWithUsage('No uuid given.', USAGE, json);
       return;
     }
@@ -35,19 +35,24 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    const record = await fetchRecord(uuid);
+    // Fetch every uuid, one at a time (mirroring push's per-file loop): a
+    // batch lookup is cheap since `fetchRecord` is already a single-uuid
+    // request, and sequential requests keep output ordered and the server
+    // unhammered. A systemic failure (auth/5xx) re-throws from `fetchRecord`,
+    // aborting any not-yet-fetched uuids exactly like the single-uuid path
+    // already did — but the `finally` still reports whatever was already
+    // fetched before the throw, so a real result already paid for isn't
+    // thrown away along with the abort (the outer catch below then reports
+    // the systemic failure itself, after these partial results are out).
+    const results: GetResult[] = [];
 
-    if (!record) {
-      failWithMessage(`Failed to fetch record "${uuid}".`, json);
-      return;
+    try {
+      for (const uuid of uuids) {
+        results.push({ uuid, record: await fetchRecord(uuid) });
+      }
+    } finally {
+      reportResultsSafely(results, json, requestedCount);
     }
-
-    if (json) {
-      printJson(record);
-      return;
-    }
-
-    printRecord(record);
   } catch (error) {
     // A systemic auth/5xx failure now re-throws from fetchRecord (issue #89):
     // surface its classified, actionable message with a non-zero exit rather
@@ -57,10 +62,21 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   }
 };
 
-// `parseArgs` accepts the uuid and `--json` in either order and throws on an
-// unknown flag (the command's outer catch surfaces it). The uuid is the first
-// positional; any extra positional is ignored, matching the prior behavior.
-const parseGetArgs = (args: string[]): { uuid: string | undefined } => {
+// `parseArgs` accepts any number of uuids and `--json` in either order and
+// throws on an unknown flag (the command's outer catch surfaces it). Every
+// distinct positional is a requested uuid — none are silently dropped
+// (issue #173). Positionals are filtered for blanks so a stray empty-string
+// argument can't masquerade as a requested uuid (matching push's identical
+// blank-filtering of its own positionals). `uuids` is deduplicated (`Set`
+// preserves insertion order) so a repeated uuid — e.g. from a copy-paste or a
+// shell glob — is fetched and printed once, not once per repetition; but
+// `requestedCount` stays the pre-dedupe count, because it drives the
+// `--json` single-object-vs-array shape decision below and that shape must
+// depend only on how many uuids the caller *typed*, not on whether any of
+// them happened to collide after fetching.
+const parseGetArgs = (
+  args: string[],
+): { uuids: string[]; requestedCount: number } => {
   // `--json` is still declared so `parseArgs` accepts it rather than rejecting
   // it as unknown; its value is read from argv by `hasJsonFlag` in the caller,
   // which also survives an unrelated bad flag that makes this throw.
@@ -72,7 +88,146 @@ const parseGetArgs = (args: string[]): { uuid: string | undefined } => {
     },
   });
 
-  return { uuid: positionals[0] };
+  const requestedUuids = positionals.filter(
+    (positional) => positional.length > 0,
+  );
+
+  return {
+    uuids: [...new Set(requestedUuids)],
+    requestedCount: requestedUuids.length,
+  };
+};
+
+// One requested uuid's outcome: the record it resolved to, or `null` when
+// `fetchRecord` classified it as a genuine not-found (a systemic failure
+// throws instead and is handled by the caller's try/catch, not this shape).
+interface GetResult {
+  uuid: string;
+  record: Record | null;
+}
+
+const reportMissing = (uuid: string, json: boolean): void => {
+  failWithMessage(`Failed to fetch record "${uuid}".`, json);
+};
+
+// Reporting runs from the fetch loop's `finally` so a mid-batch abort still
+// surfaces whatever was already fetched (see the loop's comment) — but a
+// failure *while reporting* (e.g. a non-serializable record reaching
+// `printJson`) must still fail loud with a non-zero exit, exactly like a
+// throw straight under the outer `try` used to, rather than being swallowed
+// as a log line that leaves the command exiting 0 with a stray stderr line.
+// `failWithMessage` only sets `process.exitCode` and never throws, so it
+// can't itself clobber a systemic error already unwinding through this
+// `finally`.
+const reportResultsSafely = (
+  results: GetResult[],
+  json: boolean,
+  requestedCount: number,
+): void => {
+  if (results.length === 0) {
+    return;
+  }
+
+  try {
+    reportResults(results, json, requestedCount);
+  } catch (reportError) {
+    failWithMessage(
+      sanitizeForTerminal(
+        reportError instanceof Error
+          ? reportError.message
+          : String(reportError),
+      ),
+      json,
+    );
+  }
+};
+
+// A single *requested* uuid keeps the original, unwrapped shapes (one printed
+// record, or nothing on stdout when it's missing) so an existing
+// `markpost get <uuid> --json | jq '.title'` script or a single-record
+// terminal read keeps working unchanged. Two or more requested uuids print
+// every found record — as a JSON array in `--json` mode, or one after another
+// separated by a blank line in text mode — and report each missing uuid
+// without dropping the rest of the batch. The shape decision is keyed on how
+// many uuids were *requested*, not how many results are in hand yet: a
+// systemic failure can abort the batch after only one of several requested
+// uuids resolved, and that partial result must still report as an array, not
+// silently collapse into the single-uuid shape.
+const reportResults = (
+  results: GetResult[],
+  json: boolean,
+  requestedCount: number,
+): void => {
+  if (json) {
+    reportJsonResults(results, requestedCount);
+    return;
+  }
+
+  reportTextResults(results);
+};
+
+const reportSingleJsonResult = ({ uuid, record }: GetResult): void => {
+  if (!record) {
+    reportMissing(uuid, true);
+    return;
+  }
+
+  printJson(record);
+};
+
+const reportJsonResults = (
+  results: GetResult[],
+  requestedCount: number,
+): void => {
+  if (requestedCount === 1) {
+    reportSingleJsonResult(results[0]);
+    return;
+  }
+
+  results
+    .filter((result) => !result.record)
+    .forEach((result) => reportMissing(result.uuid, true));
+
+  const records = results
+    .filter((result): result is GetResult & { record: Record } =>
+      Boolean(result.record),
+    )
+    .map((result) => result.record);
+
+  // Mirrors the single-uuid failure contract: a batch that resolved no
+  // records yet (every uuid so far missing, or aborted before any success)
+  // writes nothing to stdout rather than an empty `[]` a script might
+  // mistake for "found nothing" instead of "failed".
+  if (records.length === 0) {
+    return;
+  }
+
+  printJson(records);
+};
+
+// Prints one result and returns whether a record has now been printed at
+// least once — the caller threads that through `reduce` so a missing result
+// (which prints nothing) doesn't shift when the next printed record's leading
+// blank-line separator appears.
+const printTextResult = (printedFirst: boolean, result: GetResult): boolean => {
+  if (!result.record) {
+    reportMissing(result.uuid, false);
+    return printedFirst;
+  }
+
+  // Separate multiple printed records with a blank line; the very first one
+  // (and the only one, in the single-uuid case) prints with no leading gap,
+  // matching the prior single-uuid output exactly.
+  if (printedFirst) {
+    console.log('');
+  }
+
+  printRecord(result.record);
+  return true;
+};
+
+const reportTextResults = (results: GetResult[]): void => {
+  results.reduce(printTextResult, false);
 };
 
 // Every field here comes from the untrusted API response, so each is stripped
