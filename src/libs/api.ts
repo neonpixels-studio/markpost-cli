@@ -320,24 +320,30 @@ export const assertApiSuccess = (response: Response, body: unknown): void => {
   );
 };
 
+// The result of an authed request when a caller needs more than the parsed
+// body — today, only `fetchRecordExport` (src/libs/export.ts), which reads the
+// truncation signal off a response header rather than the JSON body.
+export type AuthedRequestResult = { body: unknown; headers: Headers };
+
 // Single seam for talking to the markpost API: prefixes the base URL,
 // attaches the bearer token, throws with the server's real error detail on
 // failure (via `assertApiSuccess`, so a 2xx response that still carries
 // `errors` is caught here too, not just a non-2xx status), otherwise returns
-// the parsed body for the caller to read in whatever shape (list, single,
-// meta) it expects. `headers` is narrowed to a plain object so caller headers
-// reliably merge on top of the auth header — a `Headers` instance or tuple
-// array (both legal on `RequestInit`) would spread to nothing/garbage and
-// silently drop them. The transport goes through `apiFetch`, so every request
-// made via this seam inherits the request timeout (a stall fails loud as
-// `ApiTimeoutError` instead of hanging the sync forever); `signal` is owned by
-// `apiFetch`, so callers can't override the timeout.
-export const authedRequest = async (
+// the parsed body AND the response headers for the caller to read in
+// whatever shape (list, single, meta) it expects. `headers` (the parameter)
+// is narrowed to a plain object so caller headers reliably merge on top of
+// the auth header — a `Headers` instance or tuple array (both legal on
+// `RequestInit`) would spread to nothing/garbage and silently drop them. The
+// transport goes through `apiFetch`, so every request made via this seam
+// inherits the request timeout (a stall fails loud as `ApiTimeoutError`
+// instead of hanging the sync forever); `signal` is owned by `apiFetch`, so
+// callers can't override the timeout.
+export const authedRequestWithHeaders = async (
   path: string,
   init: Omit<RequestInit, 'headers' | 'signal'> & {
     headers?: Record<string, string>;
   } = {},
-): Promise<unknown> => {
+): Promise<AuthedRequestResult> => {
   const { response, body } = await apiFetch(`${getBaseUrl()}${path}`, {
     ...init,
     headers: {
@@ -347,6 +353,20 @@ export const authedRequest = async (
   });
 
   assertApiSuccess(response, body);
+
+  return { body, headers: response.headers };
+};
+
+// The common case: every existing caller only ever wanted the parsed body, so
+// this stays the default seam and `authedRequestWithHeaders` is the
+// opt-in for the one caller that also needs a response header.
+export const authedRequest = async (
+  path: string,
+  init: Omit<RequestInit, 'headers' | 'signal'> & {
+    headers?: Record<string, string>;
+  } = {},
+): Promise<unknown> => {
+  const { body } = await authedRequestWithHeaders(path, init);
 
   return body;
 };

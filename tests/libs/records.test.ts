@@ -905,6 +905,66 @@ describe('createRecord', () => {
     expect(await createRecord('Test Title', 'Test Content')).toBeNull();
   });
 
+  // Regression coverage for issue #170: push previously called createRecord
+  // with only title/content, so a pulled-edited-repushed note's frontmatter
+  // tags never reached markpost even though POST /api/records accepts a
+  // tags array (server/api/records/index.post.ts).
+  it('includes tags in the request body when provided', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await createRecord('Test Title', 'Test Content', ['ci', 'deploy']);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes: {
+              title: 'Test Title',
+              content: 'Test Content',
+              tags: ['ci', 'deploy'],
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  // markpost's POST /api/records treats `tags` as fully optional — an absent
+  // key is not the same as an empty array — so an empty tags list is omitted
+  // rather than sent as `[]`, preserving the request shape a tagless push
+  // sent before issue #170.
+  it('omits tags from the request body when the list is empty', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await createRecord('Test Title', 'Test Content', []);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes: { title: 'Test Title', content: 'Test Content' },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('omits tags from the request body when no tags argument is given', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await createRecord('Test Title', 'Test Content');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes: { title: 'Test Title', content: 'Test Content' },
+          },
+        }),
+      }),
+    );
+  });
+
   // A per-file 4xx (the payload's fault) must stay a null return so a bulk
   // push skips just this file and keeps going.
   it('returns null for a non-systemic 4xx failure', async () => {

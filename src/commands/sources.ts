@@ -10,12 +10,13 @@ import {
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
+import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import {
   isManualSecretProvider,
   isRotatableProvider,
+  MANUAL_SECRET_PROVIDERS,
   ROTATABLE_PROVIDERS,
   RotateSourceSecretInput,
   Source,
@@ -89,16 +90,13 @@ const SOURCES_HANDLERS = new Map<
 // documented escape hatch); `create` and `update` have no such flag — `create`
 // always prompts, and `update` always ends by prompting for the route folder,
 // whether the target came from an explicit uuid or the interactive picker —
-// so both are guarded outright. `rotate-secret` also prompts (a picker with no
-// uuid, or a password input for a manual-secret provider) but is deliberately
-// left out here: it's out of scope for this change, same as create/update
-// were out of scope for delete's original guard. See the `rotate-secret`
-// non-TTY test below for what this currently leaves unguarded.
-// @todo Guard `rotate-secret` the same way (picker needs a uuid; a
-// manual-secret provider's password prompt needs a TTY check inside
-// collectRotateInput, since the provider isn't known until after fetchSources).
+// so both are guarded outright. `rotate-secret` only prompts when no uuid is
+// given (the picker), which is what's guarded here — its other prompt (a
+// manual-secret provider's password) is guarded separately inside
+// collectRotateInput, since the provider isn't known this early (see there).
 const interactiveGuardMessageFor = (
   subcommand: string,
+  uuid: string | undefined,
   skipConfirm: boolean,
 ): string | null => {
   if (subcommand === DELETE_SUBCOMMAND && !skipConfirm) {
@@ -111,6 +109,10 @@ const interactiveGuardMessageFor = (
 
   if (subcommand === UPDATE_SUBCOMMAND) {
     return `\`sources ${UPDATE_SUBCOMMAND}\` needs an interactive terminal — it prompts for the route folder, and to pick a source when no uuid is given.`;
+  }
+
+  if (subcommand === ROTATE_SECRET_SUBCOMMAND && !uuid) {
+    return `\`sources ${ROTATE_SECRET_SUBCOMMAND}\` needs an interactive terminal to pick a source when no uuid is given; pass a uuid (\`markpost sources ${ROTATE_SECRET_SUBCOMMAND} <uuid>\`) to skip the picker — unless the source turns out to be a manual-secret provider (${MANUAL_SECRET_PROVIDERS.join(', ')}), which still prompts for the new secret and needs a terminal either way.`;
   }
 
   return null;
@@ -147,7 +149,7 @@ const usageErrorFor = (
   }
 
   if (!isInteractive) {
-    return interactiveGuardMessageFor(subcommand, skipConfirm);
+    return interactiveGuardMessageFor(subcommand, uuid, skipConfirm);
   }
 
   return null;
@@ -185,8 +187,8 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
 
     // A prompt needs both streams to be a terminal: inquirer reads stdin and
     // renders to stdout, so a redirect on either makes create/update/delete's
-    // prompts unanswerable.
-    const isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    // prompts (and rotate-secret's picker) unanswerable.
+    const isInteractive = isInteractiveTerminal();
     const usageError = usageErrorFor(
       subcommand,
       uuid,
@@ -562,14 +564,29 @@ const deleteSourceCommand = async (
 
 // A manual-secret provider (stripe) issues its own secret, so rotation collects
 // the new value from the user; a generated provider (github/zapier/shortcuts)
-// sends no attributes and lets markpost mint one. Returns null when the user
-// leaves a required secret blank, so the caller aborts without a doomed request
-// (mirrors updateSource's empty-route-folder guard).
+// sends no attributes and lets markpost mint one. Returns null when the secret
+// can't be collected: either a blank answer (reported via console.error, exit
+// 0 — a deliberate user choice, mirrors updateSource's empty-route-folder
+// guard) or a non-interactive terminal (reported via failWithMessage, exit 1
+// — the environment could never have answered the prompt at all).
 const collectRotateInput = async (
   target: Source,
 ): Promise<RotateSourceSecretInput | null> => {
   if (!isManualSecretProvider(target.provider)) {
     return {};
+  }
+
+  // The provider isn't known until fetchSources resolves, so this guard sits
+  // here rather than in usageErrorFor (see the function header above for why
+  // it fails via failWithMessage instead of the empty-secret check's plain
+  // console.error).
+  if (!isInteractiveTerminal()) {
+    failWithMessage(
+      `\`sources ${ROTATE_SECRET_SUBCOMMAND}\` needs an interactive terminal to enter the new signing secret for "${sanitizeForTerminal(
+        target.provider,
+      )}" — both stdin and stdout must be a terminal.`,
+    );
+    return null;
   }
 
   // Masked: this is the one place the CLI accepts a signing secret, so it must
