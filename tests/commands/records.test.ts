@@ -231,6 +231,70 @@ describe('runRecordsCommand', () => {
       });
     });
 
+    it("prints an error-status record's errorMessage", async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const erroredRecord: Record = {
+        ...secondRecord,
+        status: 'error',
+        errorMessage: 'Sync failed: file already exists',
+      };
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord, erroredRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list']);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('error:      Sync failed: file already exists'),
+      );
+    });
+
+    // errorMessage is null outside of an error-status record, so a synced
+    // record must not print a blank "error:" line.
+    it('omits the error line for records without errorMessage', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord, secondRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list']);
+
+      const printedError = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes('error:'),
+        );
+      expect(printedError).toBe(false);
+    });
+
+    it('includes errorMessage in the --json output', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const erroredRecord: Record = {
+        ...secondRecord,
+        status: 'error',
+        errorMessage: 'Sync failed: file already exists',
+      };
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [erroredRecord],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--json']);
+
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)[0]).toMatchObject({
+        errorMessage: 'Sync failed: file already exists',
+      });
+    });
+
     it('strips control characters from untrusted record fields before printing', async () => {
       // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
       const control = String.fromCharCode(0x1b);

@@ -129,6 +129,56 @@ describe('runGetCommand', () => {
     });
   });
 
+  it("prints an error-status record's errorMessage", async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: 'error',
+      errorMessage: 'Sync failed: file already exists',
+    });
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('error:      Sync failed: file already exists'),
+    );
+  });
+
+  // errorMessage is null outside of an error-status record, so a synced
+  // record must not print a blank "error:" line.
+  it('omits the error line when errorMessage is absent', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedError = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && arg.includes('error:'),
+      );
+    expect(printedError).toBe(false);
+  });
+
+  it('includes errorMessage in the --json output', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: 'error',
+      errorMessage: 'Sync failed: file already exists',
+    });
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--json']);
+
+    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+    expect(JSON.parse(output)).toMatchObject({
+      errorMessage: 'Sync failed: file already exists',
+    });
+  });
+
   it('reports an error when the record is not found', async () => {
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(null);

@@ -251,6 +251,13 @@ const printRecord = (record: Record): void => {
     console.log(`  synced at:  ${sanitizeForTerminal(record.syncedAt)}`);
   }
 
+  // errorMessage is only ever non-null on (or just after) an `error`-status
+  // record — see the type's doc comment — so gating on presence alone (like
+  // status/syncedAt above) is enough to limit this line to failed records.
+  if (record.errorMessage) {
+    console.log(`  error:      ${sanitizeForTerminal(record.errorMessage)}`);
+  }
+
   console.log('');
   console.log(sanitizeBlockForTerminal(record.content));
 };

@@ -23,6 +23,14 @@ export type Record = {
   // optional so older/off-contract responses that omit them still parse.
   status?: string | null;
   syncedAt?: string | null;
+  // The failure reason markpost's markRecordError sets on a webhook-ingestion
+  // failure (server/api/hooks/[slug].post.ts), surfaced via recordSerializer
+  // (server/utils/response.ts) on every record. Null except while the record
+  // is (or was last) `status: "error"` — markpost only clears it when a
+  // subsequent update moves the record away from `error`. Typed optional,
+  // like `status`/`syncedAt` above, for older/off-contract responses that
+  // omit it.
+  errorMessage?: string | null;
   // Present on records markpost ingested through its markdown pipeline
   // (webhook/email); null for records created with only a title + content
   // (e.g. `markpost push`). Typed for good DX, but treated as untrusted JSON
