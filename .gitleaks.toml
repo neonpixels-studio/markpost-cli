@@ -27,13 +27,18 @@ description = "Global allowlist for example and fixture files"
 # not flagged, since these hold placeholder credentials by design. Keep real
 # secrets out of these paths.
 #
-# Deliberately scoped to actual test/spec files and dedicated fixture
-# directories rather than a blanket `tests?/` prefix: the old blanket match
-# also exempted verbatim-vendored contract files under tests/types/vendor/
+# Deliberately scoped to actual test/spec files, at most one directory below
+# tests?/, rather than a blanket `tests?/` prefix: the old blanket match also
+# exempted verbatim-vendored contract files nested under tests/types/vendor/
 # and tests/libs/vendor/ (see markpost-cli#181), which must stay in scope for
-# secret scanning since they're copied from another repo.
+# secret scanning since they're copied from another repo. `[^/]` (not `.`) is
+# used deliberately: in RE2, `.` matches `/`, so a `.*` pattern here would
+# still reach into a nested vendor/ directory regardless of filename. Using
+# `[^/]` keeps the match from crossing a path separator, so anything nested
+# two levels below tests?/ (like .../types/vendor/*) is structurally out of
+# reach of these patterns, independent of what it's named.
 paths = [
   '''\.example$''',
-  '''(^|/)(tests?|__tests__)/.*\.(test|spec)\.[jt]sx?$''',
-  '''(^|/)(fixtures?|__fixtures__)/''',
+  '''(^|/)(tests?|__tests__)/(?:[^/]+/)?[^/]+\.(test|spec)\.[cm]?[jt]sx?$''',
+  '''(^|/)(tests?|__tests__)/(fixtures?|__fixtures__)/[^/]+$''',
 ]
