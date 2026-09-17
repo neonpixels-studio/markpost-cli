@@ -648,7 +648,7 @@ describe('index', () => {
   // how many the server actually reports deleted. Extracted once a third
   // call site (the full-delete and short-count tests for issue #185) would
   // otherwise have duplicated this same seven-line setup a third time.
-  const arrangeTwoRecordDelete = async (deleted: number) => {
+  const arrangeTwoRecordDelete = async ({ deleted }: { deleted: number }) => {
     const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
     const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -661,14 +661,17 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce('/mock/output/title-2.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted });
+    vi.mocked(deleteRecords).mockResolvedValueOnce({ deleted });
 
     return { mockRecord2, fetchAllRecords, deleteRecords, writeMarkdown };
   };
 
   it('writes one markdown file per record', async () => {
+    // Full delete — this test is about the write fan-out, not the delete
+    // count, so it stays on the clean-exit path rather than incidentally
+    // exercising the partial-delete branch covered below.
     const { mockRecord2, writeMarkdown, deleteRecords } =
-      await arrangeTwoRecordDelete(1);
+      await arrangeTwoRecordDelete({ deleted: 2 });
 
     await import('@/index.js');
 
@@ -694,7 +697,7 @@ describe('index', () => {
   // path so the partial-count test below is a meaningful contrast, not just
   // an assertion no other test would catch either way.
   it('exits 0 on a full delete', async () => {
-    await arrangeTwoRecordDelete(2);
+    await arrangeTwoRecordDelete({ deleted: 2 });
 
     await import('@/index.js');
 
@@ -714,7 +717,7 @@ describe('index', () => {
   it('treats a non-null short delete count as partial success and exits non-zero', async () => {
     // Both records were written and are settleable, but only one was
     // actually deleted server-side.
-    const { deleteRecords } = await arrangeTwoRecordDelete(1);
+    const { deleteRecords } = await arrangeTwoRecordDelete({ deleted: 1 });
 
     await import('@/index.js');
 
@@ -729,6 +732,28 @@ describe('index', () => {
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining(
         'Deleted 1 of 2 records — the rest were not confirmed deleted',
+      ),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A server that reports more deletes than uuids requested can't be trusted
+  // (chunks are disjoint, so no uuid can be legitimately double-counted) —
+  // guards the `> settleableRecords.length` branch added alongside the
+  // short-count fix so it can't quietly regress back to treating any
+  // non-strict-match count as a full delete.
+  it('treats an impossible over-count as untrustworthy and exits non-zero', async () => {
+    const { deleteRecords } = await arrangeTwoRecordDelete({ deleted: 3 });
+
+    await import('@/index.js');
+
+    expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
+    expect(mockSpinner.success).not.toHaveBeenCalledWith(
+      expect.stringContaining('Deleted'),
+    );
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Server reported 3 deletes for 2 records — the count can't be trusted",
       ),
     );
     expect(process.exitCode).toBe(1);
@@ -2875,6 +2900,36 @@ describe('index', () => {
     // can't say which survived, so no path may be forgotten or a still-pending
     // record would drop a suffixed duplicate next pass.
     vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Pass two (snapshot index 2) still carries both uuids.
+    expect(snapshots[2].has('abc-123')).toBe(true);
+    expect(snapshots[2].has('def-456')).toBe(true);
+  });
+
+  it('retains all written paths when the delete count exceeds what was requested', async () => {
+    const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const snapshots: Array<Map<string, WrittenRecordState>> = [];
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, secondRecord], partial: false });
+    // Two records requested but the server reports three deleted — an
+    // impossible count (chunks are disjoint, so no uuid can be legitimately
+    // double-counted) that can't be trusted to mean either uuid settled, so
+    // neither path may be forgotten.
+    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 3 });
     vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
       await runSync();

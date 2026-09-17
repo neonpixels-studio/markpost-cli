@@ -1081,24 +1081,31 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
       return deletePermanentlyFailed ? false : autoSync;
     }
 
-    // Settle only on a confirmed full delete. deleteRecords returns a bare
-    // count, not per-uuid results, so a short count (`deleted < written`) can't
-    // tell which uuids survived; retaining every entry keeps the reuse guard for
-    // any record still pending, at the harmless cost of a stale entry for the
-    // ones that were deleted. A record not deleted stays pending and, without
-    // its tracked path, would drop a fresh `<slug>-2.md` duplicate next pass —
-    // the exact bug this split prevents. `>=` (not `===`) so a server that
-    // over-reports (or double-counts a uuid across chunks) still counts as
-    // fully settled instead of falsely tripping the short-count branch below
-    // and leaking these uuids in processWrittenState forever.
-    const fullyDeleted = deleteMeta.deleted >= settleableRecords.length;
+    // Settle only on a confirmed full delete (`===`, not `>=`/`<=`) — deleteRecords
+    // returns a bare count, not per-uuid results, so any mismatch can't tell which
+    // uuids survived. Forgetting a tracked path on anything but an exact match
+    // would drop the reuse guard for a record that's still pending, and, without
+    // its tracked path, the next pass would write a fresh `<slug>-2.md` duplicate —
+    // the exact bug this split prevents (#110).
+    const confirmedFullyDeleted =
+      deleteMeta.deleted === settleableRecords.length;
 
-    if (fullyDeleted) {
+    if (confirmedFullyDeleted) {
       forgetSettledRecords(
         processWrittenState,
         settleableRecords.map(({ record }) => record.uuid),
       );
       spinner.success(`Deleted ${deleteMeta.deleted} records!`);
+    } else if (deleteMeta.deleted > settleableRecords.length) {
+      // Uuids are sent to the server in disjoint chunks, so a well-behaved
+      // server can never report more deletes than uuids requested — this
+      // means the count itself can't be trusted, not that extra records were
+      // deleted. Don't guess which uuids it refers to; leave every tracked
+      // path in place (same as the short-count branch below) and fail loud.
+      spinner.error(
+        `Server reported ${deleteMeta.deleted} deletes for ${settleableRecords.length} records — the count can't be trusted, so no records were marked settled.`,
+      );
+      process.exitCode = 1;
     } else {
       // A non-null but short count means markpost silently dropped some
       // uuids from the delete — the bare count can't say whether a given
