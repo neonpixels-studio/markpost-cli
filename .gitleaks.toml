@@ -26,7 +26,14 @@ description = "Global allowlist for example and fixture files"
 # Accepted risk: secrets committed into example/fixture files are intentionally
 # not flagged, since these hold placeholder credentials by design. Keep real
 # secrets out of these paths.
+#
+# Deliberately scoped to actual test/spec files and dedicated fixture
+# directories rather than a blanket `tests?/` prefix: the old blanket match
+# also exempted verbatim-vendored contract files under tests/types/vendor/
+# and tests/libs/vendor/ (see markpost-cli#181), which must stay in scope for
+# secret scanning since they're copied from another repo.
 paths = [
   '''\.example$''',
-  '''(^|/)(tests?|__tests__|fixtures?|__fixtures__)/''',
+  '''(^|/)(tests?|__tests__)/.*\.(test|spec)\.[jt]sx?$''',
+  '''(^|/)(fixtures?|__fixtures__)/''',
 ]
