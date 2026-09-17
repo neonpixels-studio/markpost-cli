@@ -1087,8 +1087,11 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // any record still pending, at the harmless cost of a stale entry for the
     // ones that were deleted. A record not deleted stays pending and, without
     // its tracked path, would drop a fresh `<slug>-2.md` duplicate next pass —
-    // the exact bug this split prevents.
-    const fullyDeleted = deleteMeta.deleted === settleableRecords.length;
+    // the exact bug this split prevents. `>=` (not `===`) so a server that
+    // over-reports (or double-counts a uuid across chunks) still counts as
+    // fully settled instead of falsely tripping the short-count branch below
+    // and leaking these uuids in processWrittenState forever.
+    const fullyDeleted = deleteMeta.deleted >= settleableRecords.length;
 
     if (fullyDeleted) {
       forgetSettledRecords(
@@ -1097,14 +1100,17 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
       );
       spinner.success(`Deleted ${deleteMeta.deleted} records!`);
     } else {
-      // A non-null but short count is markpost silently dropping
-      // nonexistent/foreign uuids per chunk — legitimate on the server's part,
-      // but some records the CLI wrote are still pending on disk. Reporting
-      // plain success here would be exactly the fail-loud violation issue
-      // #185 called out: a cron log (or CI) reading exit 0 would never learn
-      // some records didn't settle.
-      spinner.warning(
-        `Deleted ${deleteMeta.deleted} of ${settleableRecords.length} records — the rest remain pending.`,
+      // A non-null but short count means markpost silently dropped some
+      // uuids from the delete — the bare count can't say whether a given
+      // uuid is still pending or was already gone (e.g. deleted elsewhere
+      // between fetch and delete), so the message only claims what's known:
+      // not every uuid was confirmed deleted. Reporting plain success here
+      // would be exactly the fail-loud violation issue #185 called out: a
+      // cron log (or CI) reading exit 0 would never learn some records
+      // didn't settle. Matches the delete-failure branch above in using
+      // spinner.error + a non-zero exit for this class of event.
+      spinner.error(
+        `Deleted ${deleteMeta.deleted} of ${settleableRecords.length} records — the rest were not confirmed deleted; they may already be gone from the server, or may still be pending.`,
       );
       process.exitCode = 1;
     }

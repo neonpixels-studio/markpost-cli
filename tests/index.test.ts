@@ -116,12 +116,7 @@ describe('index', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    mockSpinner = {
-      start: vi.fn(),
-      success: vi.fn(),
-      error: vi.fn(),
-      warning: vi.fn(),
-    } as unknown as Spinner;
+    mockSpinner = { start: vi.fn(), success: vi.fn(), error: vi.fn() } as unknown as Spinner;
     // The sync now runs only under the explicit `sync` subcommand, so the
     // default-sync tests below invoke it that way. Dispatch, help, and
     // no-arg tests override process.argv themselves.
@@ -648,7 +643,12 @@ describe('index', () => {
     expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
   });
 
-  it('writes one markdown file per record', async () => {
+  // Shared arrange for the two-record delete-count scenarios below: two
+  // records fetched and written, then handed to deleteRecords, varying only
+  // how many the server actually reports deleted. Extracted once a third
+  // call site (the full-delete and short-count tests for issue #185) would
+  // otherwise have duplicated this same seven-line setup a third time.
+  const arrangeTwoRecordDelete = async (deleted: number) => {
     const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
     const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
     const { writeMarkdown } = await import('@/libs/markdown.js');
@@ -661,7 +661,14 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce('/mock/output/title-2.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ deleted });
+
+    return { mockRecord2, fetchAllRecords, deleteRecords, writeMarkdown };
+  };
+
+  it('writes one markdown file per record', async () => {
+    const { mockRecord2, writeMarkdown, deleteRecords } =
+      await arrangeTwoRecordDelete(1);
 
     await import('@/index.js');
 
@@ -687,24 +694,14 @@ describe('index', () => {
   // path so the partial-count test below is a meaningful contrast, not just
   // an assertion no other test would catch either way.
   it('exits 0 on a full delete', async () => {
-    const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
-    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, mockRecord2], partial: false });
-    vi.mocked(writeMarkdown)
-      .mockReturnValueOnce('/mock/output/test-title.md')
-      .mockReturnValueOnce('/mock/output/title-2.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 2 });
+    await arrangeTwoRecordDelete(2);
 
     await import('@/index.js');
 
     expect(mockSpinner.success).toHaveBeenCalledWith('Deleted 2 records!');
-    expect(mockSpinner.warning).not.toHaveBeenCalled();
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('Deleted'),
+    );
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -715,21 +712,9 @@ describe('index', () => {
   // hit the plain `spinner.success` and exit 0, silently lying about records
   // left pending on the server.
   it('treats a non-null short delete count as partial success and exits non-zero', async () => {
-    const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
-    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
-    const { writeMarkdown } = await import('@/libs/markdown.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
-
-    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, mockRecord2], partial: false });
-    vi.mocked(writeMarkdown)
-      .mockReturnValueOnce('/mock/output/test-title.md')
-      .mockReturnValueOnce('/mock/output/title-2.md');
     // Both records were written and are settleable, but only one was
     // actually deleted server-side.
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    const { deleteRecords } = await arrangeTwoRecordDelete(1);
 
     await import('@/index.js');
 
@@ -737,8 +722,14 @@ describe('index', () => {
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
       expect.stringContaining('Deleted'),
     );
-    expect(mockSpinner.warning).toHaveBeenCalledWith(
-      expect.stringContaining('Deleted 1 of 2 records'),
+    // "remain pending" would overclaim: markpost also silently drops
+    // nonexistent/foreign uuids per chunk, so an undeleted uuid may already
+    // be gone rather than pending — the message only asserts what the bare
+    // count can support.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Deleted 1 of 2 records — the rest were not confirmed deleted',
+      ),
     );
     expect(process.exitCode).toBe(1);
   });
