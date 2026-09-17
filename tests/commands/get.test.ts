@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ERROR_STATUS } from '@/libs/records.js';
 import { Record } from '@/types/records.types.js';
 
 vi.mock('@/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/records.js', () => ({
-  ERROR_STATUS: 'error',
+vi.mock('@/libs/records.js', async (importOriginal) => ({
+  // Pulls the real ERROR_STATUS through rather than restating the literal, so
+  // these tests stay pinned to the actual constant instead of drifting from
+  // it if it's ever renamed.
+  ...(await importOriginal<typeof import('@/libs/records.js')>()),
   fetchRecord: vi.fn(),
 }));
 vi.mock('chalk', () => ({
@@ -136,7 +140,7 @@ describe('runGetCommand', () => {
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue({
       ...mockRecord,
-      status: 'error',
+      status: ERROR_STATUS,
       errorMessage: 'Sync failed: file already exists',
     });
     const { runGetCommand } = await import('@/commands/get.js');
@@ -160,7 +164,7 @@ describe('runGetCommand', () => {
     const printedError = vi
       .mocked(console.log)
       .mock.calls.some(
-        ([arg]) => typeof arg === 'string' && arg.includes('error:'),
+        ([arg]) => typeof arg === 'string' && /^ {2}error: {6}/.test(arg),
       );
     expect(printedError).toBe(false);
   });
@@ -184,7 +188,7 @@ describe('runGetCommand', () => {
     const printedError = vi
       .mocked(console.log)
       .mock.calls.some(
-        ([arg]) => typeof arg === 'string' && arg.includes('error:'),
+        ([arg]) => typeof arg === 'string' && /^ {2}error: {6}/.test(arg),
       );
     expect(printedError).toBe(false);
   });
@@ -193,7 +197,7 @@ describe('runGetCommand', () => {
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue({
       ...mockRecord,
-      status: 'error',
+      status: ERROR_STATUS,
       errorMessage: 'Sync failed: file already exists',
     });
     const { runGetCommand } = await import('@/commands/get.js');
@@ -275,6 +279,8 @@ describe('runGetCommand', () => {
       title: `A${control}B`,
       content: `C${control}D`,
       createdAt: `2024${control}01`,
+      status: ERROR_STATUS,
+      errorMessage: `Sync ${control}failed`,
     };
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(evilRecord);
@@ -290,6 +296,11 @@ describe('runGetCommand', () => {
     expect(printedControl).toBe(false);
     expect(console.log).toHaveBeenCalledWith('A B');
     expect(console.log).toHaveBeenCalledWith('C D');
+    // sanitizeForTerminal replaces the stripped control byte with a space
+    // rather than deleting it, hence the double space before "failed".
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('error:      Sync  failed'),
+    );
   });
 
   it('preserves newlines and tabs in multi-line content while still stripping escapes', async () => {

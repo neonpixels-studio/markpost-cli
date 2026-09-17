@@ -32,6 +32,12 @@ export type Record = {
   // callers must gate display on the CURRENT `status`, not on this field's
   // presence alone. Typed optional, like `status`/`syncedAt` above, for
   // older/off-contract responses that omit it.
+  //
+  // This gate applies to the CLI's human-readable text output only:
+  // `--json` intentionally passes through the raw API value unfiltered
+  // (matching every other field), so a `--json` consumer must apply the
+  // same `status === "error"` check itself before treating errorMessage as
+  // current.
   errorMessage?: string | null;
   // Present on records markpost ingested through its markdown pipeline
   // (webhook/email); null for records created with only a title + content
