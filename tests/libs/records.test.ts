@@ -1438,14 +1438,22 @@ describe('deleteRecords', () => {
     };
 
     it('aborts after two request-shape (422) rejections with nothing deleted', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockAllChunksReject(422, 'Unknown attribute: uuids');
 
       const result = await deleteRecords(uuids(250));
 
       // Only two requests fire — the third chunk (doomed the same way, since
-      // every chunk is built identically) is never attempted.
+      // every chunk's payload is built identically) is never attempted.
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(result).toBeNull();
+      // The abort itself must be logged — without this, the 50 uuids in the
+      // never-sent third chunk would be indistinguishable from any other
+      // failed delete (the caller's generic "Failed to delete records"
+      // message doesn't otherwise say anything was skipped).
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('50 of them were never attempted'),
+      );
     });
 
     it('aborts after two malformed-payload (400) rejections with nothing deleted', async () => {
@@ -1455,6 +1463,27 @@ describe('deleteRecords', () => {
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(result).toBeNull();
+    });
+
+    // When the confirming SECOND rejection happens to be the FINAL chunk,
+    // every chunk was actually attempted — `unattemptedCount` is 0, so the log
+    // must not claim uuids were "never attempted" (an early stop that didn't
+    // happen) while still reporting that nothing was confirmed deleted.
+    it('logs an accurate message when the abort lands on the last chunk (nothing skipped)', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockAllChunksReject(422, 'bad batch');
+
+      // 200 uuids -> exactly two chunks (100/100); the SECOND is also the LAST.
+      const result = await deleteRecords(uuids(200));
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(result).toBeNull();
+      const loggedMessage = errorSpy.mock.calls
+        .map((call) => String(call[0]))
+        .find((message) => message.includes('Aborted after two consecutive'));
+      expect(loggedMessage).toBeDefined();
+      expect(loggedMessage).not.toContain('never attempted');
+      expect(loggedMessage).toContain('none of the 200 requested uuid(s) were confirmed deleted');
     });
 
     // Two 4xx rejections with DIFFERENT messages look like two isolated
@@ -1556,6 +1585,179 @@ describe('deleteRecords', () => {
 
       // All three chunks fire — the first chunk's success rules out a
       // categorical (envelope-level) abort for the later rejections.
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(result).toBeNull();
+    });
+
+    // A 2xx that confirms 0 uuids deleted (every uuid in that chunk was
+    // already gone server-side) is still a SETTLED chunk — it proves the
+    // envelope valid the same as any other success. Guards against tracking
+    // "has anything been deleted" (a volume check) instead of "has any chunk
+    // settled successfully", which would wrongly let a later pair of matching
+    // request-shape rejections abort the run.
+    it('does not abort on request-shape rejections once a chunk has settled with a zero count', async () => {
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation(() => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ meta: { deleted: 0 } }),
+          });
+        }
+
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+            }),
+        });
+      });
+
+      const result = await deleteRecords(uuids(250));
+
+      // All three chunks fire — the zero-count success still counts as settled.
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(result).toBeNull();
+    });
+
+    // A 2xx whose `meta.deleted` is unusable (missing/non-numeric — a
+    // malformed or off-contract body) still means the SERVER ACCEPTED the
+    // request envelope; only the count is untrustworthy, which is a separate
+    // concern (`anyChunkFailed`/`totalDeleted`) from whether the shape itself
+    // was valid. Guards against tying the abort guard to a parseable count
+    // instead of acceptance, which would otherwise let a later pair of
+    // matching request-shape rejections abort even though the server already
+    // proved it could parse this envelope.
+    it('does not abort on request-shape rejections once a chunk was accepted with an unusable count', async () => {
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation(() => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          // 2xx, but `meta` carries no usable `deleted` count.
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ meta: {} }),
+          });
+        }
+
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+            }),
+        });
+      });
+
+      const result = await deleteRecords(uuids(250));
+
+      // All three chunks fire — the accepted-but-unparseable first chunk still
+      // rules out a categorical (envelope-level) abort for the later
+      // rejections.
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(result).toBeNull();
+    });
+
+    // An "errors-carrying 2xx" is an odd contract shape, but the server DID
+    // accept and parse the envelope (only a business-logic-level error
+    // followed) — `assertApiSuccess` throws an `ApiRequestError` with the 2xx
+    // status still attached, and that must count as accepted the same as a
+    // clean 2xx. Guards against deriving `accepted` from "the request threw at
+    // all" instead of the actual HTTP status, which would otherwise let a
+    // later pair of matching request-shape rejections abort even though this
+    // chunk proved the envelope valid.
+    it('does not abort on request-shape rejections once a chunk was accepted with an errors-carrying 2xx', async () => {
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation(() => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () =>
+              Promise.resolve({
+                data: { errors: [{ title: 'Error', detail: 'partial issue' }] },
+              }),
+          });
+        }
+
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+            }),
+        });
+      });
+
+      const result = await deleteRecords(uuids(250));
+
+      // All three chunks fire — the errors-carrying 2xx still counts as
+      // accepted, ruling out a categorical abort for the later rejections.
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(result).toBeNull();
+    });
+
+    // A non-request-shape chunk BETWEEN two identical request-shape rejections
+    // must break consecutiveness — matching markRecordsSynced's equivalent
+    // reset coverage. Chunk 4's message deliberately differs from chunk 3's so
+    // no pair in this run legitimately confirms an abort; the only way all
+    // four chunks fire is if chunk 2's plain failure actually reset the
+    // tracking between chunks 1 and 3 (without the reset, chunk 3 would wrongly
+    // match chunk 1's stale message and abort there, so chunk 4 would never fire).
+    it('does not abort when a plain failure splits two matching request-shape rejections', async () => {
+      const chunkDetails = ['bad batch', null, 'bad batch', 'different batch'];
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation(() => {
+        const detail = chunkDetails[callCount];
+        callCount += 1;
+
+        if (detail === null) {
+          return Promise.reject(new Error('Network error'));
+        }
+
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              data: { errors: [{ title: 'Rejected', detail }] },
+            }),
+        });
+      });
+
+      // 350 uuids -> four chunks (100/100/100/50), so a plain failure can sit
+      // between two matching request-shape rejections with a fourth chunk left
+      // to prove the run kept going past the reset pair.
+      const result = await deleteRecords(uuids(350));
+
+      // Every chunk fires — the plain failure at position 2 resets the
+      // consecutive-match tracking, so chunks 1+3 (split by it) never confirm,
+      // and chunk 4's distinct message never matches chunk 3's either.
+      expect(global.fetch).toHaveBeenCalledTimes(4);
+      expect(result).toBeNull();
+    });
+
+    // `FATAL_REQUEST_STATUS_CODES` (400/422 only) is what keeps a per-uuid 404
+    // (a record deleted mid-run, or already gone) from being treated as a
+    // request-shape rejection — a batch of stale uuids that all 404 with the
+    // same message must NOT abort the run, since that's a per-record problem,
+    // not an envelope one. 401/403/429 are excluded from this path entirely
+    // (they re-throw as systemic before reaching here), so 404 is the
+    // realistic non-request-shape 4xx this guards against.
+    it('does not abort on repeated 404 rejections — a per-uuid 4xx is not request-shape', async () => {
+      mockAllChunksReject(404, 'Record not found');
+
+      const result = await deleteRecords(uuids(250));
+
       expect(global.fetch).toHaveBeenCalledTimes(3);
       expect(result).toBeNull();
     });

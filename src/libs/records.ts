@@ -1,4 +1,5 @@
 import {
+  ApiRequestError,
   ApiTimeoutError,
   authedRequest,
   isFatalRequestError,
@@ -644,23 +645,25 @@ const markSyncedChunk = async (
 
 // Whether a categorical (request-shape) chunk rejection is CONFIRMED by a
 // SECOND consecutive chunk repeating the exact same server error message,
-// with nothing yet settled successfully. Shared by `markRecordsSynced`
-// (bulk PATCH) and `deleteRecords` (bulk DELETE): both chunk their input into
-// requests built identically from one call to the next, so two consecutive
-// chunks rejected the same categorical way is strong evidence the payload
-// envelope itself is wrong — not two isolated per-record rejections that
-// only happen to both be 4xx. A lone rejection, two rejections with
-// DIFFERENT messages, or any rejection after something has already settled
-// successfully (a success proves the shape valid) must NOT confirm. Callers
-// are responsible for resetting `lastMessage` to `null` between chunks that
-// aren't a request-shape rejection — a clean or plain-failure chunk between
-// two identical rejections breaks the "envelope is wrong" evidence, so it
-// must not count toward the two-in-a-row abort.
+// while `anyPriorSuccess` is false. Shared by `markRecordsSynced` (bulk PATCH)
+// and `deleteRecords` (bulk DELETE): both chunk their input into requests
+// built identically from one call to the next, so two consecutive chunks
+// rejected the same categorical way is strong evidence the payload envelope
+// itself is wrong — not two isolated per-record rejections that only happen to
+// both be 4xx. A lone rejection, two rejections with DIFFERENT messages, or
+// any rejection once `anyPriorSuccess` is true must NOT confirm. Each caller
+// defines its own "success" for that flag — PATCH's per-uuid diff and DELETE's
+// bulk count answer "did the envelope get accepted" differently, so this
+// helper takes the caller's precomputed boolean rather than re-deriving it.
+// Callers are responsible for resetting `lastMessage` to `null` between chunks
+// that aren't a request-shape rejection — a clean or plain-failure chunk
+// between two identical rejections breaks the "envelope is wrong" evidence, so
+// it must not count toward the two-in-a-row abort.
 const confirmsRequestShapeAbort = (
   message: string | null,
   lastMessage: string | null,
-  anySettled: boolean,
-): boolean => message !== null && !anySettled && message === lastMessage;
+  anyPriorSuccess: boolean,
+): boolean => message !== null && !anyPriorSuccess && message === lastMessage;
 
 // Re-tag the final `count` outcomes as `MARK_ABORTED` — the chunk whose repeated
 // request-shape rejection actually stopped the run. Returns a new array so the
@@ -742,19 +745,14 @@ export const markRecordsSynced = async (
     }
 
     if (abortReason !== 'request-shape') {
-      // Reset so the match below stays CONSECUTIVE: a clean or plain-failure
-      // chunk between two identical rejections breaks the "envelope is wrong"
-      // evidence, so it must not count toward the two-in-a-row abort.
+      // Non-abort chunk breaks consecutiveness — see `confirmsRequestShapeAbort`.
       lastRequestShapeMessage = null;
       continue;
     }
 
-    // Abort only once `confirmsRequestShapeAbort` confirms a SECOND consecutive
-    // request-shape rejection carries the SAME message with nothing synced —
-    // matching messages across two independently-built chunks is what marks the
-    // failure as envelope-level (categorical) rather than two isolated per-record
-    // rejections, and a success would have proven the shape valid. Re-tag this
-    // stopping chunk's records `MARK_ABORTED` (they were `MARK_FAILED` until now)
+    // `confirmsRequestShapeAbort` decides whether this is the SECOND consecutive
+    // request-shape rejection with the same message and nothing synced. Re-tag
+    // this stopping chunk's records `MARK_ABORTED` (they were `MARK_FAILED` until now)
     // so the outcome reflects that the run stopped here, while the earlier chunks
     // it ran past stay `MARK_FAILED`.
     if (
@@ -811,18 +809,19 @@ export const MAX_DELETE_BATCH_SIZE = 100;
 const uuidRangeLabel = (prefix: string, uuids: string[]): string =>
   `${prefix}[${uuids[0]}..${uuids[uuids.length - 1]}, ${uuids.length} uuid(s)]`;
 
-// The result of DELETEing one chunk, from the chunk's OWN perspective: `meta`
-// mirrors the old bare return (the server's count on success, `null` on any
-// failure); `requestShapeMessage` is set ONLY when the failure was a
-// request-shape 4xx (a malformed-payload 400 or a contract-validation 422 —
-// NOT a per-uuid 404, an auth 401/403, or a transient 429), carrying the
-// server's error message so `deleteRecords` can compare it against the
-// previous chunk's via `confirmsRequestShapeAbort` (mirroring
-// `MarkSyncedChunkResult.message`). `null` for both a success and a plain
-// (non-request-shape) failure.
+// `meta` mirrors the old bare return; `requestShapeMessage` is set ONLY for a
+// request-shape 4xx (400/422, not a per-uuid 404/401/403/429) so `deleteRecords`
+// can feed it to `confirmsRequestShapeAbort` (mirrors `MarkSyncedChunkResult`).
+// `accepted` is true whenever the server returned a 2xx AT ALL — even one whose
+// `meta.deleted` is missing/non-numeric (a malformed or off-contract body) —
+// since a 2xx already proves the request envelope was well-formed; it's
+// deliberately NOT tied to `meta.deleted` being usable (that's `totalDeleted`/
+// `anyChunkFailed`'s job in `deleteRecords`, a separate concern: whether this
+// chunk's COUNT can be trusted, not whether the envelope was accepted).
 type DeleteRecordsChunkResult = {
   meta: ApiDeleteMeta | null;
   requestShapeMessage: string | null;
+  accepted: boolean;
 };
 
 // DELETEs one chunk (<= MAX_DELETE_BATCH_SIZE uuids). A systemic auth/5xx
@@ -850,7 +849,11 @@ const deleteRecordsChunk = async (
       }),
     })) as ApiDeleteResponse;
 
-    return { meta: body.meta ?? null, requestShapeMessage: null };
+    return {
+      meta: body.meta ?? null,
+      requestShapeMessage: null,
+      accepted: true,
+    };
   } catch (error) {
     // A systemic auth/5xx failure will recur for the whole batch, so re-throw
     // it (mirroring createRecord) to surface the real cause rather than the
@@ -862,9 +865,16 @@ const deleteRecordsChunk = async (
 
     logApiFailure(uuidRangeLabel('deleteRecords', uuids), error);
 
+    // `assertApiSuccess` (see `authedRequest`) also throws for a 2xx response
+    // whose body carries `data.errors` — an odd contract shape, but the server
+    // DID accept and parse the envelope (only a business-logic-level error
+    // followed), so it counts as accepted the same as a clean 2xx. A network
+    // failure or JSON-parse error (not an `ApiRequestError` at all) stays
+    // unaccepted — there's no positive evidence the server ever saw it.
     return {
       meta: null,
       requestShapeMessage: isFatalRequestError(error) ? error.message : null,
+      accepted: error instanceof ApiRequestError && error.statusCode < 400,
     };
   }
 };
@@ -891,6 +901,32 @@ const logPartialSettle = (uuids: string[], totalDeleted: number): void => {
   );
 };
 
+// Logs a request-shape abort so it isn't silently indistinguishable from the
+// generic "Failed to delete records" message the caller (see src/index.ts)
+// prints for a single failed chunk — that's the only thing telling the user
+// the envelope itself looked wrong, and (when the abort lands before the last
+// chunk) that some uuids were never even attempted. `logPartialSettle`
+// doesn't cover this: it no-ops when nothing was deleted, which is always
+// true on this path (see `deleteRecords`). `unattemptedCount` is 0 when the
+// SECOND matching rejection happens to be the final chunk — every chunk was
+// attempted in that case, so the "never attempted" clause is omitted rather
+// than falsely claiming an early stop and undercounting how many of the
+// requested uuids remain unconfirmed on the server.
+const logRequestShapeAbort = (
+  uuids: string[],
+  unattemptedCount: number,
+): void => {
+  const neverAttempted =
+    unattemptedCount > 0
+      ? ` ${unattemptedCount} of them were never attempted;`
+      : '';
+
+  logErrorMessage(
+    uuidRangeLabel('deleteRecords', uuids),
+    `Aborted after two consecutive request-shape rejections with the same message — the request envelope looks wrong.${neverAttempted} none of the ${uuids.length} requested uuid(s) were confirmed deleted.`,
+  );
+};
+
 // Chunks `uuids` into `ceil(N / MAX_DELETE_BATCH_SIZE)` sequential DELETE
 // requests so a bulk delete over the server's cap settles instead of failing
 // outright. A timeout or systemic failure (auth/rate-limit/5xx) re-throws out
@@ -907,13 +943,13 @@ const logPartialSettle = (uuids: string[], totalDeleted: number): void => {
 //
 // A request-shape 4xx (a 400/422 — the server lowered MAX_DELETE_BATCH_SIZE,
 // or the DELETE envelope drifted from PATCH's) is a categorical failure: every
-// chunk is built identically, so unlike a plain per-chunk failure it does NOT
-// deserve a retry per remaining chunk. Mirroring `markRecordsSynced`, the run
-// stops firing further chunks once `confirmsRequestShapeAbort` confirms a
-// SECOND consecutive chunk was rejected with the SAME message and nothing has
-// been deleted yet — a lone rejection, two rejections with DIFFERENT
-// messages, or any rejection after a chunk has already deleted records (a
-// success proves the shape valid) all keep the run going instead.
+// chunk's payload is built the same way, so unlike a plain per-chunk failure it
+// does NOT deserve a retry per remaining chunk. Mirroring `markRecordsSynced`,
+// the run stops firing further chunks once `confirmsRequestShapeAbort` confirms
+// a SECOND consecutive chunk was rejected with the SAME message and no earlier
+// chunk was ACCEPTED (a 2xx — even a malformed one, or one confirming 0 uuids
+// deleted — already proves the envelope itself is valid, whether or not its
+// count can be trusted) — see `confirmsRequestShapeAbort` for the full rule.
 export const deleteRecords = async (
   uuids: string[],
 ): Promise<ApiDeleteMeta | null> => {
@@ -923,6 +959,7 @@ export const deleteRecords = async (
 
   let totalDeleted = 0;
   let anyChunkFailed = false;
+  let anyChunkAccepted = false;
   let lastRequestShapeMessage: string | null = null;
 
   for (let start = 0; start < uuids.length; start += MAX_DELETE_BATCH_SIZE) {
@@ -936,14 +973,17 @@ export const deleteRecords = async (
       throw error;
     }
 
-    const { meta: chunkMeta, requestShapeMessage } = chunkResult;
+    const { meta: chunkMeta, requestShapeMessage, accepted } = chunkResult;
+
+    anyChunkAccepted = anyChunkAccepted || accepted;
 
     // A malformed 2xx (missing/non-numeric `meta.deleted`) is as untrustworthy
     // as a `null` chunk: treat it as a chunk failure rather than letting
     // `totalDeleted` accumulate `NaN`/`undefined`, which would otherwise
     // poison the WHOLE sum (`NaN` from one chunk propagates through every
     // later `+=`) into a falsy-looking-truthy result the caller can't
-    // distinguish from success.
+    // distinguish from success. This is independent of `accepted`: a malformed
+    // 2xx still proves the envelope valid even though its count is unusable.
     if (chunkMeta && Number.isFinite(chunkMeta.deleted)) {
       totalDeleted += chunkMeta.deleted;
     } else {
@@ -951,9 +991,7 @@ export const deleteRecords = async (
     }
 
     if (requestShapeMessage === null) {
-      // Reset so the match below stays CONSECUTIVE: a clean or plain-failure
-      // chunk between two identical rejections breaks the "envelope is wrong"
-      // evidence, so it must not count toward the two-in-a-row abort.
+      // Non-rejection chunk breaks consecutiveness — see `confirmsRequestShapeAbort`.
       lastRequestShapeMessage = null;
       continue;
     }
@@ -962,10 +1000,15 @@ export const deleteRecords = async (
       confirmsRequestShapeAbort(
         requestShapeMessage,
         lastRequestShapeMessage,
-        totalDeleted > 0,
+        anyChunkAccepted,
       )
     ) {
-      logPartialSettle(uuids, totalDeleted);
+      // `logPartialSettle` would no-op here (it only reports when
+      // `totalDeleted > 0`, and every chunk so far was rejected — never
+      // accepted — whenever this branch is reached, so `totalDeleted` is
+      // always 0) — log the abort itself instead.
+      const unattemptedCount = uuids.length - (start + chunk.length);
+      logRequestShapeAbort(uuids, unattemptedCount);
       return null;
     }
 
