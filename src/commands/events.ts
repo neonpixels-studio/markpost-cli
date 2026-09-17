@@ -5,7 +5,7 @@ import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage } from '@/libs/usage.js';
+import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Event, EVENT_KINDS, EventKind } from '@/types/events.types.js';
 
@@ -29,13 +29,23 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
+  // markpost's GET /api/events takes no filters (unlike /api/records), so
+  // `events list` takes no flags of its own beyond `--json` — parsed here
+  // only to reject a stray argument before dragging the user through (or
+  // blocking a non-TTY run on) the config check. Kept in its own try/catch,
+  // separate from the fetch below, so a thrown usage error (a stray
+  // positional, or `parseArgs` itself rejecting an unknown flag) reports the
+  // documented `usage` JSON code instead of being swallowed into the fetch
+  // failure's `fetch_failed` code.
   try {
-    // markpost's GET /api/events takes no filters (unlike /api/records), so
-    // `events list` takes no flags of its own beyond `--json` — parsed here
-    // only to reject a stray argument before dragging the user through (or
-    // blocking a non-TTY run on) the config check.
     parseListArgs(args);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failWithUsage(message, USAGE, json);
+    return;
+  }
 
+  try {
     if (!(await checkConfig(json))) {
       return;
     }

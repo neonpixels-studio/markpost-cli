@@ -5,7 +5,7 @@ import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage } from '@/libs/usage.js';
+import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
@@ -32,12 +32,25 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
+  // Parse filters before checkConfig, which prompts for and persists an API
+  // token/output directory when unset: a bad flag must fail on usage alone,
+  // not after dragging the user through (or blocking a non-TTY run on) the
+  // config prompts. Mirrors the subcommand validation above. Kept in its own
+  // try/catch, separate from the fetch below, so a thrown usage error (a bad
+  // flag, a stray positional, or `parseArgs` itself rejecting an unknown
+  // flag) reports the documented `usage` JSON code instead of being
+  // swallowed into the fetch failure's `fetch_failed` code.
+  let filters: RecordListFilters;
+
   try {
-    // Parse filters before checkConfig, which prompts for and persists an API
-    // token/output directory when unset: a bad flag must fail on usage alone,
-    // not after dragging the user through (or blocking a non-TTY run on) the
-    // config prompts. Mirrors the subcommand validation above.
-    const { filters } = parseListArgs(args);
+    ({ filters } = parseListArgs(args));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failWithUsage(message, USAGE, json);
+    return;
+  }
+
+  try {
     if (!(await checkConfig(json))) {
       return;
     }

@@ -509,5 +509,40 @@ describe('runEventsCommand', () => {
       expect(parsed.message).toContain('Authentication failed (HTTP 401)');
       expect(process.exitCode).toBe(1);
     });
+
+    // A bad flag/stray argument on `list` must report the documented `usage`
+    // code, not `fetch_failed` — argument parsing used to share the fetch's
+    // try/catch, miscoding it (issue #184).
+    it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag on list', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list', '--bogus', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('bogus');
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchAllEvents).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('emits a usage-coded JSON error, not fetch_failed, for a stray positional on list', async () => {
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list', 'webhook', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('Unexpected argument "webhook"');
+      expect(fetchAllEvents).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
   });
 });
