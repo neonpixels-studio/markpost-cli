@@ -5,6 +5,14 @@ export const logErrorMessage = (title: string, message: string) => {
   return console.error(chalk.redBright(`${title}\n${message}`));
 };
 
+// Pulls a printable string off an unknown thrown value: an `Error`'s
+// message, otherwise its `String()` form. Not API-specific, so it lives here
+// rather than in libs/api.ts, and is shared by callers across both API
+// failures and local validation throws (e.g. the `records`/`events` `list`
+// commands' argument-parsing catch) so neither re-derives the extraction.
+export const messageFromError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 // A command-level failure (a failed fetch, a null/absent result, or an
 // unclassified throw) reported honestly on stderr with a non-zero exit. In
 // `--json` mode it emits the unified failure contract so a script parsing

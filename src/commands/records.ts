@@ -1,9 +1,9 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchAllRecords, RecordListFilters } from '@/libs/records.js';
-import { describeApiError, messageFromError } from '@/libs/api.js';
+import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
@@ -32,17 +32,9 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
-  // Parse filters before checkConfig, which prompts for and persists an API
-  // token/output directory when unset: a bad flag must fail on usage alone,
-  // not after dragging the user through (or blocking a non-TTY run on) the
-  // config prompts. Mirrors the subcommand validation above. Kept in its own
-  // try/catch, separate from the fetch below, so a thrown usage error (a bad
-  // flag, a stray positional, or `parseArgs` itself rejecting an unknown
-  // flag) reports the documented `usage` JSON code instead of being
-  // swallowed into the fetch failure's `fetch_failed` code. The thrown
-  // message can embed a raw argv token (an unknown flag, a stray
-  // positional), so it's sanitized before it reaches the terminal, same as
-  // the fetch failure path below.
+  // Parse before checkConfig, which prompts for and persists config when
+  // unset: a bad flag must fail on usage alone. Its own catch so a usage
+  // throw reports the `usage` JSON code, not the fetch path's `fetch_failed`.
   let filters: RecordListFilters;
 
   try {

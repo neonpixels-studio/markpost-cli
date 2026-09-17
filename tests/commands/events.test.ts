@@ -383,6 +383,18 @@ describe('runEventsCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    // The non-JSON path changed too: a bad flag used to print bare prose via
+    // failWithMessage and now goes through failWithUsage, so the usage block
+    // must print alongside the message.
+    it('prints the usage block, not bare prose, for an unknown flag without --json', async () => {
+      const { runEventsCommand, USAGE } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list', '--bogus']);
+
+      expect(console.error).toHaveBeenCalledWith(USAGE);
+      expect(process.exitCode).toBe(1);
+    });
+
     it('rejects a stray positional argument instead of listing everything', async () => {
       const { fetchAllEvents } = await import('@/libs/events.js');
       const { runEventsCommand } = await import('@/commands/events.js');

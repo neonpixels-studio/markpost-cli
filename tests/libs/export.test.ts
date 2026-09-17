@@ -29,6 +29,8 @@ vi.mock('@/libs/config.js', () => ({
 
 vi.mock('@/libs/errors.js', () => ({
   logErrorMessage: vi.fn(),
+  messageFromError: (error: unknown) =>
+    error instanceof Error ? error.message : String(error),
 }));
 
 // Drive the external-service seams (base URL, token) through the env vars the

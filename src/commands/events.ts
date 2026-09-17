@@ -1,9 +1,9 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchAllEvents } from '@/libs/events.js';
-import { describeApiError, messageFromError } from '@/libs/api.js';
+import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
@@ -29,16 +29,9 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
-  // markpost's GET /api/events takes no filters (unlike /api/records), so
-  // `events list` takes no flags of its own beyond `--json` — parsed here
-  // only to reject a stray argument before dragging the user through (or
-  // blocking a non-TTY run on) the config check. Kept in its own try/catch,
-  // separate from the fetch below, so a thrown usage error (a stray
-  // positional, or `parseArgs` itself rejecting an unknown flag) reports the
-  // documented `usage` JSON code instead of being swallowed into the fetch
-  // failure's `fetch_failed` code. The thrown message can embed a raw argv
-  // token, so it's sanitized before it reaches the terminal, same as the
-  // fetch failure path below.
+  // markpost's GET /api/events takes no filters, so this only rejects a
+  // stray argument before checkConfig. Its own catch so a usage throw
+  // reports the `usage` JSON code, not the fetch path's `fetch_failed`.
   try {
     parseListArgs(args);
   } catch (error) {
