@@ -531,6 +531,7 @@ describe('runEventsCommand', () => {
     });
 
     it('emits a usage-coded JSON error, not fetch_failed, for a stray positional on list', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
       const { fetchAllEvents } = await import('@/libs/events.js');
       const { runEventsCommand } = await import('@/commands/events.js');
 
@@ -541,6 +542,7 @@ describe('runEventsCommand', () => {
       );
       expect(parsed.error).toBe('usage');
       expect(parsed.message).toContain('Unexpected argument "webhook"');
+      expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchAllEvents).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     });

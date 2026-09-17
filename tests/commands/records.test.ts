@@ -694,6 +694,7 @@ describe('runRecordsCommand', () => {
     });
 
     it('emits a usage-coded JSON error, not fetch_failed, for a stray positional on list', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
       const { fetchAllRecords } = await import('@/libs/records.js');
       const { runRecordsCommand } = await import('@/commands/records.js');
 
@@ -704,6 +705,28 @@ describe('runRecordsCommand', () => {
       );
       expect(parsed.error).toBe('usage');
       expect(parsed.message).toContain('Unexpected argument "webhook"');
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    // normalizeFilter (a third usage-throw site inside the same try, distinct
+    // from parseArgs' own throws above) must also route through the `usage`
+    // code rather than `fetch_failed` — guards against a future refactor that
+    // moves this validation elsewhere and reintroduces the miscode.
+    it('emits a usage-coded JSON error, not fetch_failed, for a present-but-empty filter value', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--source=', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('--source needs a non-empty value.');
+      expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     });

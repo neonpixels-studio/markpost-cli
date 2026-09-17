@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchAllEvents } from '@/libs/events.js';
-import { describeApiError } from '@/libs/api.js';
+import { describeApiError, messageFromError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
@@ -36,12 +36,13 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
   // separate from the fetch below, so a thrown usage error (a stray
   // positional, or `parseArgs` itself rejecting an unknown flag) reports the
   // documented `usage` JSON code instead of being swallowed into the fetch
-  // failure's `fetch_failed` code.
+  // failure's `fetch_failed` code. The thrown message can embed a raw argv
+  // token, so it's sanitized before it reaches the terminal, same as the
+  // fetch failure path below.
   try {
     parseListArgs(args);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    failWithUsage(message, USAGE, json);
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
     return;
   }
 
