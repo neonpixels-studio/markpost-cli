@@ -1088,14 +1088,26 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // ones that were deleted. A record not deleted stays pending and, without
     // its tracked path, would drop a fresh `<slug>-2.md` duplicate next pass —
     // the exact bug this split prevents.
-    if (deleteMeta.deleted === settleableRecords.length) {
+    const fullyDeleted = deleteMeta.deleted === settleableRecords.length;
+
+    if (fullyDeleted) {
       forgetSettledRecords(
         processWrittenState,
         settleableRecords.map(({ record }) => record.uuid),
       );
+      spinner.success(`Deleted ${deleteMeta.deleted} records!`);
+    } else {
+      // A non-null but short count is markpost silently dropping
+      // nonexistent/foreign uuids per chunk — legitimate on the server's part,
+      // but some records the CLI wrote are still pending on disk. Reporting
+      // plain success here would be exactly the fail-loud violation issue
+      // #185 called out: a cron log (or CI) reading exit 0 would never learn
+      // some records didn't settle.
+      spinner.warning(
+        `Deleted ${deleteMeta.deleted} of ${settleableRecords.length} records — the rest remain pending.`,
+      );
+      process.exitCode = 1;
     }
-
-    spinner.success(`Deleted ${deleteMeta.deleted} records!`);
 
     reportIncompleteSync(recordsResult.partial);
     return autoSync;
