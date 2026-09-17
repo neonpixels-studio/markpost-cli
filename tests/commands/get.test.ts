@@ -6,13 +6,20 @@ import { Record } from '@/types/records.types.js';
 vi.mock('@/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/records.js', async (importOriginal) => ({
-  // Pulls the real ERROR_STATUS through rather than restating the literal, so
-  // these tests stay pinned to the actual constant instead of drifting from
-  // it if it's ever renamed.
-  ...(await importOriginal<typeof import('@/libs/records.js')>()),
-  fetchRecord: vi.fn(),
-}));
+vi.mock('@/libs/records.js', async () => {
+  // Pulls the real ERROR_STATUS through (via importActual, not a full-module
+  // spread) rather than restating the literal, so these tests stay pinned to
+  // the actual constant instead of drifting from it if it's ever renamed —
+  // while keeping every other export undefined, so a command that starts
+  // calling an unmocked function still fails loudly here instead of quietly
+  // running the real implementation.
+  const { ERROR_STATUS } =
+    await vi.importActual<typeof import('@/libs/records.js')>(
+      '@/libs/records.js',
+    );
+
+  return { ERROR_STATUS, fetchRecord: vi.fn() };
+});
 vi.mock('chalk', () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
@@ -152,11 +159,33 @@ describe('runGetCommand', () => {
     );
   });
 
-  // errorMessage is null outside of an error-status record, so a synced
-  // record must not print a blank "error:" line.
+  // A synced record (the common case, no error ever happened) must not print
+  // a blank "error:" line.
   it('omits the error line when errorMessage is absent', async () => {
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedError = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && /^ {2}error: {6}/.test(arg),
+      );
+    expect(printedError).toBe(false);
+  });
+
+  // Exercises the OTHER half of the gate: an error-status record whose
+  // errorMessage happens to be null must not print a blank "error:" line
+  // either — `status === ERROR_STATUS` alone isn't enough.
+  it('omits the error line for an error-status record with no errorMessage', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: ERROR_STATUS,
+      errorMessage: null,
+    });
     const { runGetCommand } = await import('@/commands/get.js');
 
     await runGetCommand(['abc-123']);
