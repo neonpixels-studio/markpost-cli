@@ -642,6 +642,26 @@ const markSyncedChunk = async (
   }
 };
 
+// Whether a categorical (request-shape) chunk rejection is CONFIRMED by a
+// SECOND consecutive chunk repeating the exact same server error message,
+// with nothing yet settled successfully. Shared by `markRecordsSynced`
+// (bulk PATCH) and `deleteRecords` (bulk DELETE): both chunk their input into
+// requests built identically from one call to the next, so two consecutive
+// chunks rejected the same categorical way is strong evidence the payload
+// envelope itself is wrong — not two isolated per-record rejections that
+// only happen to both be 4xx. A lone rejection, two rejections with
+// DIFFERENT messages, or any rejection after something has already settled
+// successfully (a success proves the shape valid) must NOT confirm. Callers
+// are responsible for resetting `lastMessage` to `null` between chunks that
+// aren't a request-shape rejection — a clean or plain-failure chunk between
+// two identical rejections breaks the "envelope is wrong" evidence, so it
+// must not count toward the two-in-a-row abort.
+const confirmsRequestShapeAbort = (
+  message: string | null,
+  lastMessage: string | null,
+  anySettled: boolean,
+): boolean => message !== null && !anySettled && message === lastMessage;
+
 // Re-tag the final `count` outcomes as `MARK_ABORTED` — the chunk whose repeated
 // request-shape rejection actually stopped the run. Returns a new array so the
 // caller stays free of in-place mutation; earlier outcomes are untouched.
@@ -729,15 +749,17 @@ export const markRecordsSynced = async (
       continue;
     }
 
-    // Abort only once a SECOND consecutive request-shape rejection carries the
-    // SAME message, and only while nothing has synced — matching messages across
-    // two independently-built chunks is what marks the failure as envelope-level
-    // (categorical) rather than two isolated per-record rejections, and a success
-    // would have proven the shape valid. Re-tag this stopping chunk's records
-    // `MARK_ABORTED` (they were `MARK_FAILED` until now) so the outcome reflects
-    // that the run stopped here, while the earlier chunks it ran past stay
-    // `MARK_FAILED`.
-    if (!anySynced && message !== null && message === lastRequestShapeMessage) {
+    // Abort only once `confirmsRequestShapeAbort` confirms a SECOND consecutive
+    // request-shape rejection carries the SAME message with nothing synced —
+    // matching messages across two independently-built chunks is what marks the
+    // failure as envelope-level (categorical) rather than two isolated per-record
+    // rejections, and a success would have proven the shape valid. Re-tag this
+    // stopping chunk's records `MARK_ABORTED` (they were `MARK_FAILED` until now)
+    // so the outcome reflects that the run stopped here, while the earlier chunks
+    // it ran past stay `MARK_FAILED`.
+    if (
+      confirmsRequestShapeAbort(message, lastRequestShapeMessage, anySynced)
+    ) {
       return {
         outcomes: withAbortedTail(outcomes, chunkOutcomes.length),
         abortReason: 'request-shape',
@@ -789,13 +811,29 @@ export const MAX_DELETE_BATCH_SIZE = 100;
 const uuidRangeLabel = (prefix: string, uuids: string[]): string =>
   `${prefix}[${uuids[0]}..${uuids[uuids.length - 1]}, ${uuids.length} uuid(s)]`;
 
+// The result of DELETEing one chunk, from the chunk's OWN perspective: `meta`
+// mirrors the old bare return (the server's count on success, `null` on any
+// failure); `requestShapeMessage` is set ONLY when the failure was a
+// request-shape 4xx (a malformed-payload 400 or a contract-validation 422 —
+// NOT a per-uuid 404, an auth 401/403, or a transient 429), carrying the
+// server's error message so `deleteRecords` can compare it against the
+// previous chunk's via `confirmsRequestShapeAbort` (mirroring
+// `MarkSyncedChunkResult.message`). `null` for both a success and a plain
+// (non-request-shape) failure.
+type DeleteRecordsChunkResult = {
+  meta: ApiDeleteMeta | null;
+  requestShapeMessage: string | null;
+};
+
 // DELETEs one chunk (<= MAX_DELETE_BATCH_SIZE uuids). A systemic auth/5xx
 // failure (or a timeout) is re-thrown so it dooms the whole run immediately;
-// any other failure is logged and reported as `null` so a later,
-// independently-built chunk still gets a chance to succeed.
+// any other failure is logged and reported with `meta: null` so a later,
+// independently-built chunk still gets a chance to succeed. A request-shape
+// 4xx additionally carries its message via `requestShapeMessage` — see
+// `deleteRecords`, which aborts once a SECOND consecutive chunk repeats it.
 const deleteRecordsChunk = async (
   uuids: string[],
-): Promise<ApiDeleteMeta | null> => {
+): Promise<DeleteRecordsChunkResult> => {
   try {
     const body = (await authedRequest('/api/records', {
       method: 'DELETE',
@@ -812,7 +850,7 @@ const deleteRecordsChunk = async (
       }),
     })) as ApiDeleteResponse;
 
-    return body.meta ?? null;
+    return { meta: body.meta ?? null, requestShapeMessage: null };
   } catch (error) {
     // A systemic auth/5xx failure will recur for the whole batch, so re-throw
     // it (mirroring createRecord) to surface the real cause rather than the
@@ -824,7 +862,10 @@ const deleteRecordsChunk = async (
 
     logApiFailure(uuidRangeLabel('deleteRecords', uuids), error);
 
-    return null;
+    return {
+      meta: null,
+      requestShapeMessage: isFatalRequestError(error) ? error.message : null,
+    };
   }
 };
 
@@ -863,6 +904,16 @@ const logPartialSettle = (uuids: string[], totalDeleted: number): void => {
 // `null` rather than reporting a partial delete as a full success, preserving
 // the original contract every caller (and existing test) relies on —
 // non-null means every requested uuid was confirmed deleted.
+//
+// A request-shape 4xx (a 400/422 — the server lowered MAX_DELETE_BATCH_SIZE,
+// or the DELETE envelope drifted from PATCH's) is a categorical failure: every
+// chunk is built identically, so unlike a plain per-chunk failure it does NOT
+// deserve a retry per remaining chunk. Mirroring `markRecordsSynced`, the run
+// stops firing further chunks once `confirmsRequestShapeAbort` confirms a
+// SECOND consecutive chunk was rejected with the SAME message and nothing has
+// been deleted yet — a lone rejection, two rejections with DIFFERENT
+// messages, or any rejection after a chunk has already deleted records (a
+// success proves the shape valid) all keep the run going instead.
 export const deleteRecords = async (
   uuids: string[],
 ): Promise<ApiDeleteMeta | null> => {
@@ -872,17 +923,20 @@ export const deleteRecords = async (
 
   let totalDeleted = 0;
   let anyChunkFailed = false;
+  let lastRequestShapeMessage: string | null = null;
 
   for (let start = 0; start < uuids.length; start += MAX_DELETE_BATCH_SIZE) {
     const chunk = uuids.slice(start, start + MAX_DELETE_BATCH_SIZE);
-    let chunkMeta: ApiDeleteMeta | null;
+    let chunkResult: DeleteRecordsChunkResult;
 
     try {
-      chunkMeta = await deleteRecordsChunk(chunk);
+      chunkResult = await deleteRecordsChunk(chunk);
     } catch (error) {
       logPartialSettle(uuids, totalDeleted);
       throw error;
     }
+
+    const { meta: chunkMeta, requestShapeMessage } = chunkResult;
 
     // A malformed 2xx (missing/non-numeric `meta.deleted`) is as untrustworthy
     // as a `null` chunk: treat it as a chunk failure rather than letting
@@ -890,12 +944,32 @@ export const deleteRecords = async (
     // poison the WHOLE sum (`NaN` from one chunk propagates through every
     // later `+=`) into a falsy-looking-truthy result the caller can't
     // distinguish from success.
-    if (!chunkMeta || !Number.isFinite(chunkMeta.deleted)) {
+    if (chunkMeta && Number.isFinite(chunkMeta.deleted)) {
+      totalDeleted += chunkMeta.deleted;
+    } else {
       anyChunkFailed = true;
+    }
+
+    if (requestShapeMessage === null) {
+      // Reset so the match below stays CONSECUTIVE: a clean or plain-failure
+      // chunk between two identical rejections breaks the "envelope is wrong"
+      // evidence, so it must not count toward the two-in-a-row abort.
+      lastRequestShapeMessage = null;
       continue;
     }
 
-    totalDeleted += chunkMeta.deleted;
+    if (
+      confirmsRequestShapeAbort(
+        requestShapeMessage,
+        lastRequestShapeMessage,
+        totalDeleted > 0,
+      )
+    ) {
+      logPartialSettle(uuids, totalDeleted);
+      return null;
+    }
+
+    lastRequestShapeMessage = requestShapeMessage;
   }
 
   if (anyChunkFailed) {

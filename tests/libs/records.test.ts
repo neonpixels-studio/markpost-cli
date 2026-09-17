@@ -1415,6 +1415,151 @@ describe('deleteRecords', () => {
       );
     });
   });
+
+  // Regression coverage for #183: unlike markRecordsSynced, deleteRecords used
+  // to retry EVERY remaining chunk even when a failure was categorical (the
+  // server lowered MAX_DELETE_BATCH_SIZE, or the DELETE envelope drifted from
+  // PATCH's) — hammering the API with every one of ceil(N/100) doomed
+  // requests instead of stopping once the envelope itself was confirmed
+  // wrong. Mirrors the markRecordsSynced request-shape abort coverage above.
+  describe('request-shape abort (#183)', () => {
+    // Reject every chunk the given way (a 400/422 error response), so a test
+    // can drive the two-chunk request-shape confirmation without
+    // hand-writing the mock — mirrors markRecordsSynced's `mockAllChunksReject`.
+    const mockAllChunksReject = (status: number, detail: string) => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status,
+        json: () =>
+          Promise.resolve({
+            data: { errors: [{ title: 'Rejected', detail }] },
+          }),
+      });
+    };
+
+    it('aborts after two request-shape (422) rejections with nothing deleted', async () => {
+      mockAllChunksReject(422, 'Unknown attribute: uuids');
+
+      const result = await deleteRecords(uuids(250));
+
+      // Only two requests fire — the third chunk (doomed the same way, since
+      // every chunk is built identically) is never attempted.
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(result).toBeNull();
+    });
+
+    it('aborts after two malformed-payload (400) rejections with nothing deleted', async () => {
+      mockAllChunksReject(400, 'Invalid body');
+
+      const result = await deleteRecords(uuids(250));
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(result).toBeNull();
+    });
+
+    // Two 4xx rejections with DIFFERENT messages look like two isolated
+    // per-uuid problems, not one envelope fault — so the run must keep going
+    // rather than abort. Only a repeated, identical categorical error is
+    // strong enough evidence.
+    it('does not abort on two request-shape rejections with different messages', async () => {
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation(() => {
+        callCount += 1;
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              data: {
+                errors: [{ title: 'Rejected', detail: `problem ${callCount}` }],
+              },
+            }),
+        });
+      });
+
+      const result = await deleteRecords(uuids(250));
+
+      // All three chunks are attempted — no abort.
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(result).toBeNull();
+    });
+
+    // A single request-shape rejection is not enough to abort — the next
+    // chunk still fires, since a lone 4xx could be an isolated per-chunk
+    // rejection rather than proof the envelope itself is wrong.
+    it('does not abort on a lone request-shape rejection — the next chunk still fires', async () => {
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation((_url, init: RequestInit) => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 422,
+            json: () =>
+              Promise.resolve({
+                data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+              }),
+          });
+        }
+
+        const body = JSON.parse(String(init.body));
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              meta: { deleted: body.data.attributes.uuids.length },
+            }),
+        });
+      });
+
+      const result = await deleteRecords(uuids(250));
+
+      // Every chunk gets a chance to run — chunk 1's rejection alone didn't
+      // stop chunks 2 and 3 from firing.
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      // Chunk 1's uuids are still unconfirmed, so the overall result fails
+      // loud rather than reporting a partial delete as complete.
+      expect(result).toBeNull();
+    });
+
+    // Once a chunk has actually deleted records, that success has already
+    // proven the request shape valid — a LATER request-shape rejection must
+    // not abort the run, matching markRecordsSynced's `anySynced` guard.
+    it('does not abort on request-shape rejections once a chunk has deleted records', async () => {
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation((_url, init: RequestInit) => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          const body = JSON.parse(String(init.body));
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                meta: { deleted: body.data.attributes.uuids.length },
+              }),
+          });
+        }
+
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+            }),
+        });
+      });
+
+      const result = await deleteRecords(uuids(250));
+
+      // All three chunks fire — the first chunk's success rules out a
+      // categorical (envelope-level) abort for the later rejections.
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(result).toBeNull();
+    });
+  });
 });
 
 // A stalled request must fail loud, not degrade to an empty/`null` result:
