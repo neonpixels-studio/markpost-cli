@@ -27,18 +27,19 @@ description = "Global allowlist for example and fixture files"
 # not flagged, since these hold placeholder credentials by design. Keep real
 # secrets out of these paths.
 #
-# Deliberately scoped to actual test/spec files, at most one directory below
-# tests?/, rather than a blanket `tests?/` prefix: the old blanket match also
-# exempted verbatim-vendored contract files nested under tests/types/vendor/
-# and tests/libs/vendor/ (see markpost-cli#181), which must stay in scope for
-# secret scanning since they're copied from another repo. `[^/]` (not `.`) is
-# used deliberately: in RE2, `.` matches `/`, so a `.*` pattern here would
-# still reach into a nested vendor/ directory regardless of filename. Using
-# `[^/]` keeps the match from crossing a path separator, so anything nested
-# two levels below tests?/ (like .../types/vendor/*) is structurally out of
-# reach of these patterns, independent of what it's named.
+# Deliberately scoped to actual test/spec files under tests?/ rather than a
+# blanket `tests?/` prefix: the old blanket match also exempted
+# verbatim-vendored contract files under tests/types/vendor/ and
+# tests/libs/vendor/ (see markpost-cli#181), which must stay in scope for
+# secret scanning since they're copied from another repo. RE2 (gitleaks'
+# regex engine) has no negative lookahead, so "everything except vendor/"
+# can't be expressed directly. Instead this explicitly enumerates the
+# project's actual test subdirectories (types, libs, scripts, commands) —
+# an allowlist of known-safe names, not a denylist of "vendor" — so a
+# same-named vendor/ dir can never qualify no matter where it's nested.
+# Adding a new tests/<subdir>/ requires adding it here too.
 paths = [
   '''\.example$''',
-  '''(^|/)(tests?|__tests__)/(?:[^/]+/)?[^/]+\.(test|spec)\.[cm]?[jt]sx?$''',
-  '''(^|/)(tests?|__tests__)/(fixtures?|__fixtures__)/[^/]+$''',
+  '''(^|/)(tests?|__tests__)/(?:(types|libs|scripts|commands)/)?[^/]+\.(test|spec)\.[cm]?[jt]sx?$''',
+  '''(^|/)(fixtures?|__fixtures__)/''',
 ]
