@@ -60,7 +60,7 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
 };
 
 // `parseArgs` handles both `--source webhook` and `--source=webhook`, and
-// throws on an unknown flag or a missing value, which the command's outer
+// throws on an unknown flag or a missing value, which the command's usage
 // catch surfaces to the user. The `list` subcommand itself lands in
 // `positionals` and is skipped here.
 const parseListArgs = (args: string[]): { filters: RecordListFilters } => {

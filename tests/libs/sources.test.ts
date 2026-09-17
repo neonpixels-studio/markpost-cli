@@ -38,10 +38,9 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-vi.mock('@/libs/errors.js', () => ({
+vi.mock('@/libs/errors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/libs/errors.js')>()),
   logErrorMessage: vi.fn(),
-  messageFromError: (error: unknown) =>
-    error instanceof Error ? error.message : String(error),
 }));
 
 const mockSource: Source = {
