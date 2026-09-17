@@ -1,6 +1,10 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
-import { fetchAllRecords, RecordListFilters } from '@/libs/records.js';
+import {
+  ERROR_STATUS,
+  fetchAllRecords,
+  RecordListFilters,
+} from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
@@ -123,11 +127,12 @@ const normalizeFilter = (
 
 // title, uuid, createdAt, status, syncedAt, and errorMessage all come from the
 // untrusted API response, so each is stripped of control/ANSI escapes before
-// printing (see terminal.ts). status, syncedAt, and errorMessage are printed
-// only when present: markpost sends status and syncedAt on every record, but
-// they stay optional in the type for off-contract responses, and a missing
-// value shouldn't print a blank label. errorMessage is genuinely absent
-// (null) outside of `error`-status records.
+// printing (see terminal.ts). status and syncedAt are printed only when
+// present: markpost sends both on every record, but they stay optional in the
+// type for off-contract responses, and a missing value shouldn't print a
+// blank label. errorMessage is printed only for a record whose CURRENT status
+// is `error` — see the doc comment on `ERROR_STATUS` for why presence alone
+// isn't enough.
 const printRecord = (record: Record): void => {
   console.log(chalk.bold(sanitizeForTerminal(record.title)));
   console.log(`  uuid:       ${sanitizeForTerminal(record.uuid)}`);
@@ -141,10 +146,7 @@ const printRecord = (record: Record): void => {
     console.log(`  synced at:  ${sanitizeForTerminal(record.syncedAt)}`);
   }
 
-  // errorMessage is only ever non-null on (or just after) an `error`-status
-  // record — see the type's doc comment — so gating on presence alone (like
-  // status/syncedAt above) is enough to limit this line to failed records.
-  if (record.errorMessage) {
+  if (record.status === ERROR_STATUS && record.errorMessage) {
     console.log(`  error:      ${sanitizeForTerminal(record.errorMessage)}`);
   }
 };

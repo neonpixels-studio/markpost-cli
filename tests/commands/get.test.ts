@@ -5,7 +5,10 @@ import { Record } from '@/types/records.types.js';
 vi.mock('@/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/records.js', () => ({ fetchRecord: vi.fn() }));
+vi.mock('@/libs/records.js', () => ({
+  ERROR_STATUS: 'error',
+  fetchRecord: vi.fn(),
+}));
 vi.mock('chalk', () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
@@ -150,6 +153,30 @@ describe('runGetCommand', () => {
   it('omits the error line when errorMessage is absent', async () => {
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedError = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && arg.includes('error:'),
+      );
+    expect(printedError).toBe(false);
+  });
+
+  // markpost's PATCH endpoint only clears errorMessage when a caller
+  // explicitly sends `null` for it, so a record that has since synced can
+  // still carry a stale errorMessage from an earlier failure. The error line
+  // must gate on the record's CURRENT status, not on errorMessage alone, or a
+  // resolved failure would print as if it were still live.
+  it('omits the error line for a synced record with a stale errorMessage', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: 'synced',
+      errorMessage: 'Sync failed: file already exists',
+    });
     const { runGetCommand } = await import('@/commands/get.js');
 
     await runGetCommand(['abc-123']);

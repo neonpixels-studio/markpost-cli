@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
-import { fetchRecord } from '@/libs/records.js';
+import { ERROR_STATUS, fetchRecord } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
@@ -251,10 +251,12 @@ const printRecord = (record: Record): void => {
     console.log(`  synced at:  ${sanitizeForTerminal(record.syncedAt)}`);
   }
 
-  // errorMessage is only ever non-null on (or just after) an `error`-status
-  // record — see the type's doc comment — so gating on presence alone (like
-  // status/syncedAt above) is enough to limit this line to failed records.
-  if (record.errorMessage) {
+  // Gated on CURRENT status, not presence alone: markpost's PATCH endpoint
+  // only clears errorMessage when a caller explicitly sends `null` for it
+  // (see the doc comment on ERROR_STATUS), so a record that has since synced
+  // can still carry a stale errorMessage from an earlier failure. Printing it
+  // unconditionally would show a resolved failure as if it were live.
+  if (record.status === ERROR_STATUS && record.errorMessage) {
     console.log(`  error:      ${sanitizeForTerminal(record.errorMessage)}`);
   }
 
