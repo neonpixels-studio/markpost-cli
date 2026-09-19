@@ -26,7 +26,23 @@ description = "Global allowlist for example and fixture files"
 # Accepted risk: secrets committed into example/fixture files are intentionally
 # not flagged, since these hold placeholder credentials by design. Keep real
 # secrets out of these paths.
+#
+# Deliberately scoped to actual test/spec files under tests?/ rather than a
+# blanket `tests?/` prefix: the old blanket match also exempted
+# verbatim-vendored contract files under tests/types/vendor/ and
+# tests/libs/vendor/ (see markpost-cli#181), which must stay in scope for
+# secret scanning since they're copied from another repo. RE2 (gitleaks'
+# regex engine) has no negative lookahead, so "everything except vendor/"
+# can't be expressed directly. Instead this explicitly enumerates the
+# project's actual test subdirectories (types, libs, scripts, commands) —
+# an allowlist of known-safe names, not a denylist of "vendor" — so a
+# vendor/ dir can never qualify: it's neither one of the enumerated names
+# (rejected regardless of depth) nor reachable by nesting deeper than the
+# single subdir level this pattern allows (rejected regardless of name).
+# Adding a new tests/<subdir>/, or nesting a subdir deeper than one level,
+# requires updating this pattern.
 paths = [
   '''\.example$''',
-  '''(^|/)(tests?|__tests__|fixtures?|__fixtures__)/''',
+  '''(^|/)(?:tests?|__tests__)/(?:(?:types|libs|scripts|commands)/)?[^/]+\.(?:test|spec)\.[cm]?[jt]sx?$''',
+  '''(^|/)(?:fixtures?|__fixtures__)/''',
 ]
