@@ -1,11 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ERROR_STATUS } from '@/libs/records.js';
 import { Record } from '@/types/records.types.js';
 
 vi.mock('@/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/records.js', () => ({ fetchRecord: vi.fn() }));
+vi.mock('@/libs/records.js', async () => {
+  // Pulls the real ERROR_STATUS through (via importActual, not a full-module
+  // spread) rather than restating the literal, so these tests stay pinned to
+  // the actual constant instead of drifting from it if it's ever renamed —
+  // while keeping every other export undefined, so a command that starts
+  // calling an unmocked function still fails loudly here instead of quietly
+  // running the real implementation.
+  const { ERROR_STATUS } =
+    await vi.importActual<typeof import('@/libs/records.js')>(
+      '@/libs/records.js',
+    );
+
+  return { ERROR_STATUS, fetchRecord: vi.fn() };
+});
 vi.mock('chalk', () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
@@ -129,6 +143,102 @@ describe('runGetCommand', () => {
     });
   });
 
+  it("prints an error-status record's errorMessage", async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: ERROR_STATUS,
+      errorMessage: 'Sync failed: file already exists',
+    });
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('error:      Sync failed: file already exists'),
+    );
+  });
+
+  // A synced record (the common case, no error ever happened) must not print
+  // a blank "error:" line.
+  it('omits the error line when errorMessage is absent', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedError = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && /^ {2}error: {6}/.test(arg),
+      );
+    expect(printedError).toBe(false);
+  });
+
+  // Exercises the OTHER half of the gate: an error-status record whose
+  // errorMessage happens to be null must not print a blank "error:" line
+  // either — `status === ERROR_STATUS` alone isn't enough.
+  it('omits the error line for an error-status record with no errorMessage', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: ERROR_STATUS,
+      errorMessage: null,
+    });
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedError = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && /^ {2}error: {6}/.test(arg),
+      );
+    expect(printedError).toBe(false);
+  });
+
+  // markpost's PATCH endpoint only clears errorMessage when a caller
+  // explicitly sends `null` for it, so a record that has since synced can
+  // still carry a stale errorMessage from an earlier failure. The error line
+  // must gate on the record's CURRENT status, not on errorMessage alone, or a
+  // resolved failure would print as if it were still live.
+  it('omits the error line for a synced record with a stale errorMessage', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: 'synced',
+      errorMessage: 'Sync failed: file already exists',
+    });
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const printedError = vi
+      .mocked(console.log)
+      .mock.calls.some(
+        ([arg]) => typeof arg === 'string' && /^ {2}error: {6}/.test(arg),
+      );
+    expect(printedError).toBe(false);
+  });
+
+  it('includes errorMessage in the --json output', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockResolvedValue({
+      ...mockRecord,
+      status: ERROR_STATUS,
+      errorMessage: 'Sync failed: file already exists',
+    });
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', '--json']);
+
+    const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+    expect(JSON.parse(output)).toMatchObject({
+      errorMessage: 'Sync failed: file already exists',
+    });
+  });
+
   it('reports an error when the record is not found', async () => {
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(null);
@@ -198,6 +308,8 @@ describe('runGetCommand', () => {
       title: `A${control}B`,
       content: `C${control}D`,
       createdAt: `2024${control}01`,
+      status: ERROR_STATUS,
+      errorMessage: `Sync ${control}failed`,
     };
     const { fetchRecord } = await import('@/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(evilRecord);
@@ -213,6 +325,11 @@ describe('runGetCommand', () => {
     expect(printedControl).toBe(false);
     expect(console.log).toHaveBeenCalledWith('A B');
     expect(console.log).toHaveBeenCalledWith('C D');
+    // sanitizeForTerminal replaces the stripped control byte with a space
+    // rather than deleting it, hence the double space before "failed".
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('error:      Sync  failed'),
+    );
   });
 
   it('preserves newlines and tabs in multi-line content while still stripping escapes', async () => {

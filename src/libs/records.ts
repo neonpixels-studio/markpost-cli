@@ -26,6 +26,15 @@ import {
 // `pending` and, once a record is written, PATCHes it to `synced`.
 export const PENDING_STATUS = 'pending';
 const SYNCED_STATUS = 'synced';
+// markpost's PATCH /api/records only touches fields present in the request
+// body (server/api/records/index.patch.ts `buildItemPayload`) — moving a
+// record's status away from `error` does NOT itself clear `errorMessage`,
+// and `buildBulkRecordPayload` below never sends it. So `errorMessage` can
+// stay populated on the server after a record has since synced; printing it
+// must gate on the record's CURRENT status, not on `errorMessage` alone, to
+// avoid showing a resolved failure as if it were live (mirrors markpost's own
+// `isErrorRecord` gate in `app/components/RecordDetailModal.vue`).
+export const ERROR_STATUS = 'error';
 
 // Per-record result of a bulk mark-synced run (see `markRecordsSynced`, which
 // PATCHes records in chunks of up to MAX_MARK_SYNCED_BATCH_SIZE). `MARK_SYNCED`

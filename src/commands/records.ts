@@ -1,6 +1,10 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
-import { fetchAllRecords, RecordListFilters } from '@/libs/records.js';
+import {
+  ERROR_STATUS,
+  fetchAllRecords,
+  RecordListFilters,
+} from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
@@ -121,11 +125,14 @@ const normalizeFilter = (
   return trimmed;
 };
 
-// title, uuid, createdAt, status, and syncedAt all come from the untrusted API
-// response, so each is stripped of control/ANSI escapes before printing (see
-// terminal.ts). status and syncedAt are printed only when present: markpost
-// sends both on every record, but they stay optional in the type for
-// off-contract responses, and a missing value shouldn't print a blank label.
+// title, uuid, createdAt, status, syncedAt, and errorMessage all come from the
+// untrusted API response, so each is stripped of control/ANSI escapes before
+// printing (see terminal.ts). status and syncedAt are printed only when
+// present: markpost sends both on every record, but they stay optional in the
+// type for off-contract responses, and a missing value shouldn't print a
+// blank label. errorMessage is printed only for a record whose CURRENT status
+// is `error` — see the doc comment on `ERROR_STATUS` for why presence alone
+// isn't enough.
 const printRecord = (record: Record): void => {
   console.log(chalk.bold(sanitizeForTerminal(record.title)));
   console.log(`  uuid:       ${sanitizeForTerminal(record.uuid)}`);
@@ -137,6 +144,10 @@ const printRecord = (record: Record): void => {
 
   if (record.syncedAt) {
     console.log(`  synced at:  ${sanitizeForTerminal(record.syncedAt)}`);
+  }
+
+  if (record.status === ERROR_STATUS && record.errorMessage) {
+    console.log(`  error:      ${sanitizeForTerminal(record.errorMessage)}`);
   }
 };
 
