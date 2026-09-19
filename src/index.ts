@@ -22,6 +22,7 @@ import {
   WrittenRecordState,
 } from '@/libs/markdown.js';
 import { fetchSettings, SettingsReadResult } from '@/libs/settings.js';
+import { ApiDeleteMeta } from '@/types/api.types.js';
 import { runPushCommand, USAGE as PUSH_USAGE } from '@/commands/push.js';
 import { runGetCommand, USAGE as GET_USAGE } from '@/commands/get.js';
 import {
@@ -610,6 +611,48 @@ function forgetSettledRecords(
   uuids.forEach((uuid) => writtenState.delete(uuid));
 }
 
+// Reports the outcome of a delete call and decides whether the written-path
+// map may forget these uuids. deleteRecords returns a bare count, not
+// per-uuid results, so only an exact match (`deleted === requested`) confirms
+// every uuid actually settled — forgetting a path on anything else would drop
+// the reuse guard for a record that's still pending and, without its tracked
+// path, the next pass would write a fresh `<slug>-2.md` duplicate (#110).
+// Any mismatch (short, negative, or an impossible over-count — uuids are sent
+// in disjoint chunks, so a well-behaved server can never report more deletes
+// than requested) means the count can't be trusted to say which uuids
+// survived, so every path stays and the run fails loud instead of silently
+// reporting success with records still pending on the server (#185).
+function reportDeleteOutcome(
+  deleteMeta: ApiDeleteMeta,
+  settleableRecords: WrittenRecord[],
+  spinner: Spinner,
+  writtenState: Map<string, WrittenRecordState>,
+): void {
+  const requested = settleableRecords.length;
+
+  if (deleteMeta.deleted === requested) {
+    forgetSettledRecords(
+      writtenState,
+      settleableRecords.map(({ record }) => record.uuid),
+    );
+    spinner.success(`Deleted ${deleteMeta.deleted} records!`);
+    return;
+  }
+
+  if (deleteMeta.deleted > requested || deleteMeta.deleted < 0) {
+    spinner.error(
+      `Server reported ${deleteMeta.deleted} deletes for ${requested} records — the count can't be trusted, so no records were marked settled.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  spinner.error(
+    `Deleted ${deleteMeta.deleted} of ${requested} records — the rest were not confirmed deleted; they may already be gone from the server, or may still be pending.`,
+  );
+  process.exitCode = 1;
+}
+
 // Marks every written record synced on the server after a write, so the next
 // run's pending-only fetch skips them — the autoDelete-off path's
 // non-destructive equivalent of the delete step. Returns whether the autoSync
@@ -1081,21 +1124,17 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
       return deletePermanentlyFailed ? false : autoSync;
     }
 
-    // Settle only on a confirmed full delete. deleteRecords returns a bare
-    // count, not per-uuid results, so a short count (`deleted < written`) can't
-    // tell which uuids survived; retaining every entry keeps the reuse guard for
-    // any record still pending, at the harmless cost of a stale entry for the
-    // ones that were deleted. A record not deleted stays pending and, without
-    // its tracked path, would drop a fresh `<slug>-2.md` duplicate next pass —
-    // the exact bug this split prevents.
-    if (deleteMeta.deleted === settleableRecords.length) {
-      forgetSettledRecords(
-        processWrittenState,
-        settleableRecords.map(({ record }) => record.uuid),
-      );
-    }
-
-    spinner.success(`Deleted ${deleteMeta.deleted} records!`);
+    // See reportDeleteOutcome for the full rationale (#110, #185): only an
+    // exact `deleted === requested` count may forget these uuids' tracked
+    // paths; anything else (short, negative, or an impossible over-count)
+    // can't be trusted and fails the run loud instead of silently reporting
+    // success with records still pending on the server.
+    reportDeleteOutcome(
+      deleteMeta,
+      settleableRecords,
+      spinner,
+      processWrittenState,
+    );
 
     reportIncompleteSync(recordsResult.partial);
     return autoSync;
