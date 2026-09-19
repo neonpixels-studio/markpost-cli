@@ -37,7 +37,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-vi.mock('@/libs/errors.js', () => ({
+vi.mock('@/libs/errors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/libs/errors.js')>()),
   logErrorMessage: vi.fn(),
 }));
 

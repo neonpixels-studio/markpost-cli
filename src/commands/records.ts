@@ -7,9 +7,9 @@ import {
 } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage } from '@/libs/usage.js';
+import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
@@ -36,12 +36,19 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
+  // Parse before checkConfig, which prompts for and persists config when
+  // unset: a bad flag must fail on usage alone. Its own catch so a usage
+  // throw reports the `usage` JSON code, not the fetch path's `fetch_failed`.
+  let filters: RecordListFilters;
+
   try {
-    // Parse filters before checkConfig, which prompts for and persists an API
-    // token/output directory when unset: a bad flag must fail on usage alone,
-    // not after dragging the user through (or blocking a non-TTY run on) the
-    // config prompts. Mirrors the subcommand validation above.
-    const { filters } = parseListArgs(args);
+    ({ filters } = parseListArgs(args));
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+    return;
+  }
+
+  try {
     if (!(await checkConfig(json))) {
       return;
     }
@@ -57,7 +64,7 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
 };
 
 // `parseArgs` handles both `--source webhook` and `--source=webhook`, and
-// throws on an unknown flag or a missing value, which the command's outer
+// throws on an unknown flag or a missing value, which the command's usage
 // catch surfaces to the user. The `list` subcommand itself lands in
 // `positionals` and is skipped here.
 const parseListArgs = (args: string[]): { filters: RecordListFilters } => {

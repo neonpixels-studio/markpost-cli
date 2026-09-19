@@ -27,7 +27,8 @@ vi.mock('@/libs/config.js', () => ({
   config: { get: vi.fn() },
 }));
 
-vi.mock('@/libs/errors.js', () => ({
+vi.mock('@/libs/errors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/libs/errors.js')>()),
   logErrorMessage: vi.fn(),
 }));
 

@@ -1,6 +1,6 @@
 import { config } from '@/libs/config.js';
 import { ApiError, ApiErrorEnvelope, ApiResponse } from '@/types/api.types.js';
-import { logErrorMessage } from '@/libs/errors.js';
+import { logErrorMessage, messageFromError } from '@/libs/errors.js';
 
 export const getBaseUrl = () => {
   return process.env.BASE_URL ?? 'https://sync.danholloran.me';
@@ -96,12 +96,6 @@ export const rethrowIfTimeout = (error: unknown): void => {
     throw error;
   }
 };
-
-// Pulls a printable string off an unknown thrown value: an `Error`'s message,
-// otherwise its `String()` form. Shared by `logApiFailure` and
-// `describeApiError` so neither re-derives the extraction.
-const messageFromError = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 // The one way to report a failed API call from a resilient catch: re-throw a
 // timeout (fail loud) and log every other error. Bundling both halves means

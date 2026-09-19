@@ -27,7 +27,8 @@ vi.mock('@/libs/config.js', () => ({
   config: { get: vi.fn() },
 }));
 
-vi.mock('@/libs/errors.js', () => ({
+vi.mock('@/libs/errors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/libs/errors.js')>()),
   logErrorMessage: vi.fn(),
 }));
 
@@ -147,7 +148,9 @@ describe('assertApiSuccess', () => {
   // just because it doesn't match the shape every handler happens to use
   // today.
   it('throws when the body carries top-level errors instead of nested data.errors', () => {
-    const body = { errors: [error('Unauthorized', 'Invalid or missing token')] };
+    const body = {
+      errors: [error('Unauthorized', 'Invalid or missing token')],
+    };
 
     expect(() => assertApiSuccess({ ok: false } as Response, body)).toThrow(
       'Unauthorized: Invalid or missing token',
@@ -263,7 +266,9 @@ describe('authedRequest', () => {
     mockFetch(
       {
         data: {
-          errors: [{ title: 'Unauthorized', detail: 'Invalid or missing token' }],
+          errors: [
+            { title: 'Unauthorized', detail: 'Invalid or missing token' },
+          ],
         },
       },
       false,
@@ -373,7 +378,9 @@ describe('assertApiSuccess (systemic classification)', () => {
   // failure just because an inner error object claims `status: '401'`.
   it('throws a non-systemic error for an ok response that still carries errors', () => {
     const body = {
-      data: { errors: [{ status: '401', title: 'Odd', detail: 'off-contract' }] },
+      data: {
+        errors: [{ status: '401', title: 'Odd', detail: 'off-contract' }],
+      },
     };
 
     try {
@@ -439,9 +446,7 @@ describe('ApiRequestError', () => {
   // trigger the abort.
   it('classifies only 400 and 422 as request-shape (fatal) errors', () => {
     for (const statusCode of [400, 422]) {
-      expect(new ApiRequestError('nope', statusCode).isFatalRequest).toBe(
-        true,
-      );
+      expect(new ApiRequestError('nope', statusCode).isFatalRequest).toBe(true);
     }
   });
 
@@ -639,7 +644,11 @@ describe('unwrapResourceCollection', () => {
     const body: ApiResponse<FixtureResource[]> = {
       data: [
         { type: 'fixtures', id: 'abc-123', attributes: fixture },
-        { type: 'fixtures', id: 'def-456', attributes: { ...fixture, uuid: 'def-456' } },
+        {
+          type: 'fixtures',
+          id: 'def-456',
+          attributes: { ...fixture, uuid: 'def-456' },
+        },
       ],
     };
 
@@ -729,7 +738,10 @@ describe('apiFetch', () => {
   // here. It must surface as a distinct `ApiTimeoutError` with a clear
   // message, never as a generic error or a silent hang.
   it('rejects a stalled request with a distinct ApiTimeoutError', async () => {
-    const timeout = new DOMException('The operation timed out.', 'TimeoutError');
+    const timeout = new DOMException(
+      'The operation timed out.',
+      'TimeoutError',
+    );
     global.fetch = vi.fn().mockRejectedValue(timeout);
 
     await expect(
@@ -745,7 +757,10 @@ describe('apiFetch', () => {
   // sending headers rejects `response.json()` with the same TimeoutError —
   // it must translate to ApiTimeoutError just like a connection stall.
   it('rejects with ApiTimeoutError when the body read stalls past the timeout', async () => {
-    const timeout = new DOMException('The operation timed out.', 'TimeoutError');
+    const timeout = new DOMException(
+      'The operation timed out.',
+      'TimeoutError',
+    );
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.reject(timeout),
@@ -773,7 +788,10 @@ describe('apiFetch', () => {
   // apiFetch owns the only signal, so any abort is the timeout firing —
   // including a plain AbortError-named DOMException some undici paths report.
   it('translates a plain AbortError as a timeout', async () => {
-    const aborted = new DOMException('This operation was aborted', 'AbortError');
+    const aborted = new DOMException(
+      'This operation was aborted',
+      'AbortError',
+    );
     global.fetch = vi.fn().mockRejectedValue(aborted);
 
     await expect(

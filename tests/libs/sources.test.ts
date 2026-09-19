@@ -38,7 +38,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-vi.mock('@/libs/errors.js', () => ({
+vi.mock('@/libs/errors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/libs/errors.js')>()),
   logErrorMessage: vi.fn(),
 }));
 
@@ -167,9 +168,15 @@ describe('fetchSources', () => {
   });
 
   it('returns [] and surfaces error details when the response is not ok', async () => {
-    mockFetch({ data: { errors: [{ title: 'Error', detail: 'Server error' }] } }, false);
+    mockFetch(
+      { data: { errors: [{ title: 'Error', detail: 'Server error' }] } },
+      false,
+    );
     expect(await fetchSources()).toEqual([]);
-    expect(logErrorMessage).toHaveBeenCalledWith('fetchSources', 'Error: Server error');
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'fetchSources',
+      'Error: Server error',
+    );
   });
 
   it('returns [] on network failure', async () => {
@@ -279,7 +286,12 @@ describe('createSource', () => {
     mockFetch(
       {
         data: {
-          errors: [{ title: 'Invalid Attribute', detail: 'Type must be one of: webhook, email' }],
+          errors: [
+            {
+              title: 'Invalid Attribute',
+              detail: 'Type must be one of: webhook, email',
+            },
+          ],
         },
       },
       false,
@@ -362,9 +374,9 @@ describe('updateSource', () => {
 
   it('returns the updated source attributes on success', async () => {
     mockFetch({ data: { attributes: mockSource } });
-    expect(
-      await updateSource('abc-123', { routeFolder: '00-fixed/' }),
-    ).toEqual(mockSource);
+    expect(await updateSource('abc-123', { routeFolder: '00-fixed/' })).toEqual(
+      mockSource,
+    );
   });
 
   it('returns null and surfaces error details when the uuid is not found', async () => {
@@ -372,7 +384,10 @@ describe('updateSource', () => {
       {
         data: {
           errors: [
-            { title: 'Not Found', detail: 'No source was found for the given uuid.' },
+            {
+              title: 'Not Found',
+              detail: 'No source was found for the given uuid.',
+            },
           ],
         },
       },
@@ -395,7 +410,8 @@ describe('updateSource', () => {
           errors: [
             {
               title: 'Invalid Attribute',
-              detail: 'At least one of routeFolder or fieldMapping must be provided.',
+              detail:
+                'At least one of routeFolder or fieldMapping must be provided.',
             },
           ],
         },
@@ -486,7 +502,8 @@ describe('rotateSourceSecret', () => {
           errors: [
             {
               title: 'Invalid Attribute',
-              detail: 'This source has no provider set, so it has no secret to rotate.',
+              detail:
+                'This source has no provider set, so it has no secret to rotate.',
             },
           ],
         },
@@ -540,7 +557,16 @@ describe('deleteSource', () => {
 
   it('returns null and surfaces error details when the response contains errors', async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Not Found', detail: 'No source was found for the given uuid.' }] } },
+      {
+        data: {
+          errors: [
+            {
+              title: 'Not Found',
+              detail: 'No source was found for the given uuid.',
+            },
+          ],
+        },
+      },
       false,
     );
     const result = await deleteSource('missing-uuid');

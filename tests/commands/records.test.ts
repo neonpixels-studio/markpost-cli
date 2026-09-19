@@ -570,6 +570,19 @@ describe('runRecordsCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    // The non-JSON path changed too: a bad flag used to print bare prose via
+    // failWithMessage and now goes through failWithUsage, so the usage block
+    // must print alongside the message.
+    it('prints the usage block, not bare prose, for an unknown flag without --json', async () => {
+      const { runRecordsCommand, USAGE } =
+        await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--bogus', 'value']);
+
+      expect(console.error).toHaveBeenCalledWith(USAGE);
+      expect(process.exitCode).toBe(1);
+    });
+
     it('rejects a present-but-empty filter value instead of listing everything', async () => {
       const { fetchAllRecords } = await import('@/libs/records.js');
       const { runRecordsCommand } = await import('@/commands/records.js');
@@ -808,6 +821,88 @@ describe('runRecordsCommand', () => {
       );
       expect(parsed.error).toBe('fetch_failed');
       expect(parsed.message).toContain('Authentication failed (HTTP 401)');
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A bad flag/stray argument on `list` must report the documented `usage`
+    // code, not `fetch_failed` — argument parsing used to share the fetch's
+    // try/catch, miscoding it (issue #184).
+    it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag on list', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--bogus', 'value', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('bogus');
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('emits a usage-coded JSON error, not fetch_failed, for a stray positional on list', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', 'webhook', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('Unexpected argument "webhook"');
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    // normalizeFilter (a third usage-throw site inside the same try, distinct
+    // from parseArgs' own throws above) must also route through the `usage`
+    // code rather than `fetch_failed` — guards against a future refactor that
+    // moves this validation elsewhere and reintroduces the miscode.
+    it('emits a usage-coded JSON error, not fetch_failed, for a present-but-empty filter value', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--source=', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('--source needs a non-empty value.');
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('emits a usage-coded JSON error, not fetch_failed, for a filter flag passed more than once', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'list',
+        '--source',
+        'webhook',
+        '--source',
+        'email',
+        '--json',
+      ]);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('was given more than once');
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     });
   });
