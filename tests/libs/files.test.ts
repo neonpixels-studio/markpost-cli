@@ -308,6 +308,44 @@ describe('resolveMarkdownInputs', () => {
     },
   );
 
+  it.skipIf(skipPermissionTests)(
+    'reports a glob pattern under a locked directory as skipped, not missing',
+    () => {
+      // The kernel never expands `*` before stat'ing — the literal string
+      // "locked/*.md" is stat'd as one path — so traversing into a locked
+      // `locked` fails with EACCES the same way a literal file would,
+      // before glob expansion ever gets a chance to run. Reporting this as
+      // skipped rather than missing is intentional: with the parent
+      // unreadable there is no way to know whether the pattern would have
+      // matched, so "missing" (nothing matched) would be misleading.
+      const locked = join(workspace, 'locked');
+      mkdirSync(locked);
+      chmodSync(locked, 0o000);
+      const pattern = join(locked, '*.md');
+
+      try {
+        const { files, missing, skipped } = resolveMarkdownInputs([pattern]);
+
+        expect(files).toEqual([]);
+        expect(missing).toEqual([]);
+        expect(skipped).toEqual([pattern]);
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
+
+  it('treats a path through a non-directory path component as missing', () => {
+    const file = createFile('plain.md');
+    const target = join(file, 'child.md');
+
+    const { files, missing, skipped } = resolveMarkdownInputs([target]);
+
+    expect(files).toEqual([]);
+    expect(skipped).toEqual([]);
+    expect(missing).toEqual([target]);
+  });
+
   it('reports inputs that match nothing without dropping the rest', () => {
     const real = createFile('real.md');
 

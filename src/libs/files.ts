@@ -106,10 +106,8 @@ const statOrSkip = (
   }
 };
 
-// Node reports fs failures via an `error.code` string (its equivalent of
-// inspecting `$e->getCode()` against a known errno constant in PHP) rather
-// than distinct exception classes, so distinguishing failure kinds means
-// reading that field instead of catching a specific error type.
+// Node fs errors carry an errno string in `code` rather than distinct error
+// classes, so distinguishing failure kinds means reading that field.
 const errnoCode = (error: unknown): string | undefined => {
   if (error instanceof Error && 'code' in error) {
     return (error as NodeJS.ErrnoException).code;
@@ -118,10 +116,12 @@ const errnoCode = (error: unknown): string | undefined => {
   return undefined;
 };
 
-// A path component genuinely not existing (ENOENT) or not being a directory
-// where one was expected (ENOTDIR) — as opposed to existing but being
-// unreachable for some other reason, e.g. a locked parent directory.
-const NOT_FOUND_ERRNO_CODES = new Set(['ENOENT', 'ENOTDIR']);
+// EACCES (no permission) and EPERM (operation not permitted) are the codes a
+// locked parent directory raises. Every other failure — including a
+// genuinely missing path (ENOENT/ENOTDIR) — keeps falling through to glob
+// handling below, unchanged from before this fix, so only the permission
+// case is reclassified.
+const PERMISSION_ERRNO_CODES = new Set(['EACCES', 'EPERM']);
 
 type InputStatResult =
   | { kind: 'stats'; stats: Stats }
@@ -131,20 +131,17 @@ type InputStatResult =
 // Stats an input argument and discriminates *why* the stat failed, which
 // `existsSync` cannot do: it catches every error, including EACCES, and
 // collapses them into a single `false`. That collapse is what previously
-// misreported a file behind a locked parent directory as "missing" — the
-// same outcome as a typo'd path — instead of a permission error. Genuinely
-// missing (ENOENT/ENOTDIR) still falls through to glob handling below, since
-// that's also how an actual glob pattern (no literal file) looks; anything
-// else (most commonly EACCES) is surfaced distinctly as unreadable.
+// misreported a file behind a locked parent directory as "missing" instead
+// of a permission error.
 const statInput = (path: string): InputStatResult => {
   try {
     return { kind: 'stats', stats: statSync(path) };
   } catch (error) {
-    if (NOT_FOUND_ERRNO_CODES.has(errnoCode(error) ?? '')) {
-      return { kind: 'not-found' };
+    if (PERMISSION_ERRNO_CODES.has(errnoCode(error) ?? '')) {
+      return { kind: 'unreadable' };
     }
 
-    return { kind: 'unreadable' };
+    return { kind: 'not-found' };
   }
 };
 
@@ -243,11 +240,11 @@ const collectFromGlob = (
 // directly is taken as-is (the user was explicit, so its extension is not
 // second-guessed) once confirmed readable; an existing directory is recursed;
 // a non-regular file (device, FIFO) is skipped rather than handed to a reader
-// that would block or read garbage; anything that genuinely does not exist
-// (ENOENT/ENOTDIR) is treated as a glob; anything that exists but can't be
-// stat'd for another reason (most commonly EACCES from a locked parent
-// directory) is skipped rather than silently falling through to glob
-// handling and being misreported as missing.
+// that would block or read garbage; a path that can't be stat'd for any
+// non-permission reason (most commonly it doesn't exist) is treated as a
+// glob, same as before this fix; a permission failure (EACCES/EPERM, most
+// commonly a locked parent directory) is skipped instead of silently
+// falling through to glob handling and being misreported as missing.
 const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
   const statResult = statInput(input);
 
