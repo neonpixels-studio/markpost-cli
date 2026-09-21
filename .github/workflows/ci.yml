@@ -28,12 +28,13 @@ jobs:
           # known directory and globbing for the tarball (instead of
           # parsing `npm pack --json` output) sidesteps any risk of
           # lifecycle-script output landing on the same stream as the JSON.
+          shopt -s nullglob
           pack_dir="$RUNNER_TEMP/pack"
           mkdir -p "$pack_dir"
           npm pack --pack-destination "$pack_dir"
           tarballs=("$pack_dir"/*.tgz)
-          if [ "${#tarballs[@]}" -ne 1 ] || [ ! -f "${tarballs[0]}" ]; then
-            echo "expected exactly one tarball in $pack_dir, found: ${tarballs[*]}"
+          if [ "${#tarballs[@]}" -ne 1 ]; then
+            echo "expected exactly one tarball in $pack_dir, found ${#tarballs[@]}: ${tarballs[*]:-none}"
             exit 1
           fi
           npm install -g "${tarballs[0]}"
