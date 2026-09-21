@@ -181,7 +181,7 @@ describe('runPushCommand', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it('does not warn when readMarkdown reports a normally-parsed (or absent) tags line', async () => {
+  it('does not warn when readMarkdown omits tagsLineUnparseable', async () => {
     const { readMarkdown } = await import('@/libs/markdown.js');
     const { resolveMarkdownInputs } = await import('@/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
@@ -201,6 +201,33 @@ describe('runPushCommand', () => {
     await runPushCommand(['./notes/test-title.md']);
 
     expect(console.error).not.toHaveBeenCalled();
+    expect(createRecord).toHaveBeenCalledWith('Test Title', 'Test Content', []);
+  });
+
+  it('does not warn when readMarkdown explicitly reports tagsLineUnparseable: false', async () => {
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['./notes/test-title.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'Test Title',
+      content: 'Test Content',
+      tags: ['ci'],
+      tagsLineUnparseable: false,
+    });
+    const { createRecord } = await import('@/libs/records.js');
+    vi.mocked(createRecord).mockResolvedValue(mockRecord);
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['./notes/test-title.md']);
+
+    expect(console.error).not.toHaveBeenCalled();
+    expect(createRecord).toHaveBeenCalledWith('Test Title', 'Test Content', [
+      'ci',
+    ]);
   });
 
   // checkConfig signals failure by resolving false rather than terminating the

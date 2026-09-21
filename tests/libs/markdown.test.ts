@@ -59,9 +59,7 @@ const mockWriteFileSyncRejectingExistingPaths = (
 
   vi.mocked(writeFileSync).mockImplementation((path, _content, options) => {
     const flag =
-      typeof options === 'object' && options !== null
-        ? options.flag
-        : undefined;
+      typeof options === 'object' && options !== null ? options.flag : undefined;
 
     if (flag === 'wx' && takenPaths.has(path as string)) {
       throw createFileAlreadyExistsError();
@@ -112,10 +110,9 @@ const nonFileStats = { isFile: () => false } as unknown as ReturnType<
 // A regular-file stat carrying an explicit identity, for tests that swap the file
 // at a tracked path between passes: a new inode (or device) models the different
 // file a replacement drops there.
-const identityStats = (
-  deviceId: bigint,
-  inode: bigint,
-): ReturnType<typeof lstatSync> => {
+const identityStats = (deviceId: bigint, inode: bigint): ReturnType<
+  typeof lstatSync
+> => {
   return {
     isFile: () => true,
     dev: deviceId,
@@ -132,7 +129,8 @@ vi.mock('@/libs/config.js', () => ({
 // return value to prove the independent path-containment guard in
 // markdown.ts does not simply rely on slugify behaving itself.
 vi.mock('@sindresorhus/slugify', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@sindresorhus/slugify')>();
+  const actual =
+    await importOriginal<typeof import('@sindresorhus/slugify')>();
   return {
     ...actual,
     default: vi.fn(actual.default),
@@ -346,11 +344,7 @@ describe('writeMarkdown', () => {
   });
 
   it('falls back to "untitled" when both the title and the uuid slugify to an empty string', () => {
-    const emptySlugRecord: Record = {
-      ...mockRecord,
-      title: '***',
-      uuid: '///',
-    };
+    const emptySlugRecord: Record = { ...mockRecord, title: '***', uuid: '///' };
 
     writeMarkdown(emptySlugRecord);
 
@@ -396,7 +390,9 @@ describe('writeMarkdown', () => {
     // first record's successful write, once for the second record's
     // failed attempt before it falls through to the suffixed path.
     expect(firstWrittenPath).toBe(resolve(outputDirectory, 'test-title.md'));
-    expect(secondWrittenPath).toBe(resolve(outputDirectory, 'test-title-2.md'));
+    expect(secondWrittenPath).toBe(
+      resolve(outputDirectory, 'test-title-2.md'),
+    );
     expect(writeFileSync).toHaveBeenCalledWith(
       resolve(outputDirectory, 'test-title.md'),
       firstRecord.content,
@@ -517,11 +513,7 @@ describe('writeMarkdown', () => {
       const seenSlugs = new Map<string, string>();
 
       const paths = ['first', 'second', 'third'].map((uuid) =>
-        writeMarkdown(
-          { ...mockRecord, uuid, title: 'Test Title' },
-          'overwrite',
-          seenSlugs,
-        ),
+        writeMarkdown({ ...mockRecord, uuid, title: 'Test Title' }, 'overwrite', seenSlugs),
       );
 
       expect(paths).toEqual([
@@ -537,11 +529,7 @@ describe('writeMarkdown', () => {
       // re-fetched next pass. Sharing seenSlugs across passes must not downgrade
       // it to `suffix` — same uuid still owns its slug and overwrites in place.
       const seenSlugs = new Map<string, string>();
-      const record: Record = {
-        ...mockRecord,
-        uuid: 'same',
-        title: 'Test Title',
-      };
+      const record: Record = { ...mockRecord, uuid: 'same', title: 'Test Title' };
 
       const firstPath = writeMarkdown(record, 'overwrite', seenSlugs);
       const secondPath = writeMarkdown(record, 'overwrite', seenSlugs);
@@ -558,16 +546,8 @@ describe('writeMarkdown', () => {
     it('never reassigns slug ownership, so the original owner still overwrites its own file after a different record suffixed', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const seenSlugs = new Map<string, string>();
-      const owner: Record = {
-        ...mockRecord,
-        uuid: 'owner',
-        title: 'Test Title',
-      };
-      const other: Record = {
-        ...mockRecord,
-        uuid: 'other',
-        title: 'Test Title',
-      };
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
 
       writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md
       writeMarkdown(other, 'overwrite', seenSlugs); // suffixed to test-title-2.md
@@ -578,19 +558,11 @@ describe('writeMarkdown', () => {
       expect(ownerRetryPath).toBe(resolve(outputDirectory, 'test-title.md'));
     });
 
-    it("transfers ownership to whoever writes the base path when the prior owner's file was removed", () => {
+    it('transfers ownership to whoever writes the base path when the prior owner\'s file was removed', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const seenSlugs = new Map<string, string>();
-      const owner: Record = {
-        ...mockRecord,
-        uuid: 'owner',
-        title: 'Test Title',
-      };
-      const other: Record = {
-        ...mockRecord,
-        uuid: 'other',
-        title: 'Test Title',
-      };
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
       const basePath = resolve(outputDirectory, 'test-title.md');
 
       writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md, owned by owner
@@ -607,11 +579,7 @@ describe('writeMarkdown', () => {
     it('suffixes an empty-uuid record onto an already-owned slug so it cannot clobber the owner', () => {
       mockWriteFileSyncRejectingExistingPaths();
       const seenSlugs = new Map<string, string>();
-      const owner: Record = {
-        ...mockRecord,
-        uuid: 'owner',
-        title: 'Test Title',
-      };
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
       const noUuid: Record = { ...mockRecord, uuid: '', title: 'Test Title' };
 
       writeMarkdown(owner, 'overwrite', seenSlugs); // test-title.md
@@ -634,11 +602,7 @@ describe('writeMarkdown', () => {
         uuid: 'suffixed',
         title: 'Test Title',
       };
-      const owner: Record = {
-        ...mockRecord,
-        uuid: 'owner',
-        title: 'Test Title',
-      };
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
 
       writeMarkdown(suffixed, 'suffix', seenSlugs); // test-title-2.md
       const ownerPath = writeMarkdown(owner, 'overwrite', seenSlugs);
@@ -656,16 +620,8 @@ describe('writeMarkdown', () => {
         resolve(otherDirectory, 'test-title.md'),
       ]);
       const seenSlugs = new Map<string, string>();
-      const owner: Record = {
-        ...mockRecord,
-        uuid: 'owner',
-        title: 'Test Title',
-      };
-      const other: Record = {
-        ...mockRecord,
-        uuid: 'other',
-        title: 'Test Title',
-      };
+      const owner: Record = { ...mockRecord, uuid: 'owner', title: 'Test Title' };
+      const other: Record = { ...mockRecord, uuid: 'other', title: 'Test Title' };
 
       writeMarkdown(owner, 'overwrite', seenSlugs); // /mock/output/test-title.md
       process.env.OUTPUT_DIRECTORY = otherDirectory; // user changes the setting
@@ -779,27 +735,9 @@ describe('writeMarkdown', () => {
       const seenSlugs = new Map<string, string>();
       const writtenState = new Map<string, WrittenRecordState>();
 
-      const firstPath = writeMarkdown(
-        mockRecord,
-        'suffix',
-        seenSlugs,
-        true,
-        writtenState,
-      );
-      const secondPath = writeMarkdown(
-        mockRecord,
-        'suffix',
-        seenSlugs,
-        true,
-        writtenState,
-      );
-      const thirdPath = writeMarkdown(
-        mockRecord,
-        'suffix',
-        seenSlugs,
-        true,
-        writtenState,
-      );
+      const firstPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
+      const secondPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
+      const thirdPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
 
       expect(firstPath).toBe(basePath);
       expect(secondPath).toBe(basePath);
@@ -828,13 +766,7 @@ describe('writeMarkdown', () => {
 
       writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
       vi.mocked(writeFileSync).mockClear();
-      const secondPath = writeMarkdown(
-        mockRecord,
-        'suffix',
-        seenSlugs,
-        true,
-        writtenState,
-      );
+      const secondPath = writeMarkdown(mockRecord, 'suffix', seenSlugs, true, writtenState);
 
       expect(secondPath).toBe(basePath);
       expect(writeFileSync).not.toHaveBeenCalled();
@@ -852,13 +784,7 @@ describe('writeMarkdown', () => {
       vi.mocked(lstatSync).mockImplementation((path) =>
         path === basePath ? nonFileStats : undefined,
       );
-      const secondPath = writeMarkdown(
-        mockRecord,
-        'suffix',
-        new Map(),
-        true,
-        writtenState,
-      );
+      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
 
       // basePath is still taken on disk, so the record lands on a real suffixed
       // file instead of being silently settled against the non-file.
@@ -1169,7 +1095,7 @@ describe('writeMarkdown', () => {
       );
     });
 
-    it("falls through to a fresh write when a different record claimed the tracked path after this record's file moved", () => {
+    it('falls through to a fresh write when a different record claimed the tracked path after this record\'s file moved', () => {
       // A's file is moved out of the vault; next pass a different same-slug
       // record B claims the freed base path first. A's reuse must NOT overwrite
       // B (both are deleted server-side, so a clobber loses B everywhere).
@@ -1178,29 +1104,12 @@ describe('writeMarkdown', () => {
       const seenSlugs = new Map<string, string>();
       const writtenState = new Map<string, WrittenRecordState>();
       const recordA: Record = { ...mockRecord, uuid: 'a', title: 'Test Title' };
-      const recordB: Record = {
-        ...mockRecord,
-        uuid: 'b',
-        title: 'Test Title',
-        content: 'B content',
-      };
+      const recordB: Record = { ...mockRecord, uuid: 'b', title: 'Test Title', content: 'B content' };
 
       writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenState); // test-title.md
       rmSync(basePath, { force: true }); // user moves A's file out of the vault
-      const bPath = writeMarkdown(
-        recordB,
-        'suffix',
-        seenSlugs,
-        true,
-        writtenState,
-      );
-      const aRetryPath = writeMarkdown(
-        recordA,
-        'suffix',
-        seenSlugs,
-        true,
-        writtenState,
-      );
+      const bPath = writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenState);
+      const aRetryPath = writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenState);
 
       expect(bPath).toBe(basePath);
       // B's write evicts A's stale entry for the base path, so A no longer reuses
@@ -1220,30 +1129,13 @@ describe('writeMarkdown', () => {
       const writtenState = new Map<string, WrittenRecordState>();
       const recordA: Record = { ...mockRecord, uuid: 'a', title: 'Test Title' };
       const recordB: Record = { ...mockRecord, uuid: 'b', title: 'Test Title' };
-      const recordC: Record = {
-        ...mockRecord,
-        uuid: 'c',
-        title: 'Test Title',
-        content: 'C content',
-      };
+      const recordC: Record = { ...mockRecord, uuid: 'c', title: 'Test Title', content: 'C content' };
 
       writeMarkdown(recordA, 'suffix', seenSlugs, true, writtenState); // test-title.md
       writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenState); // test-title-2.md
       rmSync(suffixedPath, { force: true }); // user deletes B's file from the vault
-      const cPath = writeMarkdown(
-        recordC,
-        'suffix',
-        seenSlugs,
-        true,
-        writtenState,
-      );
-      const bRetryPath = writeMarkdown(
-        recordB,
-        'suffix',
-        seenSlugs,
-        true,
-        writtenState,
-      );
+      const cPath = writeMarkdown(recordC, 'suffix', seenSlugs, true, writtenState);
+      const bRetryPath = writeMarkdown(recordB, 'suffix', seenSlugs, true, writtenState);
 
       expect(cPath).toBe(suffixedPath);
       // B takes the next free suffix rather than reusing C's file.
@@ -1261,13 +1153,7 @@ describe('writeMarkdown', () => {
 
       writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
       process.env.OUTPUT_DIRECTORY = newDirectory; // user changes the setting
-      const secondPath = writeMarkdown(
-        mockRecord,
-        'suffix',
-        new Map(),
-        true,
-        writtenState,
-      );
+      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
 
       // The stale old-directory entry is ignored; the record lands in the new
       // vault rather than being rewritten into the old one.
@@ -1304,23 +1190,11 @@ describe('writeMarkdown', () => {
       const basePath = resolve(outputDirectory, 'test-title.md');
       const writtenState = new Map<string, WrittenRecordState>();
 
-      const firstPath = writeMarkdown(
-        mockRecord,
-        'suffix',
-        new Map(),
-        true,
-        writtenState,
-      );
+      const firstPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
       // The user moves the file out of the vault: existsSync stays false (the
       // beforeEach default) and the disk model no longer holds the base path.
       rmSync(basePath, { force: true });
-      const secondPath = writeMarkdown(
-        mockRecord,
-        'suffix',
-        new Map(),
-        true,
-        writtenState,
-      );
+      const secondPath = writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
 
       // The stale tracked entry is ignored, so the record recreates its file at
       // the now-free base path rather than being pushed to a suffix.
@@ -1354,24 +1228,12 @@ describe('writeMarkdown', () => {
       const writtenState = new Map<string, WrittenRecordState>();
 
       // Pass one writes the file (absent), tracking it.
-      const firstPath = writeMarkdown(
-        mockRecord,
-        'skip',
-        new Map(),
-        true,
-        writtenState,
-      );
+      const firstPath = writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState);
       vi.mocked(writeFileSync).mockClear();
       // Pass two: the record is still unsettled and re-fetched. Under `skip` the
       // reused file must not be rewritten (the user may have edited it), but the
       // path still returns so the record can settle rather than loop pending.
-      const secondPath = writeMarkdown(
-        mockRecord,
-        'skip',
-        new Map(),
-        true,
-        writtenState,
-      );
+      const secondPath = writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState);
 
       expect(firstPath).toBe(basePath);
       expect(secondPath).toBe(basePath);
@@ -1384,9 +1246,7 @@ describe('writeMarkdown', () => {
       ]);
       const writtenState = new Map<string, WrittenRecordState>();
 
-      expect(
-        writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState),
-      ).toBeNull();
+      expect(writeMarkdown(mockRecord, 'skip', new Map(), true, writtenState)).toBeNull();
       expect(writtenState.has(mockRecord.uuid)).toBe(false);
     });
 
@@ -1466,10 +1326,7 @@ describe('writeMarkdown', () => {
 
       // Pass two rewrites with the new server content; the disk was untouched.
       vi.mocked(readFileSync).mockReturnValue(mockRecord.content);
-      const passTwoRecord: Record = {
-        ...mockRecord,
-        content: 'Server body two',
-      };
+      const passTwoRecord: Record = { ...mockRecord, content: 'Server body two' };
       writeMarkdown(passTwoRecord, 'suffix', new Map(), true, writtenState);
 
       // The baseline now reflects what pass two wrote, not the original content.
@@ -1522,10 +1379,7 @@ describe('writeMarkdown', () => {
       vi.mocked(readFileSync).mockReturnValue(assembledDocument as string);
       vi.mocked(writeFileSync).mockClear();
 
-      const updatedRecord: Record = {
-        ...syncedRecord,
-        content: 'Updated body.',
-      };
+      const updatedRecord: Record = { ...syncedRecord, content: 'Updated body.' };
       writeMarkdown(updatedRecord, 'suffix', new Map(), true, writtenState);
 
       const [writtenPath, rewrittenDocument] =
@@ -1808,7 +1662,9 @@ describe('writeMarkdown', () => {
       const writtenState = new Map<string, WrittenRecordState>();
 
       writeMarkdown(mockRecord, 'suffix', new Map(), true, writtenState);
-      vi.mocked(readFileSync).mockReturnValue(undefined as unknown as string);
+      vi.mocked(readFileSync).mockReturnValue(
+        undefined as unknown as string,
+      );
       vi.mocked(writeFileSync).mockClear();
 
       const updatedRecord: Record = {
@@ -1836,9 +1692,7 @@ describe('ensureOutputDirectory', () => {
 
   it('throws when neither OUTPUT_DIRECTORY nor the persisted config value is set', () => {
     delete process.env.OUTPUT_DIRECTORY;
-    expect(() => ensureOutputDirectory()).toThrow(
-      'Output directory is not set!',
-    );
+    expect(() => ensureOutputDirectory()).toThrow('Output directory is not set!');
   });
 
   it('creates the directory once and skips mkdirSync when it already exists', () => {
@@ -1883,7 +1737,10 @@ describe('readMarkdown', () => {
 
     const result = readMarkdown('./notes/Test Title.md');
 
-    expect(readFileSync).toHaveBeenCalledWith('./notes/Test Title.md', 'utf-8');
+    expect(readFileSync).toHaveBeenCalledWith(
+      './notes/Test Title.md',
+      'utf-8',
+    );
     expect(result.content).toBe(mockRecord.content);
   });
 
@@ -1978,12 +1835,7 @@ describe('readMarkdown', () => {
 });
 
 describe('buildWritePreview', () => {
-  const secondRecord: Record = {
-    uuid: 'def-456',
-    title: 'Test Title',
-    content: 'Second body',
-    createdAt: '2024-01-02T00:00:00Z',
-  };
+  const secondRecord: Record = { uuid: 'def-456', title: 'Test Title', content: 'Second body', createdAt: '2024-01-02T00:00:00Z' };
 
   beforeEach(() => {
     process.env.OUTPUT_DIRECTORY = outputDirectory;
