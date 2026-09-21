@@ -311,13 +311,12 @@ describe('resolveMarkdownInputs', () => {
   it.skipIf(skipPermissionTests)(
     'reports a glob pattern under a locked directory as skipped, not missing',
     () => {
-      // The kernel never expands `*` before stat'ing — the literal string
-      // "locked/*.md" is stat'd as one path — so traversing into a locked
-      // `locked` fails with EACCES the same way a literal file would,
-      // before glob expansion ever gets a chance to run. Reporting this as
-      // skipped rather than missing is intentional: with the parent
-      // unreadable there is no way to know whether the pattern would have
-      // matched, so "missing" (nothing matched) would be misleading.
+      // statSync receives the literal pattern string "locked/*.md", so
+      // traversal into `locked` fails with EACCES before glob expansion
+      // ever runs. Reporting this as skipped rather than missing is
+      // intentional: with the parent unreadable there is no way to know
+      // whether the pattern would have matched, so "missing" (nothing
+      // matched) would be misleading.
       const locked = join(workspace, 'locked');
       mkdirSync(locked);
       chmodSync(locked, 0o000);

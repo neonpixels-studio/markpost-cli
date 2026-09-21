@@ -117,28 +117,28 @@ const errnoCode = (error: unknown): string | undefined => {
 };
 
 // EACCES (no permission) and EPERM (operation not permitted) are the codes a
-// locked parent directory raises. Every other failure — including a
-// genuinely missing path (ENOENT/ENOTDIR) — keeps falling through to glob
-// handling below, unchanged from before this fix, so only the permission
-// case is reclassified.
+// locked parent directory raises. Every other failure, including a
+// genuinely missing path (ENOENT/ENOTDIR), falls through to glob handling.
 const PERMISSION_ERRNO_CODES = new Set(['EACCES', 'EPERM']);
+
+const isPermissionError = (error: unknown): boolean => {
+  return PERMISSION_ERRNO_CODES.has(errnoCode(error) ?? '');
+};
 
 type InputStatResult =
   | { kind: 'stats'; stats: Stats }
   | { kind: 'not-found' }
-  | { kind: 'unreadable' };
+  | { kind: 'permission-denied' };
 
 // Stats an input argument and discriminates *why* the stat failed, which
 // `existsSync` cannot do: it catches every error, including EACCES, and
-// collapses them into a single `false`. That collapse is what previously
-// misreported a file behind a locked parent directory as "missing" instead
-// of a permission error.
+// collapses them into a single `false`.
 const statInput = (path: string): InputStatResult => {
   try {
     return { kind: 'stats', stats: statSync(path) };
   } catch (error) {
-    if (PERMISSION_ERRNO_CODES.has(errnoCode(error) ?? '')) {
-      return { kind: 'unreadable' };
+    if (isPermissionError(error)) {
+      return { kind: 'permission-denied' };
     }
 
     return { kind: 'not-found' };
@@ -240,11 +240,10 @@ const collectFromGlob = (
 // directly is taken as-is (the user was explicit, so its extension is not
 // second-guessed) once confirmed readable; an existing directory is recursed;
 // a non-regular file (device, FIFO) is skipped rather than handed to a reader
-// that would block or read garbage; a path that can't be stat'd for any
+// that would block or read garbage; a path that can't be stat'd for a
 // non-permission reason (most commonly it doesn't exist) is treated as a
-// glob, same as before this fix; a permission failure (EACCES/EPERM, most
-// commonly a locked parent directory) is skipped instead of silently
-// falling through to glob handling and being misreported as missing.
+// glob; a permission failure (EACCES/EPERM, most commonly a locked parent
+// directory) is skipped.
 const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
   const statResult = statInput(input);
 
@@ -253,7 +252,7 @@ const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
     return;
   }
 
-  if (statResult.kind === 'unreadable') {
+  if (statResult.kind === 'permission-denied') {
     accumulator.skipped.push(input);
     return;
   }
