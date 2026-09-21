@@ -22,7 +22,7 @@ import { config } from '@/libs/config.js';
 import { expandHomeDirectory } from '@/libs/paths.js';
 import {
   buildRecordDocument,
-  extractFrontmatterTags,
+  extractFrontmatterTagsWithDiagnostics,
   stripFrontmatterDocument,
 } from '@/libs/frontmatter.js';
 import { Record } from '@/types/records.types.js';
@@ -827,21 +827,36 @@ export const buildWritePreview = (
 // `# ` heading writeMarkdown added. Strip them here so pushing the file back
 // sends only the body — otherwise markpost would treat the frontmatter+heading
 // as content and wrap it in a second frontmatter block on ingestion. The same
-// block's `tags:` line is extracted separately (extractFrontmatterTags) so a
-// pulled-edited-repushed file forwards its tags to createRecord instead of
-// them being discarded along with the rest of the stripped block (issue #170).
+// block's `tags:` line is extracted separately
+// (extractFrontmatterTagsWithDiagnostics) so a pulled-edited-repushed file
+// forwards its tags to createRecord instead of them being discarded along
+// with the rest of the stripped block (issue #170). `tagsLineUnparseable`
+// carries forward whether that same line was present but unreadable, so push
+// can warn the user tags were dropped instead of reporting success with none
+// (issue #195).
 export const readMarkdown = (
   filePath: string,
-): { title: string; content: string; tags: string[] } => {
+): {
+  title: string;
+  content: string;
+  tags: string[];
+  // Optional (rather than always-boolean) so existing callers/mocks that only
+  // care about title/content/tags aren't forced to thread a field they never
+  // use; push.ts treats an absent value the same as false.
+  tagsLineUnparseable?: boolean;
+} => {
   if (!existsSync(filePath)) {
     throw Error(`File not found: ${filePath}`);
   }
 
   const rawContent = readFileSync(filePath, 'utf-8');
+  const { tags, tagsLineUnparseable } =
+    extractFrontmatterTagsWithDiagnostics(rawContent);
 
   return {
     title: basename(filePath, extname(filePath)),
     content: stripFrontmatterDocument(rawContent),
-    tags: extractFrontmatterTags(rawContent),
+    tags,
+    tagsLineUnparseable,
   };
 };
