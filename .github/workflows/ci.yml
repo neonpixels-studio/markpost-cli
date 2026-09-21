@@ -21,14 +21,18 @@ jobs:
       - run: npm run test:ci
       - name: Pack and smoke-test the installed CLI artifact
         run: |
-          # npm pack's own prepack/postpack hooks rebuild dist from a clean
-          # state and verify dist/index.js exists, so a separate `npm run
-          # build` step is redundant here. Installing the tarball (rather
-          # than running node dist/index.js from the working tree) exercises
-          # the actual published `files`/`bin` config, so this catches the
-          # #152 class of "declared bin doesn't exist in the tarball" bugs.
-          tarball=$(npm pack --json | jq -r '.[0].filename')
-          npm install -g "./$tarball"
+          # Installing the packed tarball (rather than running node
+          # dist/index.js from the working tree) exercises the real
+          # published `files`/`bin` config, catching the #152 class of
+          # "declared bin doesn't exist in the tarball" bugs. Packing to a
+          # known directory and globbing for the tarball (instead of
+          # parsing `npm pack --json` output) sidesteps any risk of
+          # lifecycle-script output landing on the same stream as the JSON.
+          pack_dir="$RUNNER_TEMP/pack"
+          mkdir -p "$pack_dir"
+          npm pack --pack-destination "$pack_dir"
+          tarball=$(ls "$pack_dir"/*.tgz)
+          npm install -g "$tarball"
           markpost --help > "$RUNNER_TEMP/help.txt" 2>&1 || { status=$?; echo "installed CLI exited $status — see output below"; cat "$RUNNER_TEMP/help.txt"; exit 1; }
           grep -q '^Usage: markpost <command>' "$RUNNER_TEMP/help.txt" || { echo "top-level usage line changed — update ci.yml or HELP_TEXT in src/index.ts"; cat "$RUNNER_TEMP/help.txt"; exit 1; }
         env:
