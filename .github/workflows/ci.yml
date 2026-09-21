@@ -31,8 +31,12 @@ jobs:
           pack_dir="$RUNNER_TEMP/pack"
           mkdir -p "$pack_dir"
           npm pack --pack-destination "$pack_dir"
-          tarball=$(ls "$pack_dir"/*.tgz)
-          npm install -g "$tarball"
+          tarballs=("$pack_dir"/*.tgz)
+          if [ "${#tarballs[@]}" -ne 1 ] || [ ! -f "${tarballs[0]}" ]; then
+            echo "expected exactly one tarball in $pack_dir, found: ${tarballs[*]}"
+            exit 1
+          fi
+          npm install -g "${tarballs[0]}"
           markpost --help > "$RUNNER_TEMP/help.txt" 2>&1 || { status=$?; echo "installed CLI exited $status — see output below"; cat "$RUNNER_TEMP/help.txt"; exit 1; }
           grep -q '^Usage: markpost <command>' "$RUNNER_TEMP/help.txt" || { echo "top-level usage line changed — update ci.yml or HELP_TEXT in src/index.ts"; cat "$RUNNER_TEMP/help.txt"; exit 1; }
         env:
