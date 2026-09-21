@@ -289,6 +289,25 @@ describe('resolveMarkdownInputs', () => {
     },
   );
 
+  it.skipIf(skipPermissionTests)(
+    'reports a file behind a locked parent directory as skipped, not missing',
+    () => {
+      const locked = join(workspace, 'locked');
+      const target = createFile('locked/secret.md');
+      chmodSync(locked, 0o000);
+
+      try {
+        const { files, missing, skipped } = resolveMarkdownInputs([target]);
+
+        expect(files).toEqual([]);
+        expect(missing).toEqual([]);
+        expect(skipped).toEqual([target]);
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
+
   it('reports inputs that match nothing without dropping the rest', () => {
     const real = createFile('real.md');
 

@@ -1,7 +1,6 @@
 import {
   accessSync,
   constants,
-  existsSync,
   globSync,
   readdirSync,
   realpathSync,
@@ -107,6 +106,48 @@ const statOrSkip = (
   }
 };
 
+// Node reports fs failures via an `error.code` string (its equivalent of
+// inspecting `$e->getCode()` against a known errno constant in PHP) rather
+// than distinct exception classes, so distinguishing failure kinds means
+// reading that field instead of catching a specific error type.
+const errnoCode = (error: unknown): string | undefined => {
+  if (error instanceof Error && 'code' in error) {
+    return (error as NodeJS.ErrnoException).code;
+  }
+
+  return undefined;
+};
+
+// A path component genuinely not existing (ENOENT) or not being a directory
+// where one was expected (ENOTDIR) — as opposed to existing but being
+// unreachable for some other reason, e.g. a locked parent directory.
+const NOT_FOUND_ERRNO_CODES = new Set(['ENOENT', 'ENOTDIR']);
+
+type InputStatResult =
+  | { kind: 'stats'; stats: Stats }
+  | { kind: 'not-found' }
+  | { kind: 'unreadable' };
+
+// Stats an input argument and discriminates *why* the stat failed, which
+// `existsSync` cannot do: it catches every error, including EACCES, and
+// collapses them into a single `false`. That collapse is what previously
+// misreported a file behind a locked parent directory as "missing" — the
+// same outcome as a typo'd path — instead of a permission error. Genuinely
+// missing (ENOENT/ENOTDIR) still falls through to glob handling below, since
+// that's also how an actual glob pattern (no literal file) looks; anything
+// else (most commonly EACCES) is surfaced distinctly as unreadable.
+const statInput = (path: string): InputStatResult => {
+  try {
+    return { kind: 'stats', stats: statSync(path) };
+  } catch (error) {
+    if (NOT_FOUND_ERRNO_CODES.has(errnoCode(error) ?? '')) {
+      return { kind: 'not-found' };
+    }
+
+    return { kind: 'unreadable' };
+  }
+};
+
 // A file can stat fine (mode 000 still reports as a regular file) yet fail
 // the moment something actually opens it — statSync doesn't check permission
 // bits, only accessSync does. Pre-checking here means an unreadable file is
@@ -202,19 +243,25 @@ const collectFromGlob = (
 // directly is taken as-is (the user was explicit, so its extension is not
 // second-guessed) once confirmed readable; an existing directory is recursed;
 // a non-regular file (device, FIFO) is skipped rather than handed to a reader
-// that would block or read garbage; anything that does not exist is treated
-// as a glob.
+// that would block or read garbage; anything that genuinely does not exist
+// (ENOENT/ENOTDIR) is treated as a glob; anything that exists but can't be
+// stat'd for another reason (most commonly EACCES from a locked parent
+// directory) is skipped rather than silently falling through to glob
+// handling and being misreported as missing.
 const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
-  if (!existsSync(input)) {
+  const statResult = statInput(input);
+
+  if (statResult.kind === 'not-found') {
     collectFromGlob(input, accumulator);
     return;
   }
 
-  const stats = statOrSkip(input, accumulator);
-
-  if (!stats) {
+  if (statResult.kind === 'unreadable') {
+    accumulator.skipped.push(input);
     return;
   }
+
+  const { stats } = statResult;
 
   if (stats.isDirectory()) {
     collectFromDirectory(input, accumulator);
