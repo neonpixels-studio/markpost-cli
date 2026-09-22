@@ -142,6 +142,94 @@ describe('runPushCommand', () => {
     ]);
   });
 
+  // Regression coverage for issue #195: a frontmatter tags line that no
+  // longer parses used to drop to no tags with push reporting plain success
+  // — silent data loss reported as success. readMarkdown now flags that case
+  // via tagsLineUnparseable, and push must surface it as a per-file warning
+  // while still completing the push (tags dropped, not failed).
+  it('warns when readMarkdown flags an unparseable tags line, but still pushes with no tags', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['./notes/test-title.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'Test Title',
+      content: 'Test Content',
+      tags: [],
+      tagsLineUnparseable: true,
+    });
+    vi.mocked(createRecord).mockResolvedValue(mockRecord);
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['./notes/test-title.md']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Warning: tags in "./notes/test-title.md" could not be parsed',
+      ),
+    );
+    expect(createRecord).toHaveBeenCalledWith('Test Title', 'Test Content', []);
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Pushed "Test Title" (abc-123)'),
+    );
+    // A warning is not a failure: the file still pushed successfully, so the
+    // exit code must stay clean.
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('does not warn when readMarkdown omits tagsLineUnparseable', async () => {
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['./notes/test-title.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'Test Title',
+      content: 'Test Content',
+      tags: [],
+    });
+    const { createRecord } = await import('@/libs/records.js');
+    vi.mocked(createRecord).mockResolvedValue(mockRecord);
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['./notes/test-title.md']);
+
+    expect(console.error).not.toHaveBeenCalled();
+    expect(createRecord).toHaveBeenCalledWith('Test Title', 'Test Content', []);
+  });
+
+  it('does not warn when readMarkdown explicitly reports tagsLineUnparseable: false', async () => {
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['./notes/test-title.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown).mockReturnValue({
+      title: 'Test Title',
+      content: 'Test Content',
+      tags: ['ci'],
+      tagsLineUnparseable: false,
+    });
+    const { createRecord } = await import('@/libs/records.js');
+    vi.mocked(createRecord).mockResolvedValue(mockRecord);
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['./notes/test-title.md']);
+
+    expect(console.error).not.toHaveBeenCalled();
+    expect(createRecord).toHaveBeenCalledWith('Test Title', 'Test Content', [
+      'ci',
+    ]);
+  });
+
   // checkConfig signals failure by resolving false rather than terminating the
   // process, so push must short-circuit before resolving inputs or creating a
   // record.

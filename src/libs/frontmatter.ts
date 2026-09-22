@@ -332,28 +332,42 @@ const splitTagList = (tagList: string): string[] | null => {
 // partial garbage out of it and forwarding it to createRecord as a fabricated
 // tag. An empty token (`tags: [ci, ]` or `tags: [ci,,deploy]`, both reachable
 // from a hand-edited file) is dropped rather than forwarded as a blank tag.
-const parseTagsLine = (serializedTags: string): string[] => {
+//
+// `unparseable` distinguishes a genuinely empty list (`tags: []`, or every
+// token hand-edited down to blank) from a line that no longer has a readable
+// shape at all (no bracket pair, or an unbalanced quote) — the caller uses
+// this to warn that tags were dropped rather than silently applying none
+// (issue #195). Only the shape is judged here; an empty result from a
+// well-formed `[...]` is not an error.
+type TagsLineParseResult = {
+  tags: string[];
+  unparseable: boolean;
+};
+
+const parseTagsLine = (serializedTags: string): TagsLineParseResult => {
   const trimmedValue = serializedTags.trim();
 
   if (!trimmedValue.startsWith('[') || !trimmedValue.endsWith(']')) {
-    return [];
+    return { tags: [], unparseable: true };
   }
 
   const tagList = trimmedValue.slice(1, -1).trim();
 
   if (tagList === '') {
-    return [];
+    return { tags: [], unparseable: false };
   }
 
   const tokens = splitTagList(tagList);
 
   if (!tokens) {
-    return [];
+    return { tags: [], unparseable: true };
   }
 
-  return tokens
+  const tags = tokens
     .map((token) => unquoteYamlScalar(token.trim()))
     .filter((tag) => tag !== '');
+
+  return { tags, unparseable: false };
 };
 
 // Companion to stripFrontmatterDocument: extracts the tags markpost's own
@@ -364,13 +378,34 @@ const parseTagsLine = (serializedTags: string): string[] => {
 // carrying markpost tags. Returns [] for any document with no markpost
 // frontmatter, matching what a tagless record would round-trip to.
 export const extractFrontmatterTags = (content: string): string[] => {
+  return extractFrontmatterTagsWithDiagnostics(content).tags;
+};
+
+// Result of extracting tags, plus whether the tags line was present but
+// unreadable. `tagsLineUnparseable` is false both when there's no markpost
+// frontmatter at all and when the tags line parsed to a genuinely empty list
+// — only a line whose shape parseTagsLine couldn't read sets it, so a caller
+// (push, issue #195) can warn specifically about dropped data rather than
+// every tagless file.
+export type FrontmatterTagsExtraction = {
+  tags: string[];
+  tagsLineUnparseable: boolean;
+};
+
+export const extractFrontmatterTagsWithDiagnostics = (
+  content: string,
+): FrontmatterTagsExtraction => {
   const parsed = parseFrontmatterDocument(content);
 
   if (!parsed) {
-    return [];
+    return { tags: [], tagsLineUnparseable: false };
   }
 
-  return parseTagsLine(lineValue(parsed.blockLines, TAGS_LINE_INDEX));
+  const { tags, unparseable } = parseTagsLine(
+    lineValue(parsed.blockLines, TAGS_LINE_INDEX),
+  );
+
+  return { tags, tagsLineUnparseable: unparseable };
 };
 
 const isPlainObject = (value: unknown): value is { [key: string]: unknown } => {

@@ -4,6 +4,7 @@ import {
   assembleMarkdownDocument,
   buildRecordDocument,
   extractFrontmatterTags,
+  extractFrontmatterTagsWithDiagnostics,
   serializeFrontmatter,
   stripFrontmatterDocument,
 } from '@/libs/frontmatter.js';
@@ -660,5 +661,98 @@ describe('extractFrontmatterTags', () => {
       'deploy',
       'incoming',
     ]);
+  });
+});
+
+// Companion to extractFrontmatterTags: same extraction, plus whether the
+// tags line was present but unreadable, so push (issue #195) can warn about
+// dropped tags instead of reporting success with silently-none.
+describe('extractFrontmatterTagsWithDiagnostics', () => {
+  it('reports no warning for a normally-parsed tags line', () => {
+    const document = assembleMarkdownDocument({
+      title: 'Production deploy succeeded',
+      body: 'Commit a1f9c20 shipped to prod.',
+      frontmatter,
+    });
+
+    expect(extractFrontmatterTagsWithDiagnostics(document)).toEqual({
+      tags: ['ci', 'deploy', 'incoming'],
+      tagsLineUnparseable: false,
+    });
+  });
+
+  it('reports no warning for a legitimately empty tags line', () => {
+    const document = assembleMarkdownDocument({
+      title: 'No tags here',
+      body: 'Body.',
+      frontmatter: { ...frontmatter, title: 'No tags here', tags: [] },
+    });
+
+    expect(extractFrontmatterTagsWithDiagnostics(document)).toEqual({
+      tags: [],
+      tagsLineUnparseable: false,
+    });
+  });
+
+  it('reports no warning for a document with no markpost frontmatter at all', () => {
+    expect(extractFrontmatterTagsWithDiagnostics('Just some text.')).toEqual({
+      tags: [],
+      tagsLineUnparseable: false,
+    });
+  });
+
+  // The scenario issue #195 targets: a hand-edited tags line that no longer
+  // has a bracketed shape (`tags: urgent`) still passes every other block
+  // check, so parseTagsLine drops to [] — but this caller must be told that
+  // drop happened rather than treat it the same as a file with no tags.
+  it('flags an unbracketed hand-edited tags line as unparseable', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: urgent\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTagsWithDiagnostics(document)).toEqual({
+      tags: [],
+      tagsLineUnparseable: true,
+    });
+  });
+
+  it('flags a tags line with an unbalanced quote as unparseable', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci", deploy]\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTagsWithDiagnostics(document)).toEqual({
+      tags: [],
+      tagsLineUnparseable: true,
+    });
+  });
+
+  it('reports no warning for a hand-edited trailing comma (still a valid bracketed list)', () => {
+    const document =
+      '---\n' +
+      'title: Runbook\n' +
+      'source: manual\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci, ]\n' +
+      '---\n\n' +
+      '# Runbook\n\n' +
+      'Body.';
+
+    expect(extractFrontmatterTagsWithDiagnostics(document)).toEqual({
+      tags: ['ci'],
+      tagsLineUnparseable: false,
+    });
   });
 });

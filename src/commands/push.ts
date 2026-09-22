@@ -65,9 +65,39 @@ const toMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
+// A hand-edited tags line markpost's frontmatter no longer reads as a valid
+// tag list (e.g. `tags: urgent`, an unbalanced quote) still produces a
+// successful push — dropping to no tags rather than failing the file — so
+// warn here rather than in readMarkdown/frontmatter.ts: this is the one place
+// that decides what reaches the terminal, keeping the parsing libs free of
+// presentation concerns (issue #195). Mirrors export.ts's warning convention
+// (stderr via console.error + chalk.yellow, not console.warn) but — unlike
+// export's truncation/malformed-row warnings — deliberately leaves exitCode
+// alone: the record itself still pushed successfully, so this is a warning,
+// not a failure.
+const warnIfTagsLineUnparseable = (
+  filePath: string,
+  tagsLineUnparseable: boolean | undefined,
+): void => {
+  if (!tagsLineUnparseable) {
+    return;
+  }
+
+  console.error(
+    chalk.yellow(
+      sanitizeForTerminal(
+        `Warning: tags in "${filePath}" could not be parsed; pushing with no tags.`,
+      ),
+    ),
+  );
+};
+
 const pushFile = async (filePath: string): Promise<PushResult> => {
   try {
-    const { title, content, tags } = readMarkdown(filePath);
+    const { title, content, tags, tagsLineUnparseable } =
+      readMarkdown(filePath);
+    warnIfTagsLineUnparseable(filePath, tagsLineUnparseable);
+
     const record = await createRecord(title, content, tags);
 
     if (!record) {

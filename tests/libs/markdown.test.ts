@@ -1791,6 +1791,47 @@ describe('readMarkdown', () => {
 
     expect(result.tags).toEqual([]);
   });
+
+  it('does not flag tagsLineUnparseable for a normally-parsed tags line', () => {
+    const pulledDocument =
+      '---\n' +
+      'title: Deploy\n' +
+      'source: webhook/github\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: [ci, deploy]\n' +
+      '---\n\n' +
+      '# Deploy\n\n' +
+      'Commit shipped.';
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(pulledDocument);
+
+    const result = readMarkdown('./notes/deploy.md');
+
+    expect(result.tagsLineUnparseable).toBe(false);
+  });
+
+  // Regression coverage for issue #195: a hand-edited tags line that no
+  // longer parses used to drop to no tags with nothing telling the caller it
+  // happened. readMarkdown must surface that so push can warn instead of
+  // reporting success with tags silently dropped.
+  it('flags tagsLineUnparseable when the frontmatter tags line no longer parses', () => {
+    const pulledDocument =
+      '---\n' +
+      'title: Deploy\n' +
+      'source: webhook/github\n' +
+      'created: 2026-06-14T09:41:02Z\n' +
+      'tags: urgent\n' +
+      '---\n\n' +
+      '# Deploy\n\n' +
+      'Commit shipped.';
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(pulledDocument);
+
+    const result = readMarkdown('./notes/deploy.md');
+
+    expect(result.tags).toEqual([]);
+    expect(result.tagsLineUnparseable).toBe(true);
+  });
 });
 
 describe('buildWritePreview', () => {
