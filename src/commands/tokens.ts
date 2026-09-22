@@ -32,6 +32,14 @@ const printTokenSecret = (token: string): void => {
   console.log(chalk.bold(`  ${sanitizeForTerminal(token)}`));
 };
 
+// Shared by every "sanitize an untrusted field, or show a fixed fallback
+// when it's absent" line below (expires, last used, scopes) — the same
+// concern repeated three times, so it's pulled into one helper.
+const sanitizedOrFallback = (
+  value: string | null | undefined,
+  fallback: string,
+): string => (value ? sanitizeForTerminal(value) : fallback);
+
 // Every field here comes from the untrusted API response, so each is
 // stripped of control/ANSI escapes before printing (see terminal.ts). Prints
 // the masked `prefix` (e.g. `mp_live_ab12`), never a full secret — the
@@ -41,18 +49,15 @@ const printToken = (token: Token): void => {
   console.log(`  id:         ${sanitizeForTerminal(token.id)}`);
   console.log(`  prefix:     ${sanitizeForTerminal(token.prefix)}`);
   console.log(`  created:    ${sanitizeForTerminal(token.createdAt)}`);
+  console.log(`  expires:    ${sanitizedOrFallback(token.expiresAt, 'never')}`);
   console.log(
-    `  expires:    ${token.expiresAt ? sanitizeForTerminal(token.expiresAt) : 'never'}`,
+    `  last used:  ${sanitizedOrFallback(token.lastUsedAt, 'never used')}`,
   );
   console.log(
-    `  last used:  ${token.lastUsedAt ? sanitizeForTerminal(token.lastUsedAt) : 'never used'}`,
-  );
-  console.log(
-    `  scopes:     ${
-      token.scopes && token.scopes.length > 0
-        ? sanitizeForTerminal(token.scopes.join(', '))
-        : 'full access'
-    }`,
+    `  scopes:     ${sanitizedOrFallback(
+      token.scopes && token.scopes.length > 0 ? token.scopes.join(', ') : null,
+      'full access',
+    )}`,
   );
 };
 
@@ -90,19 +95,27 @@ const listTokens = async (json: boolean): Promise<void> => {
   tokens.forEach(printToken);
 };
 
-// Parses `--expires-in-days`: `null` for anything that isn't a clean whole
-// number, including an empty string. markpost enforces the actual bounds
-// (1-3650 days, server/api/tokens/index.post.ts) — this only guards against
-// sending a non-numeric value, so the range check stays in one place instead
-// of being duplicated (and risking drift) on the CLI side.
-const parseExpiresInDays = (raw: string): number | null => {
-  if (raw.trim() === '') {
-    return null;
+// Only digits (with an optional leading `-`) count as a whole number. Plain
+// `Number()` + `Number.isInteger()` would also accept hex (`0x10`) and
+// exponent (`1e2`) forms, silently minting a token with a surprising expiry
+// — this pattern rejects both.
+const WHOLE_NUMBER_PATTERN = /^-?\d+$/;
+
+// Resolves `--expires-in-days`: `undefined` when the flag was omitted
+// (matches markpost's own "no expiry requested" semantics), a parsed number
+// when it's a clean whole number, or `null` when it's present but malformed
+// (including an empty string). markpost enforces the actual bounds (1-3650
+// days, server/api/tokens/index.post.ts) — this only guards against sending
+// a non-numeric value, so the range check stays in one place instead of
+// being duplicated (and risking drift) on the CLI side.
+const resolveExpiresInDays = (
+  raw: string | undefined,
+): number | null | undefined => {
+  if (raw === undefined) {
+    return undefined;
   }
 
-  const parsed = Number(raw);
-
-  return Number.isInteger(parsed) ? parsed : null;
+  return WHOLE_NUMBER_PATTERN.test(raw.trim()) ? Number(raw) : null;
 };
 
 const createTokenCommand = async (rest: string[]): Promise<void> => {
@@ -119,20 +132,14 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
     return;
   }
 
-  let expiresInDays: number | undefined;
+  const expiresInDays = resolveExpiresInDays(values['expires-in-days']);
 
-  if (values['expires-in-days'] !== undefined) {
-    const parsed = parseExpiresInDays(values['expires-in-days']);
-
-    if (parsed === null) {
-      failWithUsage(
-        `--expires-in-days must be a whole number, got \`${values['expires-in-days']}\`.`,
-        USAGE,
-      );
-      return;
-    }
-
-    expiresInDays = parsed;
+  if (expiresInDays === null) {
+    failWithUsage(
+      `--expires-in-days must be a whole number, got \`${values['expires-in-days']}\`.`,
+      USAGE,
+    );
+    return;
   }
 
   const input: CreateTokenInput = { name: values.name, expiresInDays };
@@ -142,12 +149,11 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
     // A token may still have been minted server-side with its one-time
     // secret in the response the CLI just discarded; that secret is now
     // unrecoverable, so point at how to recover deliberately rather than
-    // letting a blind retry orphan a token. Mirrors createSourceCommand's
-    // equivalent failure message in commands/sources.ts.
-    console.error(
-      chalk.redBright(
-        'Failed to create token. Run `markpost tokens list` to check whether it was created anyway — if it was, its one-time secret is unrecoverable, so revoke it and run `tokens create` again to mint a new one.',
-      ),
+    // letting a blind retry orphan a token. `failWithMessage` (not a bare
+    // console.error) so a scripted `tokens create ... || alert` catches the
+    // failure via a non-zero exit instead of reading it as success.
+    failWithMessage(
+      'Failed to create token. Run `markpost tokens list` to check whether it was created anyway — if it was, its one-time secret is unrecoverable, so revoke it and run `tokens create` again to mint a new one.',
     );
     return;
   }
@@ -158,10 +164,12 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
   // CreatedToken); a response that omits it means the token was created but
   // is now unrecoverable. Fail before printing any success line, so stdout
   // never ends on "Created ..." for an unusable token — mirrors
-  // rotateSecretForSource's equivalent guard in commands/sources.ts.
+  // rotateSecretForSource's equivalent guard in commands/sources.ts. The id
+  // is already in hand from the response, so point straight at it rather
+  // than sending the user through `tokens list` to find it.
   if (!secret) {
     failWithMessage(
-      'The token was created but the server did not return its secret — it is now unrecoverable. Run `markpost tokens revoke <id>` then `tokens create` again to mint one you can copy.',
+      `The token was created but the server did not return its secret — it is now unrecoverable. Run \`markpost tokens revoke ${sanitizeForTerminal(tokenFields.id)}\` then \`tokens create\` again to mint one you can copy.`,
     );
     return;
   }

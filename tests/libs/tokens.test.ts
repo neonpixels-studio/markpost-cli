@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  createToken,
-  fetchTokens,
-  revokeToken,
-} from '@/libs/tokens.js';
+import { createToken, fetchTokens, revokeToken } from '@/libs/tokens.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { logErrorMessage } from '@/libs/errors.js';
 import { Token } from '@/types/tokens.types.js';
@@ -122,33 +118,28 @@ describe('fetchTokens', () => {
     expect(await fetchTokens()).toEqual([mockToken]);
   });
 
-  it('returns [] and surfaces error details when the response is ok but carries errors', async () => {
+  // fetchTokens deliberately does NOT swallow a failed fetch into `[]` — a
+  // failure must not masquerade as "no tokens" to the command layer, which
+  // relies on the throw to report the failure loudly (see libs/tokens.ts).
+  it('rejects and surfaces error details when the response is ok but carries errors', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Error', detail: 'Server error' }] } },
       true,
     );
-    expect(await fetchTokens()).toEqual([]);
-    expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchTokens',
-      'Error: Server error',
-    );
+    await expect(fetchTokens()).rejects.toThrow('Error: Server error');
   });
 
-  it('returns [] and surfaces error details when the response is not ok', async () => {
+  it('rejects and surfaces error details when the response is not ok', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Error', detail: 'Server error' }] } },
       false,
     );
-    expect(await fetchTokens()).toEqual([]);
-    expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchTokens',
-      'Error: Server error',
-    );
+    await expect(fetchTokens()).rejects.toThrow('Error: Server error');
   });
 
-  it('returns [] on network failure', async () => {
+  it('rejects on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await fetchTokens()).toEqual([]);
+    await expect(fetchTokens()).rejects.toThrow('Network error');
   });
 
   it('skips a resource with no attributes and reports the count', async () => {
@@ -247,8 +238,7 @@ describe('createToken', () => {
           errors: [
             {
               title: 'Invalid Attribute',
-              detail:
-                'ExpiresInDays must be a whole number between 1 and 3650',
+              detail: 'ExpiresInDays must be a whole number between 1 and 3650',
             },
           ],
         },

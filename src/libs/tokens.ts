@@ -16,16 +16,16 @@ import {
 const JSON_API_CONTENT_TYPE = 'application/vnd.api+json';
 const TOKENS_PATH = '/api/tokens';
 
+// Deliberately does not swallow a failed fetch into `[]`: a failure must not
+// masquerade as "no tokens" the way `sources list` currently lets it — see
+// the equivalent comment on `listRecords` in commands/records.ts, which this
+// mirrors instead. The command layer's outer try/catch reports the thrown
+// error via `failWithMessage`, honoring the documented `--json` failure
+// contract (README "JSON failure contract").
 export const fetchTokens = async (): Promise<Token[]> => {
-  try {
-    const body = (await authedRequest(TOKENS_PATH)) as TokenListApiResponse;
+  const body = (await authedRequest(TOKENS_PATH)) as TokenListApiResponse;
 
-    return unwrapResourceCollection('fetchTokens', body, 'token');
-  } catch (error) {
-    logApiFailure('fetchTokens', error);
-
-    return [];
-  }
+  return unwrapResourceCollection('fetchTokens', body, 'token');
 };
 
 // Mints a token via markpost's POST /api/tokens. The response reveals the raw

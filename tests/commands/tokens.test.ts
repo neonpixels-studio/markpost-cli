@@ -157,12 +157,41 @@ describe('runTokensCommand', () => {
 
       await runTokensCommand(['list']);
 
+      // Anchored to the full line (not a bare `stringContaining('never')`,
+      // which "never used" would also satisfy even if the expires branch
+      // regressed to printing something else).
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('never'),
+        expect.stringContaining('expires:    never'),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('never used'),
+        expect.stringContaining('last used:  never used'),
       );
+    });
+
+    // fetchTokens deliberately propagates a failed fetch (see libs/tokens.ts)
+    // instead of swallowing it to `[]`, so a fetch failure must not print
+    // "No API tokens found." and exit 0 — that would misreport an error as
+    // an empty account.
+    it('exits non-zero and prints nothing to stdout when the fetch fails', async () => {
+      const { fetchTokens } = await import('@/libs/tokens.js');
+      vi.mocked(fetchTokens).mockRejectedValue(new Error('Server error'));
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['list']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('exits non-zero and prints nothing to stdout in --json mode when the fetch fails', async () => {
+      const { fetchTokens } = await import('@/libs/tokens.js');
+      vi.mocked(fetchTokens).mockRejectedValue(new Error('Server error'));
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['list', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     });
 
     it('renders "full access" for a null scopes list', async () => {
@@ -380,7 +409,32 @@ describe('runTokensCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
-    it('reports an error when creation fails', async () => {
+    // Plain `Number()` + `Number.isInteger()` would accept both of these
+    // (`Number('0x10')` is 16, `Number('1e2')` is 100), silently minting a
+    // token with a surprising expiry instead of rejecting the malformed flag.
+    it.each(['0x10', '1e2'])(
+      'rejects a hex/exponent --expires-in-days value (%s) rather than silently accepting it',
+      async (value) => {
+        const { createToken } = await import('@/libs/tokens.js');
+        const { runTokensCommand } = await import('@/commands/tokens.js');
+
+        await runTokensCommand([
+          'create',
+          '--name',
+          'CI token',
+          '--expires-in-days',
+          value,
+        ]);
+
+        expect(createToken).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining('must be a whole number'),
+        );
+        expect(process.exitCode).toBe(1);
+      },
+    );
+
+    it('reports an error and exits non-zero when creation fails', async () => {
       const { createToken } = await import('@/libs/tokens.js');
       vi.mocked(createToken).mockResolvedValue(null);
       const { runTokensCommand } = await import('@/commands/tokens.js');
@@ -390,6 +444,9 @@ describe('runTokensCommand', () => {
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to create token.'),
       );
+      // A scripted `tokens create ... || alert` must see the failure via the
+      // exit code, not just red text on stderr.
+      expect(process.exitCode).toBe(1);
     });
 
     // The mint response's whole point is the one-time reveal; a response
@@ -405,6 +462,11 @@ describe('runTokensCommand', () => {
 
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining('did not return its secret'),
+      );
+      // Points straight at the id already in hand rather than sending the
+      // user through `tokens list` to find it.
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(`tokens revoke ${mockToken.id}`),
       );
       expect(process.exitCode).toBe(1);
       expect(console.log).not.toHaveBeenCalledWith(
