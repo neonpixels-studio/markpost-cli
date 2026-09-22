@@ -368,6 +368,30 @@ describe('runEventsCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    // Under --json the stderr warning must itself be the single JSON error
+    // object the rest of the JSON failure contract uses (issue #194) — not a
+    // plain-text chalk line, which would choke a script parsing stderr as
+    // JSON.
+    it('emits a single JSON error object on stderr on a partial read under --json', async () => {
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      vi.mocked(fetchAllEvents).mockResolvedValue({
+        ok: true,
+        events: [okEvent],
+        partial: true,
+      });
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list', '--json']);
+
+      expect(console.error).toHaveBeenCalledTimes(1);
+      const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
+      expect(() => JSON.parse(errorOutput)).not.toThrow();
+      expect(JSON.parse(errorOutput)).toEqual({
+        error: 'fetch_failed',
+        message: expect.stringContaining('this list may be incomplete'),
+      });
+    });
+
     it('surfaces an error and never fetches when given an unknown flag', async () => {
       const { checkConfig } = await import('@/libs/config.js');
       const { fetchAllEvents } = await import('@/libs/events.js');

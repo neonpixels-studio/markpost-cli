@@ -10,7 +10,12 @@ import { checkConfig } from '@/libs/config.js';
 import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
-import { hasJsonFlag, printJson } from '@/libs/output.js';
+import {
+  hasJsonFlag,
+  JSON_ERROR_FETCH_FAILED,
+  printJson,
+  printJsonError,
+} from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
 export const USAGE = `Usage: markpost records list [options]
@@ -181,12 +186,24 @@ const listRecords = async (
   // stays honest — `fetchPaginatedRecords` already logged the cause. The
   // warning goes to stderr, so the JSON path below still writes clean JSON to
   // stdout while the caller (and `--json`) still sees the non-zero exit.
+  // Under `--json` the warning itself must be the same `{ error, message }`
+  // shape as every other `--json` failure (see JSON failure contract in the
+  // README) — a stray plain-text line on stderr would choke a script parsing
+  // it as JSON.
   if (partial) {
-    console.error(
-      chalk.yellow(
-        'Warning: a later page failed to fetch — this list may be incomplete.',
-      ),
-    );
+    if (json) {
+      printJsonError(
+        JSON_ERROR_FETCH_FAILED,
+        'A later page failed to fetch — this list may be incomplete.',
+      );
+    } else {
+      console.error(
+        chalk.yellow(
+          'Warning: a later page failed to fetch — this list may be incomplete.',
+        ),
+      );
+    }
+
     process.exitCode = 1;
   }
 
