@@ -311,12 +311,12 @@ describe('resolveMarkdownInputs', () => {
   it.skipIf(skipPermissionTests)(
     'reports a glob pattern under a locked directory as skipped, not missing',
     () => {
-      // statSync receives the literal pattern string "locked/*.md", so
-      // traversal into `locked` fails with EACCES before glob expansion
-      // ever runs. Reporting this as skipped rather than missing is
-      // intentional: with the parent unreadable there is no way to know
-      // whether the pattern would have matched, so "missing" (nothing
-      // matched) would be misleading.
+      // statSync receives the literal pattern string "locked/*.md", so with
+      // no execute bit on `locked` even that literal lookup fails with
+      // EACCES before glob expansion ever runs. This case only covers a
+      // fully locked-down directory (0o000): a directory with execute but
+      // not read permission behaves differently (see collectFromGlob,
+      // which has no errno handling of its own) and is out of scope here.
       const locked = join(workspace, 'locked');
       mkdirSync(locked);
       chmodSync(locked, 0o000);

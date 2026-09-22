@@ -127,8 +127,17 @@ const isPermissionError = (error: unknown): boolean => {
 
 type InputStatResult =
   | { kind: 'stats'; stats: Stats }
-  | { kind: 'not-found' }
+  // Not necessarily ENOENT — any non-permission stat failure (a typo'd
+  // path, ENOTDIR, ELOOP, …) lands here and is retried as a glob, same as
+  // a path that simply doesn't exist.
+  | { kind: 'try-glob' }
   | { kind: 'permission-denied' };
+
+const classifyStatError = (error: unknown): InputStatResult => {
+  return isPermissionError(error)
+    ? { kind: 'permission-denied' }
+    : { kind: 'try-glob' };
+};
 
 // Stats an input argument and discriminates *why* the stat failed, which
 // `existsSync` cannot do: it catches every error, including EACCES, and
@@ -137,11 +146,7 @@ const statInput = (path: string): InputStatResult => {
   try {
     return { kind: 'stats', stats: statSync(path) };
   } catch (error) {
-    if (isPermissionError(error)) {
-      return { kind: 'permission-denied' };
-    }
-
-    return { kind: 'not-found' };
+    return classifyStatError(error);
   }
 };
 
@@ -247,7 +252,7 @@ const collectFromGlob = (
 const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
   const statResult = statInput(input);
 
-  if (statResult.kind === 'not-found') {
+  if (statResult.kind === 'try-glob') {
     collectFromGlob(input, accumulator);
     return;
   }
