@@ -3,15 +3,14 @@ import chalk from 'chalk';
 import { fetchAllEvents } from '@/libs/events.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, messageFromError } from '@/libs/errors.js';
+import {
+  failWithMessage,
+  messageFromError,
+  warnPartialRead,
+} from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
-import {
-  hasJsonFlag,
-  JSON_ERROR_FETCH_FAILED,
-  printJson,
-  printJsonError,
-} from '@/libs/output.js';
+import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Event, EVENT_KINDS, EventKind } from '@/types/events.types.js';
 
 export const USAGE = `Usage: markpost events list [options]
@@ -134,7 +133,7 @@ const printEvent = (event: Event): void => {
 // to `records list`: a source that silently stops ingesting shows up here as
 // a warn/err entry even when it produced no record at all.
 const listEvents = async (json: boolean): Promise<void> => {
-  const result = await fetchAllEvents();
+  const result = await fetchAllEvents(json);
 
   // A failed fetch must not masquerade as "No events found." — throw so the
   // command's catch reports it loudly and exits non-zero, rather than
@@ -146,28 +145,13 @@ const listEvents = async (json: boolean): Promise<void> => {
   const { events, partial } = result;
 
   // A partial read (a later page failed mid-pagination) must not present a
-  // truncated list as the full log. Warn and exit non-zero so the preview
-  // stays honest. The warning goes to stderr, so the JSON path below still
-  // writes clean JSON to stdout while the caller (and `--json`) still sees
-  // the non-zero exit. Under `--json` the warning itself must be the same
-  // `{ error, message }` shape as every other `--json` failure (see JSON
-  // failure contract in the README) — a stray plain-text line on stderr
-  // would choke a script parsing it as JSON.
+  // truncated list as the full log. `warnPartialRead` reports it honestly —
+  // chalk prose on stderr in plain mode, or the unified `{ error, message }`
+  // JSON contract under `--json` — and sets a non-zero exit either way, so
+  // the JSON path below still writes clean JSON to stdout while the caller
+  // (and `--json`) still sees the failure.
   if (partial) {
-    if (json) {
-      printJsonError(
-        JSON_ERROR_FETCH_FAILED,
-        'A later page failed to fetch — this list may be incomplete.',
-      );
-    } else {
-      console.error(
-        chalk.yellow(
-          'Warning: a later page failed to fetch — this list may be incomplete.',
-        ),
-      );
-    }
-
-    process.exitCode = 1;
+    warnPartialRead(json);
   }
 
   // JSON mode prints the array (empty included, as `[]`) and nothing else —

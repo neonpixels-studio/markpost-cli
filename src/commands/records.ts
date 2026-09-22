@@ -7,15 +7,14 @@ import {
 } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, messageFromError } from '@/libs/errors.js';
+import {
+  failWithMessage,
+  messageFromError,
+  warnPartialRead,
+} from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
-import {
-  hasJsonFlag,
-  JSON_ERROR_FETCH_FAILED,
-  printJson,
-  printJsonError,
-} from '@/libs/output.js';
+import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
 export const USAGE = `Usage: markpost records list [options]
@@ -170,7 +169,7 @@ const listRecords = async (
   filters: RecordListFilters,
   json: boolean,
 ): Promise<void> => {
-  const result = await fetchAllRecords(filters);
+  const result = await fetchAllRecords(filters, json);
 
   // A failed fetch must not masquerade as "No records found." — throw so the
   // command's catch reports it loudly and exits non-zero, rather than printing
@@ -182,29 +181,13 @@ const listRecords = async (
   const { records, partial } = result;
 
   // A partial read (a later page failed mid-pagination) must not present a
-  // truncated list as the full set. Warn and exit non-zero so the preview
-  // stays honest — `fetchPaginatedRecords` already logged the cause. The
-  // warning goes to stderr, so the JSON path below still writes clean JSON to
-  // stdout while the caller (and `--json`) still sees the non-zero exit.
-  // Under `--json` the warning itself must be the same `{ error, message }`
-  // shape as every other `--json` failure (see JSON failure contract in the
-  // README) — a stray plain-text line on stderr would choke a script parsing
-  // it as JSON.
+  // truncated list as the full set. `warnPartialRead` reports it honestly —
+  // chalk prose on stderr in plain mode, or the unified `{ error, message }`
+  // JSON contract under `--json` — and sets a non-zero exit either way, so
+  // the JSON path below still writes clean JSON to stdout while the caller
+  // (and `--json`) still sees the failure.
   if (partial) {
-    if (json) {
-      printJsonError(
-        JSON_ERROR_FETCH_FAILED,
-        'A later page failed to fetch — this list may be incomplete.',
-      );
-    } else {
-      console.error(
-        chalk.yellow(
-          'Warning: a later page failed to fetch — this list may be incomplete.',
-        ),
-      );
-    }
-
-    process.exitCode = 1;
+    warnPartialRead(json);
   }
 
   // JSON mode prints the array (empty included, as `[]`) and nothing else —

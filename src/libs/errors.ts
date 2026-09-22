@@ -30,3 +30,26 @@ export const failWithMessage = (message: string, json = false): void => {
 
   console.error(chalk.redBright(message));
 };
+
+// A partial (truncated) read — a later page failed mid-pagination but the
+// pages already collected are still usable — reported honestly: warn and set
+// a non-zero exit so a script/cron job notices even though the request
+// nominally succeeded. Shared by `records list` and `events list` (the CLI's
+// two paginated read commands) so the wording and the `--json`/plain-text
+// branching can't drift between them. In `--json` mode the warning is the
+// same `{ error, message }` shape as every other `--json` failure — no
+// separate JSON-error shape invented for this case — so a script parsing
+// stderr never has to special-case a partial read.
+const PARTIAL_READ_MESSAGE =
+  'A later page failed to fetch — this list may be incomplete.';
+
+export const warnPartialRead = (json: boolean): void => {
+  process.exitCode = 1;
+
+  if (json) {
+    printJsonError(JSON_ERROR_FETCH_FAILED, PARTIAL_READ_MESSAGE);
+    return;
+  }
+
+  console.error(chalk.yellow(`Warning: ${PARTIAL_READ_MESSAGE}`));
+};

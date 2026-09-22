@@ -128,6 +128,19 @@ describe('fetchPaginatedEvents', () => {
     expect(console.error).toHaveBeenCalled();
   });
 
+  // The `json` param (third arg) suppresses this diagnostic entirely: under
+  // --json, the CLI's stderr contract is exactly one JSON error object (see
+  // warnPartialRead in errors.ts / issue #194), so this function's own
+  // plain-text line must not sneak onto stderr ahead of it.
+  it('returns null but does not log when json is true', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    const result = await fetchPaginatedEvents(undefined, 100, true);
+
+    expect(result).toBeNull();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
   // A systemic auth failure dooms every page of the read, so it must
   // propagate rather than collapse to null (mirrors fetchPaginatedRecords).
   it('propagates a systemic auth (401) failure instead of returning null', async () => {
@@ -247,6 +260,38 @@ describe('fetchAllEvents', () => {
       events: [mockEvent],
       partial: true,
     });
+  });
+
+  // Under --json, events.ts's command layer already writes the single
+  // documented JSON error object for a partial read (see warnPartialRead in
+  // errors.ts / issue #194). fetchPaginatedEvents's own plain-text
+  // diagnostic for the same page failure must stay silent in that mode, or
+  // stderr would carry a stray non-JSON line ahead of it.
+  it('stays silent on stderr for a subsequent-page failure when json is true', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [eventResource(mockEvent)],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: {
+              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+            },
+          }),
+      })
+      .mockRejectedValueOnce(new Error('Network blip'));
+    global.fetch = fetchMock;
+
+    const result = await fetchAllEvents(true);
+
+    expect(result).toEqual({
+      ok: true,
+      events: [mockEvent],
+      partial: true,
+    });
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   // A systemic failure on a LATER page must still propagate (fail loud),

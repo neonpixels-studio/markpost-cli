@@ -385,11 +385,18 @@ describe('runEventsCommand', () => {
 
       expect(console.error).toHaveBeenCalledTimes(1);
       const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
-      expect(() => JSON.parse(errorOutput)).not.toThrow();
       expect(JSON.parse(errorOutput)).toEqual({
         error: 'fetch_failed',
         message: expect.stringContaining('this list may be incomplete'),
       });
+      // The partial-read data on stdout and the non-zero exit must both
+      // survive alongside the JSON error object — a script checks the exit
+      // code, not the presence of stderr output, to know the read was cut
+      // short (mirrors the `get`/`export` partial-success precedent in the
+      // README's JSON failure contract).
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toEqual([okEvent]);
+      expect(process.exitCode).toBe(1);
     });
 
     it('surfaces an error and never fetches when given an unknown flag', async () => {

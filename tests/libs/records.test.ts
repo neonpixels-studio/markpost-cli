@@ -369,6 +369,36 @@ describe('fetchAllRecords', () => {
     });
   });
 
+  // Under --json, records.ts's command layer already writes the single
+  // documented JSON error object for a partial read (see warnPartialRead in
+  // errors.ts / issue #194). fetchPaginatedRecords's own plain-text
+  // diagnostic for the same page failure must stay silent in that mode, or
+  // stderr would carry a stray non-JSON line ahead of it.
+  it('stays silent on stderr for a subsequent-page failure when json is true', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [{ attributes: mockRecord }],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: {
+              next: '/api/records?page[after]=abc-123&page[size]=1',
+              prev: null,
+            },
+          }),
+      })
+      .mockRejectedValueOnce(new Error('Network error'));
+
+    expect(await fetchAllRecords({}, true)).toEqual({
+      ok: true,
+      records: [mockRecord],
+      partial: true,
+    });
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
   it('stops instead of looping forever if the server repeats the same cursor', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -742,6 +772,24 @@ describe('fetchPaginatedRecords', () => {
     expect(consoleErrorSpy).not.toHaveBeenCalledWith(
       expect.stringContaining('Unknown error occurred'),
     );
+  });
+
+  // The `json` param (fourth arg) suppresses this diagnostic entirely: under
+  // --json, the CLI's stderr contract is exactly one JSON error object (see
+  // warnPartialRead in errors.ts / issue #194), so this function's own
+  // plain-text line must not sneak onto stderr ahead of it.
+  it('does not log to stderr on a non-systemic failure when json is true', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [{ title: 'Unauthorized', detail: 'Invalid API token' }],
+        },
+      },
+      false,
+    );
+
+    expect(await fetchPaginatedRecords(undefined, 100, {}, true)).toBeNull();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
   it('returns null on network failure', async () => {
