@@ -46,6 +46,11 @@ describe('warnPartialRead', () => {
 
   afterEach(() => {
     process.exitCode = undefined;
+    // clearAllMocks (beforeEach) drops call history but keeps the mocked
+    // implementation in place, unlike the manual spy.mockRestore() the
+    // logErrorMessage suite above uses — restore it here so a mocked, silent
+    // console.error can't leak into a test added later in this file.
+    vi.restoreAllMocks();
   });
 
   it('writes plain-text chalk prose and sets a non-zero exit when json is false', () => {
@@ -64,7 +69,7 @@ describe('warnPartialRead', () => {
     expect(console.error).toHaveBeenCalledTimes(1);
     const output = vi.mocked(console.error).mock.calls[0][0] as string;
     expect(JSON.parse(output)).toEqual({
-      error: 'fetch_failed',
+      error: 'partial_read',
       message: expect.stringContaining('this list may be incomplete'),
     });
     expect(process.exitCode).toBe(1);

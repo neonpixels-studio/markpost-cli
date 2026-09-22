@@ -395,7 +395,7 @@ describe('runEventsCommand', () => {
       expect(console.error).toHaveBeenCalledTimes(1);
       const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
       expect(JSON.parse(errorOutput)).toEqual({
-        error: 'fetch_failed',
+        error: 'partial_read',
         message: expect.stringContaining('this list may be incomplete'),
       });
       // The partial-read data on stdout and the non-zero exit must both

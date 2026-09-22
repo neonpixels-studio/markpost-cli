@@ -4,6 +4,7 @@ import {
   hasJsonFlag,
   JSON_ERROR_CONFIG_REQUIRED,
   JSON_ERROR_FETCH_FAILED,
+  JSON_ERROR_PARTIAL_READ,
   JSON_ERROR_USAGE,
   printJsonError,
 } from '@/libs/output.js';
@@ -63,10 +64,11 @@ describe('printJsonError', () => {
     expect(JSON.parse(raw).message).toBe(`A${csi}B`);
   });
 
-  it('keeps the three contract codes stable', () => {
+  it('keeps the four contract codes stable', () => {
     expect(JSON_ERROR_CONFIG_REQUIRED).toBe('config_required');
     expect(JSON_ERROR_USAGE).toBe('usage');
     expect(JSON_ERROR_FETCH_FAILED).toBe('fetch_failed');
+    expect(JSON_ERROR_PARTIAL_READ).toBe('partial_read');
   });
 });
 

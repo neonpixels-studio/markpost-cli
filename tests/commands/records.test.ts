@@ -506,10 +506,14 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['list', '--json']);
 
+      // `--json` must thread through to fetchAllRecords so its own
+      // page-level diagnostic stays silent, leaving only the single JSON
+      // object below on stderr (mirrors the events.test.ts assertion).
+      expect(fetchAllRecords).toHaveBeenCalledWith(expect.any(Object), true);
       expect(console.error).toHaveBeenCalledTimes(1);
       const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
       expect(JSON.parse(errorOutput)).toEqual({
-        error: 'fetch_failed',
+        error: 'partial_read',
         message: expect.stringContaining('this list may be incomplete'),
       });
       // The partial-read data on stdout and the non-zero exit must both
