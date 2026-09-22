@@ -184,11 +184,17 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
 };
 
 const revokeTokenCommand = async (rest: string[]): Promise<void> => {
-  const [id] = rest;
+  // Parsed (not a bare destructure) so an unrecognized flag like
+  // `--help` fails loud via parseArgs's strict mode instead of being sent
+  // as a literal token id, and a second positional is caught explicitly
+  // rather than silently dropped (a script revoking two ids would
+  // otherwise see only the first one actually revoked and still exit 0).
+  const { positionals } = parseArgs({ args: rest, allowPositionals: true });
+  const [id, ...extraPositionals] = positionals;
 
-  if (!id) {
+  if (!id || extraPositionals.length > 0) {
     failWithUsage(
-      '`tokens revoke` requires an id: `markpost tokens revoke <id>`.',
+      '`tokens revoke` takes exactly one id: `markpost tokens revoke <id>`.',
       USAGE,
     );
     return;

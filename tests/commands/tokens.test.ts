@@ -363,18 +363,25 @@ describe('runTokensCommand', () => {
       });
     });
 
-    it('never requires the raw secret as a shell argument — create takes no secret flag', async () => {
+    // `create` declares no secret-accepting flag, so an attempt to pass one
+    // (e.g. a caller assuming it works like some other CLI's token import)
+    // is rejected outright by parseArgs's strict mode rather than being
+    // silently accepted or ignored — there is no way to hand the CLI a raw
+    // secret as a shell argument.
+    it('rejects an attempt to pass a raw secret as a flag instead of silently accepting it', async () => {
       const { createToken } = await import('@/libs/tokens.js');
-      vi.mocked(createToken).mockResolvedValue(mintedToken);
       const { runTokensCommand } = await import('@/commands/tokens.js');
 
-      await runTokensCommand(['create', '--name', 'CI token']);
+      await runTokensCommand([
+        'create',
+        '--name',
+        'CI token',
+        '--token',
+        'mp_live_shouldnotbeaccepted',
+      ]);
 
-      // The only attributes ever sent are name/expiresInDays — no secret
-      // input exists for the CLI to accept.
-      expect(createToken).toHaveBeenCalledWith(
-        expect.not.objectContaining({ token: expect.anything() }),
-      );
+      expect(createToken).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     });
 
     it('fails with usage when --name is missing', async () => {
@@ -412,8 +419,8 @@ describe('runTokensCommand', () => {
     // Plain `Number()` + `Number.isInteger()` would accept both of these
     // (`Number('0x10')` is 16, `Number('1e2')` is 100), silently minting a
     // token with a surprising expiry instead of rejecting the malformed flag.
-    it.each(['0x10', '1e2'])(
-      'rejects a hex/exponent --expires-in-days value (%s) rather than silently accepting it',
+    it.each(['0x10', '1e2', '', '   '])(
+      'rejects an unparseable --expires-in-days value (%j) rather than silently accepting it',
       async (value) => {
         const { createToken } = await import('@/libs/tokens.js');
         const { runTokensCommand } = await import('@/commands/tokens.js');
@@ -433,6 +440,27 @@ describe('runTokensCommand', () => {
         expect(process.exitCode).toBe(1);
       },
     );
+
+    // resolveExpiresInDays trims before matching the whole-number pattern, so
+    // surrounding whitespace must not be rejected as malformed.
+    it('trims surrounding whitespace from a valid --expires-in-days value', async () => {
+      const { createToken } = await import('@/libs/tokens.js');
+      vi.mocked(createToken).mockResolvedValue(mintedToken);
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand([
+        'create',
+        '--name',
+        'CI token',
+        '--expires-in-days',
+        ' 90 ',
+      ]);
+
+      expect(createToken).toHaveBeenCalledWith({
+        name: 'CI token',
+        expiresInDays: 90,
+      });
+    });
 
     it('reports an error and exits non-zero when creation fails', async () => {
       const { createToken } = await import('@/libs/tokens.js');
@@ -519,8 +547,37 @@ describe('runTokensCommand', () => {
 
       expect(revokeToken).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('requires an id'),
+        expect.stringContaining('exactly one id'),
       );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A second positional must not be silently dropped: without this guard
+    // `revoke a b` would revoke only `a` and still exit 0, so a script
+    // expecting both ids revoked would misread it as fully done.
+    it('fails with usage instead of silently dropping a second id', async () => {
+      const { revokeToken } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['revoke', 'tok-a', 'tok-b']);
+
+      expect(revokeToken).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('exactly one id'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Parsed (not a bare positional destructure), so an unrecognized flag
+    // is rejected by parseArgs's strict mode rather than being sent to the
+    // API as a literal token id.
+    it('fails loudly instead of treating an unrecognized flag as a literal id', async () => {
+      const { revokeToken } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['revoke', '--help']);
+
+      expect(revokeToken).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     });
 
