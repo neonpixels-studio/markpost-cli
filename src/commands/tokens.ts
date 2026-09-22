@@ -40,6 +40,13 @@ const sanitizedOrFallback = (
   fallback: string,
 ): string => (value ? sanitizeForTerminal(value) : fallback);
 
+// Collapses a scopes array into the comma-joined string `sanitizedOrFallback`
+// expects, or `null` for "no scopes" (full access) so that helper's own
+// fallback handles the display text. Split out so the scopes print line
+// below isn't a nested ternary.
+const formatScopes = (scopes: string[] | null): string | null =>
+  scopes && scopes.length > 0 ? scopes.join(', ') : null;
+
 // Every field here comes from the untrusted API response, so each is
 // stripped of control/ANSI escapes before printing (see terminal.ts). Prints
 // the masked `prefix` (e.g. `mp_live_ab12`), never a full secret — the
@@ -54,10 +61,7 @@ const printToken = (token: Token): void => {
     `  last used:  ${sanitizedOrFallback(token.lastUsedAt, 'never used')}`,
   );
   console.log(
-    `  scopes:     ${sanitizedOrFallback(
-      token.scopes && token.scopes.length > 0 ? token.scopes.join(', ') : null,
-      'full access',
-    )}`,
+    `  scopes:     ${sanitizedOrFallback(formatScopes(token.scopes), 'full access')}`,
   );
 };
 
@@ -77,7 +81,17 @@ const serializeTokenForJson = (token: Token): Required<Token> => ({
   scopes: token.scopes,
 });
 
-const listTokens = async (json: boolean): Promise<void> => {
+// `list` takes no flags beyond `--json` and no positionals. Parsed (rather
+// than ignoring `rest` outright) so a typo like `list --jsn` or a stray
+// `list foo` fails loud via parseArgs's strict mode instead of silently
+// running the plain-text path with exit 0 — the same guarantee `create` and
+// `revoke` already have for their own arguments.
+const listTokensCommand = async (
+  rest: string[],
+  json: boolean,
+): Promise<void> => {
+  parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+
   const tokens = await fetchTokens();
 
   // JSON mode prints the array (empty included, as `[]`) with no "No tokens
@@ -222,7 +236,7 @@ const TOKENS_HANDLERS = new Map<
   string,
   (rest: string[], json: boolean) => Promise<void>
 >([
-  [LIST_SUBCOMMAND, (_rest, json) => listTokens(json)],
+  [LIST_SUBCOMMAND, (rest, json) => listTokensCommand(rest, json)],
   [CREATE_SUBCOMMAND, (rest) => createTokenCommand(rest)],
   [REVOKE_SUBCOMMAND, (rest) => revokeTokenCommand(rest)],
 ]);

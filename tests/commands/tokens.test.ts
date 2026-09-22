@@ -110,13 +110,15 @@ describe('runTokensCommand', () => {
   });
 
   // A propagated failure (e.g. a request timeout) must exit non-zero like
-  // every other command, not print red text and exit 0.
-  it('exits non-zero when a tokens call throws', async () => {
-    const { fetchTokens } = await import('@/libs/tokens.js');
-    vi.mocked(fetchTokens).mockRejectedValue(new Error('boom'));
+  // every other command, not print red text and exit 0 — covers any
+  // subcommand's own API call, not just list's fetchTokens (tested
+  // separately below).
+  it('exits non-zero when a create call throws', async () => {
+    const { createToken } = await import('@/libs/tokens.js');
+    vi.mocked(createToken).mockRejectedValue(new Error('boom'));
     const { runTokensCommand } = await import('@/commands/tokens.js');
 
-    await runTokensCommand(['list']);
+    await runTokensCommand(['create', '--name', 'CI token']);
 
     expect(process.exitCode).toBe(1);
   });
@@ -316,6 +318,30 @@ describe('runTokensCommand', () => {
 
       expect(checkConfig).not.toHaveBeenCalled();
       expect(revokeToken).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    // `list` takes no positionals and no flag besides `--json`; a typo'd
+    // flag or a stray argument must fail loud instead of silently running
+    // the plain-text path with exit 0 — the same guarantee `create` and
+    // `revoke` already have for their own arguments.
+    it("fails loudly on a typo'd flag instead of silently listing", async () => {
+      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['list', '--jsn']);
+
+      expect(fetchTokens).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('fails loudly on a stray positional instead of silently listing', async () => {
+      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['list', 'foo']);
+
+      expect(fetchTokens).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     });
   });

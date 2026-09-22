@@ -4,6 +4,7 @@ import {
   unwrapResourceAttributes,
   unwrapResourceCollection,
 } from '@/libs/api.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { ApiResponse } from '@/types/api.types.js';
 import {
   CreatedToken,
@@ -50,7 +51,10 @@ export const createToken = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    logApiFailure(`createToken["${input.name}"]`, error);
+    // The name is caller-supplied (and, on a round trip, could reflect
+    // server-echoed content), so it's sanitized before landing in a log
+    // label the same way every printed field is on the command layer.
+    logApiFailure(`createToken["${sanitizeForTerminal(input.name)}"]`, error);
 
     return null;
   }
@@ -68,7 +72,9 @@ export const revokeToken = async (id: string): Promise<boolean> => {
 
     return true;
   } catch (error) {
-    logApiFailure(`revokeToken["${id}"]`, error);
+    // Sanitized for the same reason as createToken's label above — `id` is
+    // user-supplied input landing in a console.error call.
+    logApiFailure(`revokeToken["${sanitizeForTerminal(id)}"]`, error);
 
     return false;
   }

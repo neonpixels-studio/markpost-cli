@@ -257,6 +257,26 @@ describe('createToken', () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await createToken({ name: 'CI token' })).toBeNull();
   });
+
+  // The name is caller-supplied and lands in the log label passed to
+  // logErrorMessage; a control character in it must not reach console.error
+  // raw, matching every other untrusted field the CLI prints.
+  it('sanitizes a hostile name in the logged error label', async () => {
+    const control = String.fromCharCode(0x1b);
+    mockFetch(
+      { data: { errors: [{ title: 'Error', detail: 'boom' }] } },
+      false,
+    );
+    await createToken({ name: `evil${control}[2Jname` });
+    // sanitizeForTerminal replaces the ESC byte with a single space; the
+    // following `[2J` is plain printable text and survives untouched —
+    // mirrors the equivalent assertion for the printed secret in
+    // tests/commands/tokens.test.ts.
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'createToken["evil [2Jname"]',
+      'Error: boom',
+    );
+  });
 });
 
 describe('revokeToken', () => {
