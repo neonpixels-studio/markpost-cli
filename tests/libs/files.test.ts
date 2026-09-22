@@ -289,6 +289,62 @@ describe('resolveMarkdownInputs', () => {
     },
   );
 
+  it.skipIf(skipPermissionTests)(
+    'reports a file behind a locked parent directory as skipped, not missing',
+    () => {
+      const locked = join(workspace, 'locked');
+      const target = createFile('locked/secret.md');
+      chmodSync(locked, 0o000);
+
+      try {
+        const { files, missing, skipped } = resolveMarkdownInputs([target]);
+
+        expect(files).toEqual([]);
+        expect(missing).toEqual([]);
+        expect(skipped).toEqual([target]);
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
+
+  it.skipIf(skipPermissionTests)(
+    'reports a glob pattern under a locked directory as skipped, not missing',
+    () => {
+      // statSync receives the literal pattern string "locked/*.md", so with
+      // no execute bit on `locked` even that literal lookup fails with
+      // EACCES before glob expansion ever runs. This case only covers a
+      // fully locked-down directory (0o000): a directory with execute but
+      // not read permission behaves differently (see collectFromGlob,
+      // which has no errno handling of its own) and is out of scope here.
+      const locked = join(workspace, 'locked');
+      mkdirSync(locked);
+      chmodSync(locked, 0o000);
+      const pattern = join(locked, '*.md');
+
+      try {
+        const { files, missing, skipped } = resolveMarkdownInputs([pattern]);
+
+        expect(files).toEqual([]);
+        expect(missing).toEqual([]);
+        expect(skipped).toEqual([pattern]);
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
+
+  it('treats a path through a non-directory path component as missing', () => {
+    const file = createFile('plain.md');
+    const target = join(file, 'child.md');
+
+    const { files, missing, skipped } = resolveMarkdownInputs([target]);
+
+    expect(files).toEqual([]);
+    expect(skipped).toEqual([]);
+    expect(missing).toEqual([target]);
+  });
+
   it('reports inputs that match nothing without dropping the rest', () => {
     const real = createFile('real.md');
 

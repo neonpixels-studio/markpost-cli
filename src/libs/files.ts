@@ -1,7 +1,6 @@
 import {
   accessSync,
   constants,
-  existsSync,
   globSync,
   readdirSync,
   realpathSync,
@@ -107,6 +106,50 @@ const statOrSkip = (
   }
 };
 
+// Node fs errors carry an errno string in `code` rather than distinct error
+// classes, so distinguishing failure kinds means reading that field.
+const errnoCode = (error: unknown): string | undefined => {
+  if (error instanceof Error && 'code' in error) {
+    return (error as NodeJS.ErrnoException).code;
+  }
+
+  return undefined;
+};
+
+// EACCES (no permission) and EPERM (operation not permitted) are the codes a
+// locked parent directory raises. Every other failure, including a
+// genuinely missing path (ENOENT/ENOTDIR), falls through to glob handling.
+const PERMISSION_ERRNO_CODES = new Set(['EACCES', 'EPERM']);
+
+const isPermissionError = (error: unknown): boolean => {
+  return PERMISSION_ERRNO_CODES.has(errnoCode(error) ?? '');
+};
+
+type InputStatResult =
+  | { kind: 'stats'; stats: Stats }
+  // Not necessarily ENOENT — any non-permission stat failure (a typo'd
+  // path, ENOTDIR, ELOOP, …) lands here and is retried as a glob, same as
+  // a path that simply doesn't exist.
+  | { kind: 'try-glob' }
+  | { kind: 'permission-denied' };
+
+const classifyStatError = (error: unknown): InputStatResult => {
+  return isPermissionError(error)
+    ? { kind: 'permission-denied' }
+    : { kind: 'try-glob' };
+};
+
+// Stats an input argument and discriminates *why* the stat failed, which
+// `existsSync` cannot do: it catches every error, including EACCES, and
+// collapses them into a single `false`.
+const statInput = (path: string): InputStatResult => {
+  try {
+    return { kind: 'stats', stats: statSync(path) };
+  } catch (error) {
+    return classifyStatError(error);
+  }
+};
+
 // A file can stat fine (mode 000 still reports as a regular file) yet fail
 // the moment something actually opens it — statSync doesn't check permission
 // bits, only accessSync does. Pre-checking here means an unreadable file is
@@ -202,19 +245,24 @@ const collectFromGlob = (
 // directly is taken as-is (the user was explicit, so its extension is not
 // second-guessed) once confirmed readable; an existing directory is recursed;
 // a non-regular file (device, FIFO) is skipped rather than handed to a reader
-// that would block or read garbage; anything that does not exist is treated
-// as a glob.
+// that would block or read garbage; a path that can't be stat'd for a
+// non-permission reason (most commonly it doesn't exist) is treated as a
+// glob; a permission failure (EACCES/EPERM, most commonly a locked parent
+// directory) is skipped.
 const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
-  if (!existsSync(input)) {
+  const statResult = statInput(input);
+
+  if (statResult.kind === 'try-glob') {
     collectFromGlob(input, accumulator);
     return;
   }
 
-  const stats = statOrSkip(input, accumulator);
-
-  if (!stats) {
+  if (statResult.kind === 'permission-denied') {
+    accumulator.skipped.push(input);
     return;
   }
+
+  const { stats } = statResult;
 
   if (stats.isDirectory()) {
     collectFromDirectory(input, accumulator);
