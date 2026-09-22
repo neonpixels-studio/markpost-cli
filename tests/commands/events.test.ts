@@ -64,6 +64,11 @@ describe('runEventsCommand', () => {
     await runEventsCommand(['list']);
 
     expect(checkConfig).toHaveBeenCalledWith(false);
+    // `--json` must thread through to fetchAllEvents so a page-level failure
+    // it logs stays silent on stderr under --json (see warnPartialRead /
+    // issue #194) — a regression here would silently reintroduce the stray
+    // plain-text line without any test catching it.
+    expect(fetchAllEvents).toHaveBeenCalledWith(false);
   });
 
   it('never dispatches to list when checkConfig resolves false', async () => {
@@ -365,6 +370,41 @@ describe('runEventsCommand', () => {
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining('this list may be incomplete'),
       );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Under --json the stderr warning must itself be the single JSON error
+    // object the rest of the JSON failure contract uses (issue #194) — not a
+    // plain-text chalk line, which would choke a script parsing stderr as
+    // JSON.
+    it('emits a single JSON error object on stderr on a partial read under --json', async () => {
+      const { fetchAllEvents } = await import('@/libs/events.js');
+      vi.mocked(fetchAllEvents).mockResolvedValue({
+        ok: true,
+        events: [okEvent],
+        partial: true,
+      });
+      const { runEventsCommand } = await import('@/commands/events.js');
+
+      await runEventsCommand(['list', '--json']);
+
+      // `--json` must thread through to fetchAllEvents (see the comment on
+      // the plain-mode assertion above) so its own page-level diagnostic
+      // stays silent, leaving only the single JSON object below on stderr.
+      expect(fetchAllEvents).toHaveBeenCalledWith(true);
+      expect(console.error).toHaveBeenCalledTimes(1);
+      const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
+      expect(JSON.parse(errorOutput)).toEqual({
+        error: 'partial_read',
+        message: expect.stringContaining('this list may be incomplete'),
+      });
+      // The partial-read data on stdout and the non-zero exit must both
+      // survive alongside the JSON error object — a script checks the exit
+      // code, not the presence of stderr output, to know the read was cut
+      // short (mirrors the `get`/`export` partial-success precedent in the
+      // README's JSON failure contract).
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toEqual([okEvent]);
       expect(process.exitCode).toBe(1);
     });
 

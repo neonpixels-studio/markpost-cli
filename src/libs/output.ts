@@ -58,10 +58,15 @@ export const printJson = (value: unknown): void => {
 // `--json` consumer switches on these, so they are part of the CLI's public
 // contract and must stay stable — see README "JSON failure contract". Every
 // failure classifies into exactly one: a missing/unconfigured value, a bad
-// argument or usage, or a failed request/result.
+// argument or usage, a failed request/result, or a truncated-but-usable read.
 export const JSON_ERROR_CONFIG_REQUIRED = 'config_required';
 export const JSON_ERROR_USAGE = 'usage';
 export const JSON_ERROR_FETCH_FAILED = 'fetch_failed';
+// Distinct from `fetch_failed`: a partial read still writes its (truncated)
+// data to stdout, unlike every other code, which writes nothing there. A
+// script that reflexively discards stdout on ANY `--json` failure would
+// throw away valid, if incomplete, data — the separate code lets it choose.
+export const JSON_ERROR_PARTIAL_READ = 'partial_read';
 
 const JSON_FLAG = '--json';
 

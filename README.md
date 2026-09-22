@@ -39,9 +39,8 @@ The destructive fetch/write/delete sync runs only under the explicit
 
 Commands that accept `--json` (`get`, `sources list`, `tokens list`, `records list`, `events list`, `export`) emit a
 single, uniform failure shape so a script can parse **any** failure the same
-way. On failure the CLI writes nothing to stdout (stdout stays the clean
-`--json | jq` data channel), sets a non-zero exit code, and prints one JSON
-object to **stderr**:
+way. On failure the CLI sets a non-zero exit code and prints one JSON object
+to **stderr**:
 
 ```json
 { "error": "<code>", "message": "<human-readable explanation>" }
@@ -49,11 +48,19 @@ object to **stderr**:
 
 `error` is one of a small, stable set of machine-readable codes:
 
-| `error` code      | When it happens                                                                                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `config_required` | A required value (API token or output directory) is not configured and `--json` mode will not prompt. Also includes a `missing` field naming the config key. |
-| `usage`           | A bad or missing argument/subcommand, or `--json` passed where it is not supported.                                                                          |
-| `fetch_failed`    | The requested operation could not be completed (a failed or empty fetch, or an error thrown while carrying it out — e.g. an auth/5xx failure).               |
+| `error` code      | When it happens                                                                                                                                              | stdout                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| `config_required` | A required value (API token or output directory) is not configured and `--json` mode will not prompt. Also includes a `missing` field naming the config key. | nothing                          |
+| `usage`           | A bad or missing argument/subcommand, or `--json` passed where it is not supported.                                                                          | nothing                          |
+| `fetch_failed`    | The requested operation could not be completed (a failed or empty fetch, or an error thrown while carrying it out — e.g. an auth/5xx failure).               | nothing                          |
+| `partial_read`    | `records list`/`events list` paginated past the first page and a later page failed non-systemically, truncating the result.                                  | the JSON array of pages fetched so far |
+
+`partial_read` is the one exception to "stdout stays the clean `--json | jq`
+data channel on failure": the pages already fetched are still valid data, so
+they're printed as usual and the truncation is reported only via this object
+on stderr and the non-zero exit — a script should check for `partial_read`
+specifically (not just any non-zero exit) to know whether it's safe to still
+consume stdout.
 
 Any string in `message` that is server-derived is sanitized so it cannot inject
 a live terminal escape sequence. Additional fields (such as `missing`) may

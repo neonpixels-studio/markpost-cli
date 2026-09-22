@@ -179,13 +179,18 @@ const FILTER_QUERY_KEYS: { [Key in keyof RecordListFilters]-?: string } = {
 
 const DEFAULT_PAGE_SIZE = 100;
 
+// `json` is threaded straight through to `fetchPaginatedRecords` (see its doc
+// comment) so a page-level failure stays silent on stderr under `--json`,
+// matching the command's own JSON failure contract for the read as a whole.
 export const fetchAllRecords = async (
   filters: RecordListFilters = {},
+  json = false,
 ): Promise<FetchAllRecordsResult> => {
   const initial = await fetchPaginatedRecords(
     undefined,
     DEFAULT_PAGE_SIZE,
     filters,
+    json,
   );
 
   // Return `{ ok: false }` rather than `[]` so the caller can tell a failed
@@ -243,13 +248,15 @@ export const fetchAllRecords = async (
       after,
       DEFAULT_PAGE_SIZE,
       filters,
+      json,
     );
 
     if (!subsequent) {
       // A later page failed NON-systemically (`fetchPaginatedRecords` already
-      // logged why). Stop, but mark the read incomplete so the caller doesn't
-      // present a truncated set as the whole. A systemic failure or timeout on
-      // this page wouldn't reach here — it re-throws out of this loop instead.
+      // logged why, unless `json` suppressed it). Stop, but mark the read
+      // incomplete so the caller doesn't present a truncated set as the
+      // whole. A systemic failure or timeout on this page wouldn't reach
+      // here — it re-throws out of this loop instead.
       partial = true;
       break;
     }
@@ -295,10 +302,18 @@ const buildRecordsQuery = (
   return params.join('&');
 };
 
+// `json` suppresses the plain-text `logApiFailure` diagnostic below for a
+// non-systemic failure: under `--json`, stderr must carry only the unified
+// `{ error, message }` object the command layer writes once the read
+// settles (see the JSON failure contract in the README), not this
+// function's own prose line ahead of it. A systemic failure still throws
+// unconditionally either way — that path is handled by the command's outer
+// catch, which already respects `--json`.
 export const fetchPaginatedRecords = async (
   after?: string,
   size: number = DEFAULT_PAGE_SIZE,
   filters: RecordListFilters = {},
+  json = false,
 ): Promise<{
   records: Record[];
   meta: PaginatedRecordsMeta;
@@ -350,7 +365,9 @@ export const fetchPaginatedRecords = async (
       throw error;
     }
 
-    logApiFailure(`fetchPaginatedRecords`, error);
+    if (!json) {
+      logApiFailure(`fetchPaginatedRecords`, error);
+    }
 
     return null;
   }

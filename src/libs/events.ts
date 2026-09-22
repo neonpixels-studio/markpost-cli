@@ -82,8 +82,17 @@ const DEFAULT_PAGE_SIZE = 100;
 export type FetchAllEventsResult =
   { ok: true; events: Event[]; partial: boolean } | { ok: false };
 
-export const fetchAllEvents = async (): Promise<FetchAllEventsResult> => {
-  const initial = await fetchPaginatedEvents(undefined, DEFAULT_PAGE_SIZE);
+// `json` is threaded straight through to `fetchPaginatedEvents` (see its doc
+// comment) so a page-level failure stays silent on stderr under `--json`,
+// matching the command's own JSON failure contract for the read as a whole.
+export const fetchAllEvents = async (
+  json = false,
+): Promise<FetchAllEventsResult> => {
+  const initial = await fetchPaginatedEvents(
+    undefined,
+    DEFAULT_PAGE_SIZE,
+    json,
+  );
 
   if (!initial) {
     return { ok: false };
@@ -123,12 +132,17 @@ export const fetchAllEvents = async (): Promise<FetchAllEventsResult> => {
     }
 
     seenCursors.add(after);
-    const subsequent = await fetchPaginatedEvents(after, DEFAULT_PAGE_SIZE);
+    const subsequent = await fetchPaginatedEvents(
+      after,
+      DEFAULT_PAGE_SIZE,
+      json,
+    );
 
     if (!subsequent) {
-      // A later page failed NON-systemically (already logged). Stop, but
-      // mark the read incomplete. A systemic failure or timeout on this page
-      // wouldn't reach here — it re-throws out of this loop instead.
+      // A later page failed NON-systemically (already logged, unless `json`
+      // suppressed it). Stop, but mark the read incomplete. A systemic
+      // failure or timeout on this page wouldn't reach here — it re-throws
+      // out of this loop instead.
       partial = true;
       break;
     }
@@ -153,9 +167,17 @@ const buildEventsQuery = (size: number, after: string | undefined): string => {
   return params.join('&');
 };
 
+// `json` suppresses the plain-text `logApiFailure` diagnostic below for a
+// non-systemic failure: under `--json`, stderr must carry only the unified
+// `{ error, message }` object the command layer writes once the read
+// settles (see the JSON failure contract in the README), not this
+// function's own prose line ahead of it. A systemic failure still throws
+// unconditionally either way — that path is handled by the command's outer
+// catch, which already respects `--json`.
 export const fetchPaginatedEvents = async (
   after?: string,
   size: number = DEFAULT_PAGE_SIZE,
+  json = false,
 ): Promise<{
   events: Event[];
   meta: PaginatedEventsMeta;
@@ -205,7 +227,9 @@ export const fetchPaginatedEvents = async (
       throw error;
     }
 
-    logApiFailure('fetchPaginatedEvents', error);
+    if (!json) {
+      logApiFailure('fetchPaginatedEvents', error);
+    }
 
     return null;
   }

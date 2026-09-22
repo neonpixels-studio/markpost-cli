@@ -439,11 +439,17 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['list', '--source', 'webhook', '--json']);
 
-      expect(fetchAllRecords).toHaveBeenCalledWith({
-        source: 'webhook',
-        status: undefined,
-        search: undefined,
-      });
+      // The second argument threads `--json` through to fetchAllRecords so a
+      // later-page failure it logs can stay silent on stderr under --json
+      // (see warnPartialRead / issue #194).
+      expect(fetchAllRecords).toHaveBeenCalledWith(
+        {
+          source: 'webhook',
+          status: undefined,
+          search: undefined,
+        },
+        true,
+      );
       const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
       expect(JSON.parse(output)).toHaveLength(1);
     });
@@ -485,6 +491,41 @@ describe('runRecordsCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    // Under --json the stderr warning must itself be the single JSON error
+    // object the rest of the JSON failure contract uses (issue #194) — not a
+    // plain-text chalk line, which would choke a script parsing stderr as
+    // JSON.
+    it('emits a single JSON error object on stderr on a partial read under --json', async () => {
+      const { fetchAllRecords } = await import('@/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [firstRecord],
+        partial: true,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['list', '--json']);
+
+      // `--json` must thread through to fetchAllRecords so its own
+      // page-level diagnostic stays silent, leaving only the single JSON
+      // object below on stderr (mirrors the events.test.ts assertion).
+      expect(fetchAllRecords).toHaveBeenCalledWith(expect.any(Object), true);
+      expect(console.error).toHaveBeenCalledTimes(1);
+      const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
+      expect(JSON.parse(errorOutput)).toEqual({
+        error: 'partial_read',
+        message: expect.stringContaining('this list may be incomplete'),
+      });
+      // The partial-read data on stdout and the non-zero exit must both
+      // survive alongside the JSON error object — a script checks the exit
+      // code, not the presence of stderr output, to know the read was cut
+      // short (mirrors the `get`/`export` partial-success precedent in the
+      // README's JSON failure contract).
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toEqual([firstRecord]);
+      expect(process.exitCode).toBe(1);
+    });
+
     it('passes no filters through when no flags are given', async () => {
       const { fetchAllRecords } = await import('@/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
@@ -496,11 +537,14 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['list']);
 
-      expect(fetchAllRecords).toHaveBeenCalledWith({
-        source: undefined,
-        status: undefined,
-        search: undefined,
-      });
+      expect(fetchAllRecords).toHaveBeenCalledWith(
+        {
+          source: undefined,
+          status: undefined,
+          search: undefined,
+        },
+        false,
+      );
     });
 
     it('threads --source, --status, and --search into the fetch', async () => {
@@ -522,11 +566,14 @@ describe('runRecordsCommand', () => {
         'meeting notes',
       ]);
 
-      expect(fetchAllRecords).toHaveBeenCalledWith({
-        source: 'webhook',
-        status: 'pending',
-        search: 'meeting notes',
-      });
+      expect(fetchAllRecords).toHaveBeenCalledWith(
+        {
+          source: 'webhook',
+          status: 'pending',
+          search: 'meeting notes',
+        },
+        false,
+      );
       // Assert the fetched record actually renders, so the test breaks if the
       // filter path stops reaching the print step (not just the fetch call).
       expect(console.log).toHaveBeenCalledWith(
@@ -546,11 +593,14 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['list', '--source=email']);
 
-      expect(fetchAllRecords).toHaveBeenCalledWith({
-        source: 'email',
-        status: undefined,
-        search: undefined,
-      });
+      expect(fetchAllRecords).toHaveBeenCalledWith(
+        {
+          source: 'email',
+          status: undefined,
+          search: undefined,
+        },
+        false,
+      );
     });
 
     it('surfaces an error and never fetches when given an unknown flag', async () => {
@@ -654,11 +704,14 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['list', '--search', '  meeting notes  ']);
 
-      expect(fetchAllRecords).toHaveBeenCalledWith({
-        source: undefined,
-        status: undefined,
-        search: 'meeting notes',
-      });
+      expect(fetchAllRecords).toHaveBeenCalledWith(
+        {
+          source: undefined,
+          status: undefined,
+          search: 'meeting notes',
+        },
+        false,
+      );
     });
 
     it('surfaces an error and never fetches when a flag is missing its value', async () => {
