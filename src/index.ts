@@ -29,6 +29,7 @@ import {
   runSourcesCommand,
   USAGE as SOURCES_USAGE,
 } from '@/commands/sources.js';
+import { runTokensCommand, USAGE as TOKENS_USAGE } from '@/commands/tokens.js';
 import {
   runRecordsCommand,
   USAGE as RECORDS_USAGE,
@@ -132,6 +133,7 @@ const COMMANDS = new Map<string, Command>([
   ['push', { run: runPushCommand, usage: PUSH_USAGE }],
   ['get', { run: runGetCommand, usage: GET_USAGE }],
   ['sources', { run: runSourcesCommand, usage: SOURCES_USAGE }],
+  ['tokens', { run: runTokensCommand, usage: TOKENS_USAGE }],
   ['records', { run: runRecordsCommand, usage: RECORDS_USAGE }],
   ['events', { run: runEventsCommand, usage: EVENTS_USAGE }],
   ['export', { run: runExportCommand, usage: EXPORT_USAGE }],
