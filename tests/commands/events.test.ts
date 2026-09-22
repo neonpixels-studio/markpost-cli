@@ -64,6 +64,11 @@ describe('runEventsCommand', () => {
     await runEventsCommand(['list']);
 
     expect(checkConfig).toHaveBeenCalledWith(false);
+    // `--json` must thread through to fetchAllEvents so a page-level failure
+    // it logs stays silent on stderr under --json (see warnPartialRead /
+    // issue #194) — a regression here would silently reintroduce the stray
+    // plain-text line without any test catching it.
+    expect(fetchAllEvents).toHaveBeenCalledWith(false);
   });
 
   it('never dispatches to list when checkConfig resolves false', async () => {
@@ -383,6 +388,10 @@ describe('runEventsCommand', () => {
 
       await runEventsCommand(['list', '--json']);
 
+      // `--json` must thread through to fetchAllEvents (see the comment on
+      // the plain-mode assertion above) so its own page-level diagnostic
+      // stays silent, leaving only the single JSON object below on stderr.
+      expect(fetchAllEvents).toHaveBeenCalledWith(true);
       expect(console.error).toHaveBeenCalledTimes(1);
       const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
       expect(JSON.parse(errorOutput)).toEqual({

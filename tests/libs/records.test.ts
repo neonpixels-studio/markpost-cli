@@ -777,16 +777,11 @@ describe('fetchPaginatedRecords', () => {
   // The `json` param (fourth arg) suppresses this diagnostic entirely: under
   // --json, the CLI's stderr contract is exactly one JSON error object (see
   // warnPartialRead in errors.ts / issue #194), so this function's own
-  // plain-text line must not sneak onto stderr ahead of it.
+  // plain-text line must not sneak onto stderr ahead of it. A thrown network
+  // error (rather than an HTTP-status fixture) keeps this unambiguously
+  // non-systemic, mirroring the network-failure test just below.
   it('does not log to stderr on a non-systemic failure when json is true', async () => {
-    mockFetch(
-      {
-        data: {
-          errors: [{ title: 'Unauthorized', detail: 'Invalid API token' }],
-        },
-      },
-      false,
-    );
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
     expect(await fetchPaginatedRecords(undefined, 100, {}, true)).toBeNull();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
