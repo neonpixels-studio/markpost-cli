@@ -1957,26 +1957,37 @@ describe('markRecordsSynced', () => {
     );
   });
 
-  // Regression coverage for markpost#302: markpost's PATCH /api/records (and,
-  // for the single-record case, PATCH /api/records/:uuid) 422s any request
-  // that includes a client-supplied `syncedAt` (markpost#271, markpost#297)
-  // — the server stamps it itself. This asserts the single-record
-  // sync-completion request never puts `syncedAt` in its body, not merely
-  // that the CLI stopped defaulting one locally.
-  it('never sends a client-computed syncedAt on a single-record sync-completion PATCH', async () => {
+  // Regression coverage for markpost#302: markpost's bulk PATCH /api/records
+  // 422s any request that includes a client-supplied `syncedAt`
+  // (markpost#271) — the server stamps it itself. This CLI has no separate
+  // single-uuid PATCH call (PATCH /api/records/:uuid, markpost#297, is never
+  // used here); a single written record still settles through this bulk
+  // endpoint with a one-item chunk, which is the "single-record
+  // sync-completion" case the issue describes. Asserts both the endpoint and
+  // that no record in the body — across a MULTI-chunk run, not just a lone
+  // record — ever carries `syncedAt`, so a regression can't hide behind only
+  // the first chunk being checked.
+  it('never sends a client-computed syncedAt in the bulk PATCH body, across chunks', async () => {
     mockBulkPatchEcho();
-    await markRecordsSynced([
-      { uuid: 'abc-123', filePath: '/vault/note.md' },
-    ]);
-    const requestInit = vi.mocked(global.fetch).mock.calls[0]?.[1];
-    const sentBody = JSON.parse(String(requestInit?.body));
-    const sentRecord = sentBody.data.attributes.records[0];
-    expect(sentRecord).not.toHaveProperty('syncedAt');
-    expect(Object.keys(sentRecord).sort()).toEqual([
-      'filePath',
-      'status',
-      'uuid',
-    ]);
+    await markRecordsSynced(items(150));
+    const calls = vi.mocked(global.fetch).mock.calls;
+    expect(calls).toHaveLength(2);
+    calls.forEach(([requestUrl, requestInit]) => {
+      expect(requestUrl).toBe('https://example.com/api/records');
+      expect(requestInit?.method).toBe('PATCH');
+      const sentBody = JSON.parse(String(requestInit?.body));
+      const sentRecords = sentBody.data.attributes.records as {
+        [key: string]: unknown;
+      }[];
+      sentRecords.forEach((sentRecord) => {
+        expect(sentRecord).not.toHaveProperty('syncedAt');
+        expect(Object.keys(sentRecord).sort()).toEqual([
+          'filePath',
+          'status',
+          'uuid',
+        ]);
+      });
+    });
   });
 
   it('sends nothing and reports no outcomes for an empty input', async () => {

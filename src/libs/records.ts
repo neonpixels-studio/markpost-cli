@@ -598,7 +598,7 @@ const markSyncedChunk = async (
         data: {
           type: 'records',
           attributes: {
-            records: items.map((item) => buildBulkRecordPayload(item)),
+            records: items.map(buildBulkRecordPayload),
           },
         },
       }),
