@@ -2,14 +2,15 @@ import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
 import { createToken, fetchTokens, revokeToken } from '@/libs/tokens.js';
-import { checkConfig, getConfigValue } from '@/libs/config.js';
+import { checkConfig } from '@/libs/config.js';
+import { getApiToken } from '@/libs/api.js';
 import { failWithMessage } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { CreateTokenInput, Token } from '@/types/tokens.types.js';
 
-export const USAGE = `Usage: markpost tokens <list|create|revoke> [id]
+export const USAGE = `Usage: markpost tokens <list|create|revoke> [id] [--yes]
 
   list                                             List all API tokens (pass --json for machine-readable output)
   create --name <name> [--expires-in-days <days>]  Mint a new API token; the raw secret is shown once and cannot be retrieved again
@@ -21,10 +22,25 @@ const CREATE_SUBCOMMAND = 'create';
 // guard that rejects the flag elsewhere as well as its handler-map key.
 const REVOKE_SUBCOMMAND = 'revoke';
 
-// The confirmation escape hatch, read straight from argv like `--json` so the
-// runner can reject it on the wrong subcommand — before any parseArgs runs —
-// exactly as `sources delete` treats it.
+// The confirmation escape hatch, read straight from argv the same way
+// `hasJsonFlag` reads `--json`, so the runner can reject it on the wrong
+// subcommand before any subcommand-level parseArgs runs. `sources delete`
+// reaches the same outcome via a single unified `parseArgs` call instead;
+// this file keeps `--json` and `--yes` consistent with each other rather
+// than matching that mechanism exactly.
 const YES_FLAG = '--yes';
+const ARGS_TERMINATOR = '--';
+
+// Unlike a plain `args.includes(YES_FLAG)`, this stops scanning at a literal
+// `--`, so `tokens revoke -- --yes` (an id that happens to be the string
+// "--yes") isn't misread as the flag — matching how `revokeTokenCommand`'s
+// own `parseArgs` call (which understands `--`) resolves the same argv.
+const hasYesFlag = (args: string[]): boolean => {
+  const terminatorIndex = args.indexOf(ARGS_TERMINATOR);
+  const scanned =
+    terminatorIndex === -1 ? args : args.slice(0, terminatorIndex);
+  return scanned.includes(YES_FLAG);
+};
 
 const TOKEN_SECRET_NOTICE =
   'API token (shown once — copy it now, it cannot be retrieved later):';
@@ -57,8 +73,9 @@ const formatScopes = (scopes: string[] | null): string | null =>
 
 // Every field here comes from the untrusted API response, so each is
 // stripped of control/ANSI escapes before printing (see terminal.ts). Prints
-// the masked `prefix` (e.g. `mp_live_ab12`), never a full secret — the
-// prefix-masked shape markpost's own listing UI uses.
+// only the unmasked `prefix` (e.g. `mp_live_ab12` — markpost stores the raw
+// secret's first 12 characters, see server/utils/tokens.ts extractTokenPrefix),
+// never the full secret.
 const printToken = (token: Token): void => {
   console.log(chalk.bold(sanitizeForTerminal(token.name)));
   console.log(`  id:         ${sanitizeForTerminal(token.id)}`);
@@ -215,14 +232,20 @@ const lookupTokenById = async (id: string): Promise<Token | null> => {
   return tokens.find((candidate) => candidate.id === id) ?? null;
 };
 
-// The stored `apiToken` is the raw secret; the list only ever carries the
-// masked `prefix` (never the secret), so the one link between an id being
-// revoked and the token this CLI authenticates with is whether the stored
-// secret begins with that token's prefix. A truthy `prefix` guard keeps an
-// empty/malformed prefix (whose `startsWith('')` is always true) from
-// falsely flagging every token as the configured one.
+// The token this CLI actually authenticates with is whatever `getApiToken`
+// resolves — `API_TOKEN`, when exported, wins over the stored config value
+// (see libs/api.ts), and `checkConfig` only ever writes the env var into
+// config when the store is empty, so the two can permanently diverge. Reading
+// through `getApiToken` (not `getConfigValue('apiToken')` directly) keeps this
+// check aligned with the credential requests actually use. The list only ever
+// carries the unmasked `prefix` (the raw secret's own first 12 characters —
+// never the full secret), so the one link between an id being revoked and the
+// token this CLI authenticates with is whether that secret begins with the
+// token's prefix. A truthy `prefix` guard keeps an empty/malformed prefix
+// (whose `startsWith('')` is always true) from falsely flagging every token
+// as the configured one.
 const isConfiguredToken = (token: Token): boolean => {
-  const configured = getConfigValue('apiToken');
+  const configured = getApiToken();
   return Boolean(
     configured && token.prefix && configured.startsWith(token.prefix),
   );
@@ -267,7 +290,7 @@ const revokeConfirmationDetails = async (
 // flow stays unit-testable by mocking the prompt — mirrors `confirmDeletion`
 // in commands/sources.ts.
 const CONFIGURED_TOKEN_WARNING =
-  'WARNING: this is the token this CLI is currently configured with — revoking it will lock this CLI out until you set a new one with `markpost config set apiToken <token>`.';
+  'WARNING: this is the token this CLI is currently configured with — revoking it will lock this CLI out until you set a new one, either by exporting API_TOKEN or with `markpost config set apiToken <token>`.';
 
 const confirmRevocation = async (
   label: string,
@@ -355,6 +378,25 @@ const TOKENS_HANDLERS = new Map<
   ],
 ]);
 
+// Whether `rest` (the args after the subcommand) carries a positional at
+// all — used only to reject `tokens revoke --yes` (no id) on usage grounds
+// before the config check runs. A malformed flag isn't this helper's problem
+// to diagnose: it reports "an id was given" so the guard steps aside and
+// `revokeTokenCommand`'s own `parseArgs` produces the real error instead of a
+// misleading "requires an id" message.
+const revokeIdGiven = (rest: string[]): boolean => {
+  try {
+    const { positionals } = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      options: { yes: { type: 'boolean' } },
+    });
+    return positionals.length > 0;
+  } catch {
+    return true;
+  }
+};
+
 // The invocation-level usage checks that all fail the same way (one usage
 // message, non-zero exit). Returns the message to show, or null when the
 // invocation is valid. Kept in one place so their ordering is a single unit
@@ -362,6 +404,7 @@ const TOKENS_HANDLERS = new Map<
 // in commands/sources.ts.
 const usageErrorFor = (
   subcommand: string,
+  rest: string[],
   json: boolean,
   skipConfirm: boolean,
   isInteractive: boolean,
@@ -379,6 +422,14 @@ const usageErrorFor = (
     return `--yes is only supported by \`tokens ${REVOKE_SUBCOMMAND}\`.`;
   }
 
+  // --yes promises a non-interactive revoke, so it needs an explicit id —
+  // without this, `tokens revoke --yes` clears every guard below and reaches
+  // the config check, which can block on an interactive prompt of its own on
+  // a non-interactive terminal. Mirrors `sources delete`'s equivalent guard.
+  if (skipConfirm && subcommand === REVOKE_SUBCOMMAND && !revokeIdGiven(rest)) {
+    return `--yes requires an id: \`markpost tokens ${REVOKE_SUBCOMMAND} <id> --yes\`.`;
+  }
+
   // Without --yes, revoke prompts; inquirer needs both stdin and stdout to be
   // a TTY, so a redirected/non-interactive run would otherwise hang. Refuse
   // instead, pointing at the --yes escape hatch — mirrors `sources delete`.
@@ -394,7 +445,7 @@ export const runTokensCommand = async (args: string[]): Promise<void> => {
   // rendered in whichever contract the caller asked for, even one thrown
   // before parsing, and so the guards can reject a misplaced flag first.
   const json = hasJsonFlag(args);
-  const skipConfirm = args.includes(YES_FLAG);
+  const skipConfirm = hasYesFlag(args);
   const [subcommand, ...rest] = args;
   const handler = TOKENS_HANDLERS.get(subcommand);
 
@@ -407,6 +458,7 @@ export const runTokensCommand = async (args: string[]): Promise<void> => {
 
   const usageError = usageErrorFor(
     subcommand,
+    rest,
     json,
     skipConfirm,
     isInteractiveTerminal(),
