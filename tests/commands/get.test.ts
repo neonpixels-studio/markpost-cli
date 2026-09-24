@@ -427,7 +427,9 @@ describe('runGetCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('exits 1 on an unknown flag before checking config or fetching', async () => {
+  // A bad flag now routes through failWithUsage, so the non-JSON path prints
+  // the usage block, not bare prose — mirroring records.ts/events.ts (#208).
+  it('exits 1 with the usage block on an unknown flag, before checking config or fetching', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     const { fetchRecord } = await import('@/libs/records.js');
     const { runGetCommand } = await import('@/commands/get.js');
@@ -436,6 +438,9 @@ describe('runGetCommand', () => {
 
     expect(checkConfig).not.toHaveBeenCalled();
     expect(fetchRecord).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Usage: markpost get'),
+    );
     expect(process.exitCode).toBe(1);
   });
 
@@ -778,6 +783,26 @@ describe('runGetCommand', () => {
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
       expect(parsed).toEqual({ error: 'usage', message: 'No uuid given.' });
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A bad flag is a usage error, not a fetch failure — it must report the
+    // documented `usage` code, never `fetch_failed` (issue #208). Arg parsing
+    // used to share the fetch's single outer catch, which miscoded it.
+    it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { runGetCommand } = await import('@/commands/get.js');
+
+      await runGetCommand(['abc-123', '--bogus', '--json']);
+
+      expect(fetchRecord).not.toHaveBeenCalled();
+      expect(console.log).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.error).not.toBe('fetch_failed');
+      expect(parsed.message).toContain('bogus');
       expect(process.exitCode).toBe(1);
     });
 

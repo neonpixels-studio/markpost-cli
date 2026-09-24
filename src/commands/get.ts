@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { ERROR_STATUS, fetchRecord } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import {
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
@@ -23,14 +23,26 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   // flag — is rendered in whichever contract the caller asked for.
   const json = hasJsonFlag(args);
 
+  // Parse in its own try/catch, before the fetch path, so a bad flag reports
+  // the `usage` JSON code (and the usage block without --json) rather than the
+  // fetch path's `fetch_failed`/generic prose — a usage error is not a fetch
+  // failure (issue #208), mirroring records.ts/events.ts.
+  let uuids: string[];
+  let requestedCount: number;
+
   try {
-    const { uuids, requestedCount } = parseGetArgs(args);
+    ({ uuids, requestedCount } = parseGetArgs(args));
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+    return;
+  }
 
-    if (requestedCount === 0) {
-      failWithUsage('No uuid given.', USAGE, json);
-      return;
-    }
+  if (requestedCount === 0) {
+    failWithUsage('No uuid given.', USAGE, json);
+    return;
+  }
 
+  try {
     if (!(await checkConfig(json))) {
       return;
     }
@@ -63,7 +75,8 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 };
 
 // `parseArgs` accepts any number of uuids and `--json` in either order and
-// throws on an unknown flag (the command's outer catch surfaces it). Every
+// throws on an unknown flag (the command's usage catch surfaces it as a
+// `usage` error, not `fetch_failed`). Every
 // distinct positional is a requested uuid — none are silently dropped
 // (issue #173). Positionals are filtered for blanks so a stray empty-string
 // argument can't masquerade as a requested uuid (matching push's identical

@@ -3,8 +3,9 @@ import chalk from 'chalk';
 import { fetchRecordExport, writeExportFile } from '@/libs/export.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
+import { failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { RecordExportRow } from '@/types/records.types.js';
 
@@ -32,9 +33,21 @@ export const runExportCommand = async (args: string[]): Promise<void> => {
   // (mirroring get/records/events).
   const json = hasJsonFlag(args);
 
-  try {
-    const { outputPath, force } = parseExportArgs(args);
+  // Parse in its own try/catch, before the fetch path, so a bad flag or stray
+  // argument reports the `usage` JSON code (and the usage block without --json)
+  // rather than the fetch path's `fetch_failed`/generic prose — a usage error
+  // is not a fetch failure (issue #208), mirroring records.ts/events.ts.
+  let outputPath: string | undefined;
+  let force: boolean;
 
+  try {
+    ({ outputPath, force } = parseExportArgs(args));
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+    return;
+  }
+
+  try {
     if (!(await checkConfig(json))) {
       return;
     }
@@ -50,8 +63,9 @@ export const runExportCommand = async (args: string[]): Promise<void> => {
 };
 
 // `parseArgs` handles both `--out path` and `--out=path`, and throws on an
-// unknown flag or a missing value, which the command's outer catch surfaces
-// to the user. `--out` and `--json` are mutually exclusive: one writes a file,
+// unknown flag or a missing value, which the command's usage catch surfaces
+// to the user as a `usage` error, not `fetch_failed`. `--out` and `--json` are
+// mutually exclusive: one writes a file,
 // the other is a stdout data channel, and combining them would leave the
 // caller guessing which one actually happened.
 const parseExportArgs = (
