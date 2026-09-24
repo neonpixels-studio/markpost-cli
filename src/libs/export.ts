@@ -87,19 +87,32 @@ const isRecordExportRow = (value: unknown): value is RecordExportRow => {
 // the bare row array with no JSON:API envelope (see
 // server/api/records/export.get.ts), so it's read directly rather than
 // through `unwrapResourceCollection`.
-export const fetchRecordExport = async (): Promise<RecordExportResult> => {
+//
+// `json` suppresses every plain-text diagnostic below (the malformed-row skip
+// count and both `logApiFailure` calls) — mirroring `fetchPaginatedRecords`'s
+// own `json` parameter in records.ts: under `--json`, stderr must carry only
+// the unified `{ error, message }`/`partial_read` object the command layer
+// writes once the read settles (see the JSON failure contract in the
+// README), not this function's own prose line ahead of it. A systemic
+// failure still throws unconditionally either way — that path is handled by
+// the command's outer catch, which already respects `--json`.
+export const fetchRecordExport = async (
+  json = false,
+): Promise<RecordExportResult> => {
   try {
     const { body, headers } = await authedRequestWithHeaders(
       '/api/records/export',
     );
 
     if (!Array.isArray(body)) {
-      logApiFailure(
-        'fetchRecordExport',
-        new Error(
-          'Unexpected response shape: expected an array of export rows.',
-        ),
-      );
+      if (!json) {
+        logApiFailure(
+          'fetchRecordExport',
+          new Error(
+            'Unexpected response shape: expected an array of export rows.',
+          ),
+        );
+      }
 
       return { ok: false };
     }
@@ -107,7 +120,7 @@ export const fetchRecordExport = async (): Promise<RecordExportResult> => {
     const validRows = body.filter(isRecordExportRow);
     const skippedCount = body.length - validRows.length;
 
-    if (skippedCount > 0) {
+    if (skippedCount > 0 && !json) {
       logErrorMessage(
         'fetchRecordExport',
         `Skipped ${skippedCount} malformed export row(s)`,
@@ -129,7 +142,9 @@ export const fetchRecordExport = async (): Promise<RecordExportResult> => {
       throw error;
     }
 
-    logApiFailure('fetchRecordExport', error);
+    if (!json) {
+      logApiFailure('fetchRecordExport', error);
+    }
 
     return { ok: false };
   }

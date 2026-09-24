@@ -157,6 +157,28 @@ describe('fetchRecordExport', () => {
     );
   });
 
+  // The `json` param (second arg) suppresses this diagnostic entirely: under
+  // --json, stderr must carry only the single `partial_read` object the
+  // command layer writes via `reportIncompleteExport`/`warnPartialRead` (see
+  // issue #205), not this function's own plain-text line ahead of it —
+  // mirroring `fetchPaginatedRecords`'s own `json` param in records.ts
+  // (issue #194).
+  it('does not log the skip to stderr when json is true, while still reporting skippedCount', async () => {
+    mockFetch([exportRow, null, { uuid: 'no-title-or-status' }], {
+      truncatedHeader: 'false',
+    });
+
+    const result = await fetchRecordExport(true);
+
+    expect(result).toEqual({
+      ok: true,
+      rows: [exportRow],
+      truncated: false,
+      skippedCount: 2,
+    });
+    expect(logErrorMessage).not.toHaveBeenCalled();
+  });
+
   // Regression: the guard originally checked only uuid/title/status, so a row
   // missing a field the CLI still reads or persists on every row (createdAt,
   // content) would pass validation, then crash the printer or land silently
@@ -205,6 +227,13 @@ describe('fetchRecordExport', () => {
     );
   });
 
+  it('does not log to stderr when the response body is not an array and json is true', async () => {
+    mockFetch({ data: [] }, { truncatedHeader: 'false' });
+
+    await expect(fetchRecordExport(true)).resolves.toEqual({ ok: false });
+    expect(logErrorMessage).not.toHaveBeenCalled();
+  });
+
   it('logs and returns ok:false for a non-systemic failure', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
@@ -220,6 +249,23 @@ describe('fetchRecordExport', () => {
 
     await expect(fetchRecordExport()).resolves.toEqual({ ok: false });
     expect(logErrorMessage).toHaveBeenCalled();
+  });
+
+  it('does not log to stderr on a non-systemic failure when json is true', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: new Headers(),
+      json: () =>
+        Promise.resolve({
+          data: {
+            errors: [{ status: '404', title: 'Not found', detail: 'x' }],
+          },
+        }),
+    });
+
+    await expect(fetchRecordExport(true)).resolves.toEqual({ ok: false });
+    expect(logErrorMessage).not.toHaveBeenCalled();
   });
 
   // A systemic auth/5xx failure dooms the whole export, so it must re-throw

@@ -1196,20 +1196,29 @@ describe('deleteRecords', () => {
 
   it('returns meta on success', async () => {
     mockFetch({ meta: mockMeta });
-    expect(await deleteRecords(['abc-123'])).toEqual(mockMeta);
+    expect(await deleteRecords(['abc-123'])).toEqual({
+      meta: mockMeta,
+      permanentlyFailed: false,
+    });
   });
 
-  it('returns null when the response contains errors', async () => {
+  it('reports a non-permanent failure when the response contains errors', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Error', detail: 'Bad request' }] } },
       false,
     );
-    expect(await deleteRecords(['abc-123'])).toBeNull();
+    expect(await deleteRecords(['abc-123'])).toEqual({
+      meta: null,
+      permanentlyFailed: false,
+    });
   });
 
-  it('returns null on network failure', async () => {
+  it('reports a non-permanent failure on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await deleteRecords(['abc-123'])).toBeNull();
+    expect(await deleteRecords(['abc-123'])).toEqual({
+      meta: null,
+      permanentlyFailed: false,
+    });
   });
 
   // A systemic auth (401) failure will recur for the whole batch, so
@@ -1292,7 +1301,10 @@ describe('deleteRecords', () => {
       // A full-but-not-over chunk is one request — the off-by-one boundary.
       expect(global.fetch).toHaveBeenCalledTimes(1);
       expect(chunkSizes()).toEqual([MAX_DELETE_BATCH_SIZE]);
-      expect(result).toEqual({ deleted: MAX_DELETE_BATCH_SIZE });
+      expect(result).toEqual({
+        meta: { deleted: MAX_DELETE_BATCH_SIZE },
+        permanentlyFailed: false,
+      });
     });
 
     it('splits one-over-the-batch-size into two requests (ceil(N/100))', async () => {
@@ -1301,7 +1313,10 @@ describe('deleteRecords', () => {
       // 101 uuids must not go in one over-cap request markpost would 422.
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(chunkSizes()).toEqual([MAX_DELETE_BATCH_SIZE, 1]);
-      expect(result).toEqual({ deleted: MAX_DELETE_BATCH_SIZE + 1 });
+      expect(result).toEqual({
+        meta: { deleted: MAX_DELETE_BATCH_SIZE + 1 },
+        permanentlyFailed: false,
+      });
     });
 
     it('chunks 250 uuids into 100/100/50 requests, each within the cap', async () => {
@@ -1316,7 +1331,10 @@ describe('deleteRecords', () => {
       // Every uuid went out exactly once, in order — not just the right chunk
       // sizes with the wrong (e.g. re-sent or skipped) uuids inside them.
       expect(sentUuids()).toEqual(uuids(250));
-      expect(result).toEqual({ deleted: 250 });
+      expect(result).toEqual({
+        meta: { deleted: 250 },
+        permanentlyFailed: false,
+      });
     });
 
     // A plain (non-systemic) per-chunk failure is scoped to that chunk's
@@ -1357,7 +1375,7 @@ describe('deleteRecords', () => {
       expect(chunkSizes()).toEqual([100, 50]);
       // Not `{ deleted: 50 }` — that would tell the caller the batch
       // succeeded when the first 100 uuids' outcome is actually unknown.
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
       // The 50 uuids the second chunk DID delete (after the first chunk
       // failed) must still be logged, worded so it doesn't claim they were
       // deleted "before" the failure — they weren't.
@@ -1370,7 +1388,10 @@ describe('deleteRecords', () => {
       global.fetch = vi.fn();
       const result = await deleteRecords([]);
       expect(global.fetch).not.toHaveBeenCalled();
-      expect(result).toEqual({ deleted: 0 });
+      expect(result).toEqual({
+        meta: { deleted: 0 },
+        permanentlyFailed: false,
+      });
     });
 
     // markpost silently drops any uuid that doesn't exist or isn't owned by
@@ -1394,7 +1415,10 @@ describe('deleteRecords', () => {
 
       const result = await deleteRecords(uuids(150));
 
-      expect(result).toEqual({ deleted: 140 });
+      expect(result).toEqual({
+        meta: { deleted: 140 },
+        permanentlyFailed: false,
+      });
     });
 
     // A malformed 2xx (missing/non-numeric `meta.deleted`) must not silently
@@ -1415,7 +1439,7 @@ describe('deleteRecords', () => {
 
       const result = await deleteRecords(uuids(150));
 
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
 
     // A timeout or systemic failure (auth/rate-limit/5xx) dooms every
@@ -1489,7 +1513,7 @@ describe('deleteRecords', () => {
       // Only two requests fire — the third chunk (doomed the same way, since
       // every chunk's payload is built identically) is never attempted.
       expect(global.fetch).toHaveBeenCalledTimes(2);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: true });
       // The abort itself must be logged — without this, the 50 uuids in the
       // never-sent third chunk would be indistinguishable from any other
       // failed delete (the caller's generic "Failed to delete records"
@@ -1505,7 +1529,7 @@ describe('deleteRecords', () => {
       const result = await deleteRecords(uuids(250));
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: true });
     });
 
     // When the confirming SECOND rejection happens to be the FINAL chunk,
@@ -1520,7 +1544,7 @@ describe('deleteRecords', () => {
       const result = await deleteRecords(uuids(200));
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: true });
       const loggedMessage = errorSpy.mock.calls
         .map((call) => String(call[0]))
         .find((message) => message.includes('Aborted after two consecutive'));
@@ -1553,7 +1577,7 @@ describe('deleteRecords', () => {
 
       // All three chunks are attempted — no abort.
       expect(global.fetch).toHaveBeenCalledTimes(3);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
 
     // A single request-shape rejection is not enough to abort — the next
@@ -1592,7 +1616,7 @@ describe('deleteRecords', () => {
       expect(global.fetch).toHaveBeenCalledTimes(3);
       // Chunk 1's uuids are still unconfirmed, so the overall result fails
       // loud rather than reporting a partial delete as complete.
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
 
     // Once a chunk has actually deleted records, that success has already
@@ -1629,7 +1653,7 @@ describe('deleteRecords', () => {
       // All three chunks fire — the first chunk's success rules out a
       // categorical (envelope-level) abort for the later rejections.
       expect(global.fetch).toHaveBeenCalledTimes(3);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
 
     // A 2xx that confirms 0 uuids deleted (every uuid in that chunk was
@@ -1664,7 +1688,7 @@ describe('deleteRecords', () => {
 
       // All three chunks fire — the zero-count success still counts as settled.
       expect(global.fetch).toHaveBeenCalledTimes(3);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
 
     // A 2xx whose `meta.deleted` is unusable (missing/non-numeric — a
@@ -1704,7 +1728,7 @@ describe('deleteRecords', () => {
       // rules out a categorical (envelope-level) abort for the later
       // rejections.
       expect(global.fetch).toHaveBeenCalledTimes(3);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
 
     // An "errors-carrying 2xx" is an odd contract shape, but the server DID
@@ -1746,7 +1770,7 @@ describe('deleteRecords', () => {
       // All three chunks fire — the errors-carrying 2xx still counts as
       // accepted, ruling out a categorical abort for the later rejections.
       expect(global.fetch).toHaveBeenCalledTimes(3);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
 
     // A non-request-shape chunk BETWEEN two identical request-shape rejections
@@ -1786,7 +1810,7 @@ describe('deleteRecords', () => {
       // consecutive-match tracking, so chunks 1+3 (split by it) never confirm,
       // and chunk 4's distinct message never matches chunk 3's either.
       expect(global.fetch).toHaveBeenCalledTimes(4);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
 
     // `FATAL_REQUEST_STATUS_CODES` (400/422 only) is what keeps a per-uuid 404
@@ -1802,7 +1826,7 @@ describe('deleteRecords', () => {
       const result = await deleteRecords(uuids(250));
 
       expect(global.fetch).toHaveBeenCalledTimes(3);
-      expect(result).toBeNull();
+      expect(result).toEqual({ meta: null, permanentlyFailed: false });
     });
   });
 });

@@ -954,6 +954,21 @@ const logRequestShapeAbort = (
   );
 };
 
+// `meta` mirrors the old bare return (an `ApiDeleteMeta` on a fully-confirmed
+// run, `null` on any failure); `permanentlyFailed` widens that contract so the
+// caller can tell a CATEGORICAL request-shape abort (a repeated 400/422 whose
+// envelope is wrong and will fail identically every pass) apart from a plain or
+// transient failure that's worth retrying. It's the return-path counterpart of
+// the thrown-error permanence the sync's `deleteRecords(...).catch` already
+// derives via `isPermanentApiFailure`, so both feed the SAME
+// `deletePermanentlyFailed` daemon-stop decision (see src/index.ts) instead of
+// a parallel mechanism. Only the request-shape abort sets it — a systemic
+// auth/5xx failure re-throws out of `deleteRecordsChunk` and never returns here.
+export type DeleteRecordsResult = {
+  meta: ApiDeleteMeta | null;
+  permanentlyFailed: boolean;
+};
+
 // Chunks `uuids` into `ceil(N / MAX_DELETE_BATCH_SIZE)` sequential DELETE
 // requests so a bulk delete over the server's cap settles instead of failing
 // outright. A timeout or systemic failure (auth/rate-limit/5xx) re-throws out
@@ -977,11 +992,14 @@ const logRequestShapeAbort = (
 // chunk was ACCEPTED (a 2xx — even a malformed one, or one confirming 0 uuids
 // deleted — already proves the envelope itself is valid, whether or not its
 // count can be trusted) — see `confirmsRequestShapeAbort` for the full rule.
+// That abort is reported as `permanentlyFailed: true` so the caller stops the
+// autoSync daemon rather than rescheduling into the same doomed DELETEs forever
+// (#204).
 export const deleteRecords = async (
   uuids: string[],
-): Promise<ApiDeleteMeta | null> => {
+): Promise<DeleteRecordsResult> => {
   if (uuids.length === 0) {
-    return { deleted: 0 };
+    return { meta: { deleted: 0 }, permanentlyFailed: false };
   }
 
   let totalDeleted = 0;
@@ -1036,7 +1054,9 @@ export const deleteRecords = async (
       // always 0) — log the abort itself instead.
       const unattemptedCount = uuids.length - (start + chunk.length);
       logRequestShapeAbort(uuids, unattemptedCount);
-      return null;
+      // Categorical: the envelope itself is wrong, so it recurs identically
+      // every pass — report it as permanent so the caller stops the daemon.
+      return { meta: null, permanentlyFailed: true };
     }
 
     lastRequestShapeMessage = requestShapeMessage;
@@ -1044,8 +1064,10 @@ export const deleteRecords = async (
 
   if (anyChunkFailed) {
     logPartialSettle(uuids, totalDeleted);
-    return null;
+    // A plain per-chunk failure is not categorical — a later pass may succeed —
+    // so it stays retryable (not permanent).
+    return { meta: null, permanentlyFailed: false };
   }
 
-  return { deleted: totalDeleted };
+  return { meta: { deleted: totalDeleted }, permanentlyFailed: false };
 };
