@@ -74,4 +74,27 @@ describe('warnPartialRead', () => {
     });
     expect(process.exitCode).toBe(1);
   });
+
+  // export.ts (issue #205) overrides the default message to describe its own
+  // reason(s) for an incomplete result (a server-side row cap and/or skipped
+  // malformed rows) instead of the default paginated-read wording, while
+  // still going through this one shared reporter.
+  it('uses the given message instead of the default when one is provided', () => {
+    warnPartialRead(true, 'The export was truncated.');
+
+    const output = vi.mocked(console.error).mock.calls[0][0] as string;
+    expect(JSON.parse(output)).toEqual({
+      error: 'partial_read',
+      message: 'The export was truncated.',
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('uses the given message in plain-text mode too', () => {
+    warnPartialRead(false, 'The export was truncated.');
+
+    const output = vi.mocked(console.error).mock.calls[0][0] as string;
+    expect(output).toBe('Warning: The export was truncated.');
+    expect(process.exitCode).toBe(1);
+  });
 });
