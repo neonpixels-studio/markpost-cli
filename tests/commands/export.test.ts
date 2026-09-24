@@ -177,6 +177,21 @@ describe('runExportCommand', () => {
   // must exit non-zero (mirroring records.ts/events.ts's partial-read
   // convention) so a script can detect an incomplete backup via `$?` alone.
   describe('incomplete export reporting', () => {
+    it('calls fetchRecordExport with json:false when --json is not given', async () => {
+      const { fetchRecordExport } = await import('@/libs/export.js');
+      vi.mocked(fetchRecordExport).mockResolvedValue({
+        ok: true,
+        rows: [firstRow],
+        truncated: false,
+        skippedCount: 0,
+      });
+      const { runExportCommand } = await import('@/commands/export.js');
+
+      await runExportCommand([]);
+
+      expect(fetchRecordExport).toHaveBeenCalledWith(false);
+    });
+
     it('warns and exits non-zero when the export was truncated', async () => {
       const { fetchRecordExport } = await import('@/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
@@ -250,6 +265,25 @@ describe('runExportCommand', () => {
   });
 
   describe('--json', () => {
+    // `--json` must thread through to `fetchRecordExport` so its own
+    // malformed-row/failure diagnostics stay silent on stderr (see
+    // libs/export.test.ts) — mirroring the equivalent assertion in
+    // records.test.ts for `fetchAllRecords` (issue #194).
+    it('threads --json through to fetchRecordExport', async () => {
+      const { fetchRecordExport } = await import('@/libs/export.js');
+      vi.mocked(fetchRecordExport).mockResolvedValue({
+        ok: true,
+        rows: [],
+        truncated: false,
+        skippedCount: 0,
+      });
+      const { runExportCommand } = await import('@/commands/export.js');
+
+      await runExportCommand(['--json']);
+
+      expect(fetchRecordExport).toHaveBeenCalledWith(true);
+    });
+
     it('prints the rows as a parseable JSON array', async () => {
       const { fetchRecordExport } = await import('@/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({

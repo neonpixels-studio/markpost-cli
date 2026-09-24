@@ -129,8 +129,10 @@ const printExportRow = (row: RecordExportRow): void => {
 };
 
 // A capped export and a batch of malformed rows are independent reasons the
-// export can be incomplete, so each gets its own lowercase clause here; the
-// caller below joins whichever clauses apply into one sentence.
+// export can be incomplete, so each gets its own complete sentence here; the
+// caller below joins whichever sentences apply with a plain space — no
+// capitalization/punctuation surgery on the combined string, so a sentence
+// starting with a digit or quote can't break it.
 const describeIncompleteExport = (
   truncated: boolean,
   skippedCount: number,
@@ -139,13 +141,13 @@ const describeIncompleteExport = (
 
   if (truncated) {
     reasons.push(
-      'the export was truncated at the server-side row limit — only the most recent rows were included',
+      'The export was truncated at the server-side row limit — only the most recent rows were included.',
     );
   }
 
   if (skippedCount > 0) {
     reasons.push(
-      `the server returned ${skippedCount} malformed row(s), which were skipped`,
+      `The server returned ${skippedCount} malformed row(s), which were skipped.`,
     );
   }
 
@@ -172,10 +174,7 @@ const reportIncompleteExport = (
     return;
   }
 
-  const combinedReason = reasons.join('; ');
-  const message = `${combinedReason.charAt(0).toUpperCase()}${combinedReason.slice(1)}.`;
-
-  warnPartialRead(json, message);
+  warnPartialRead(json, reasons.join(' '));
 };
 
 // Writes the already-fetched rows to disk and reports where they landed. A
@@ -217,7 +216,7 @@ const runExport = async (
   force: boolean,
   json: boolean,
 ): Promise<void> => {
-  const result = await fetchRecordExport();
+  const result = await fetchRecordExport(json);
 
   // A failed fetch must not masquerade as an empty backup — throw so the
   // command's catch reports it loudly and exits non-zero, mirroring

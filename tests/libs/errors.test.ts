@@ -97,16 +97,4 @@ describe('warnPartialRead', () => {
     expect(output).toBe('Warning: The export was truncated.');
     expect(process.exitCode).toBe(1);
   });
-
-  // The default constant is safe by construction, but an override is
-  // caller-built text with no sanitization guarantee of its own — a
-  // server-derived reason could otherwise carry a live terminal escape
-  // straight to stderr (see the doc comment above `warnPartialRead`).
-  it('sanitizes a control character in a caller-supplied message in plain-text mode', () => {
-    warnPartialRead(false, 'Truncated\x1b[31m message');
-
-    const output = vi.mocked(console.error).mock.calls[0][0] as string;
-    expect(output).not.toContain('\x1b');
-    expect(output).toContain('Truncated');
-  });
 });

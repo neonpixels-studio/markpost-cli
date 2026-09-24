@@ -4,7 +4,6 @@ import {
   JSON_ERROR_PARTIAL_READ,
   printJsonError,
 } from '@/libs/output.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
 
 export const logErrorMessage = (title: string, message: string) => {
   return console.error(chalk.redBright(`${title}\n${message}`));
@@ -44,15 +43,15 @@ export const failWithMessage = (message: string, json = false): void => {
 // a server-side row cap and/or skipped malformed rows) so the wording and the
 // `--json`/plain-text branching can't drift between them. `message` defaults
 // to the paginated-read case; `export` overrides it to describe its own
-// reason(s). In `--json` mode the warning reuses the same `{ error, message }`
+// reason(s) — like `failWithMessage`, callers pass an already-sanitized
+// message (neither export's override nor the default constant here is
+// server-derived, so plain string literals are safe as-is). In `--json` mode
+// the warning reuses the same `{ error, message }`
 // shape as every other `--json` failure — no separate JSON-error shape
 // invented for this case — but under its own `partial_read` code (not
 // `fetch_failed`): unlike every other `--json` failure, stdout still carries
 // valid (if truncated) data here, and a script needs to tell that apart from
-// a request that returned nothing at all. The plain-text path sanitizes
-// `message` (mirroring `failWithMessage`'s callers) since, unlike the default
-// constant, an override is caller-built text that isn't guaranteed
-// terminal-safe.
+// a request that returned nothing at all.
 const PARTIAL_READ_MESSAGE =
   'A later page failed to fetch — this list may be incomplete.';
 
@@ -67,5 +66,5 @@ export const warnPartialRead = (
     return;
   }
 
-  console.error(chalk.yellow(`Warning: ${sanitizeForTerminal(message)}`));
+  console.error(chalk.yellow(`Warning: ${message}`));
 };
