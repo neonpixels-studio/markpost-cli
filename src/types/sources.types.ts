@@ -162,9 +162,11 @@ export type SourceTestResult = {
 
 // The test endpoint returns its own resource type (`sourceTestEvents`), not a
 // `sources` resource — it is a diagnostic preview, not the source itself.
+// (No `SourceTestApiResponse` alias: `writeSourceRequest` casts generically to
+// `ApiResponse<TResource | null>`, so a dedicated envelope type here would
+// never be referenced — see `SourceListApiResponse`, which is used, for the
+// contrast.)
 export type SourceTestResource = ApiResourceObject & {
   type: 'sourceTestEvents';
   attributes: SourceTestResult;
 };
-
-export type SourceTestApiResponse = ApiResponse<SourceTestResource>;

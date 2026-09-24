@@ -22,7 +22,10 @@ import {
   RotateSourceSecretInput,
   Source,
   SOURCE_TYPES,
+  SourceTestFieldMapping,
   SourceTestResult,
+  SourceTestSignatureCheck,
+  SourceTestSignatureStatus,
   SourceType,
 } from '@/types/sources.types.js';
 
@@ -57,8 +60,7 @@ export const buildEndpointUrl = (
 // never pass the guard without a handler (which would otherwise risk falling
 // through to the destructive delete). A Map (not an object) keeps a subcommand
 // named "toString" from resolving to a prototype member.
-// Only `list` renders JSON; the other subcommands are interactive or emit a
-// one-off result, so --json means nothing to them.
+// Which subcommands render JSON is decided once, by JSON_SUBCOMMANDS below.
 const LIST_SUBCOMMAND = 'list';
 const CREATE_SUBCOMMAND = 'create';
 const UPDATE_SUBCOMMAND = 'update';
@@ -182,7 +184,8 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   try {
     // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
     // still prompts rather than trying to delete a source named "--json") and
-    // rejects an unknown/mistyped flag. Only `list` reads json.
+    // rejects an unknown/mistyped flag. Which subcommands act on `json` is
+    // decided by JSON_SUBCOMMANDS below.
     const { positionals, values } = parseArgs({
       args,
       allowPositionals: true,
@@ -707,18 +710,28 @@ const rotateSecretCommand = async (uuid?: string): Promise<void> => {
 
 // A pass is green, a rejection red, and the two inconclusive states
 // (not_required / not_verifiable) yellow — so the outcome is legible at a
-// glance. Only chalk methods the codebase already uses appear here. The status
-// is server-derived, so it's sanitized by the caller before this wraps it.
-const colorizeSignatureStatus = (status: string): string => {
-  if (status === 'verified') {
-    return chalk.greenBright(status);
-  }
+// glance. Keyed by the raw (pre-sanitize) status, not the sanitized display
+// text, so a status carrying a stray control character still matches; typing
+// the key `SourceTestSignatureStatus` also means a status this union doesn't
+// know about fails the build here instead of silently falling through to
+// yellow forever.
+const SIGNATURE_STATUS_COLORS: Record<
+  SourceTestSignatureStatus,
+  (text: string) => string
+> = {
+  verified: chalk.greenBright,
+  failed: chalk.redBright,
+  not_required: chalk.yellowBright,
+  not_verifiable: chalk.yellowBright,
+};
 
-  if (status === 'failed') {
-    return chalk.redBright(status);
-  }
+const colorizeSignatureStatus = (
+  status: SourceTestSignatureStatus | undefined,
+  displayText: string,
+): string => {
+  const colorize = status ? SIGNATURE_STATUS_COLORS[status] : undefined;
 
-  return chalk.yellowBright(status);
+  return (colorize ?? chalk.yellowBright)(displayText);
 };
 
 // Every field here is untrusted API output, so each is stripped of control/ANSI
@@ -726,12 +739,26 @@ const colorizeSignatureStatus = (status: string): string => {
 // `content` is coerced to a single line by the single-line sanitizer, which is
 // fine for a preview. `frontmatter` is `unknown`, so it's JSON-stringified
 // first, then sanitized (an object value could itself carry an escape).
+//
+// `signatureCheck`/`fieldMapping` are declared required, but that's only a
+// compile-time claim over parsed JSON (see terminal.ts's `sanitize`) — a
+// drifted or malformed response could omit either nested object entirely, or
+// ship `tags` as something other than an array. Each is optional-chained (and
+// `tags` explicitly array-checked) so a malformed response still prints a
+// best-effort preview instead of throwing a raw TypeError past the caller's
+// `--json` check.
 const printTestResult = (result: SourceTestResult): void => {
-  const { signatureCheck, fieldMapping } = result;
+  const signatureCheck: Partial<SourceTestSignatureCheck> =
+    result.signatureCheck ?? {};
+  const fieldMapping: Partial<SourceTestFieldMapping> =
+    result.fieldMapping ?? {};
+  const tags = Array.isArray(fieldMapping.tags) ? fieldMapping.tags : [];
 
+  console.log(`Provider:    ${sanitizeForTerminal(result.provider ?? 'none')}`);
   console.log(
     chalk.bold(
       `Signature check: ${colorizeSignatureStatus(
+        signatureCheck.status,
         sanitizeForTerminal(signatureCheck.status),
       )}`,
     ),
@@ -741,9 +768,7 @@ const printTestResult = (result: SourceTestResult): void => {
   console.log(chalk.bold('Field mapping preview:'));
   console.log(`  title:       ${sanitizeForTerminal(fieldMapping.title)}`);
   console.log(`  content:     ${sanitizeForTerminal(fieldMapping.content)}`);
-  console.log(
-    `  tags:        ${sanitizeForTerminal(fieldMapping.tags.join(', '))}`,
-  );
+  console.log(`  tags:        ${sanitizeForTerminal(tags.join(', '))}`);
   console.log(`  file path:   ${sanitizeForTerminal(fieldMapping.filePath)}`);
   console.log(
     `  frontmatter: ${sanitizeForTerminal(JSON.stringify(fieldMapping.frontmatter))}`,

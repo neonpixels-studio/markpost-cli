@@ -1709,6 +1709,77 @@ describe('runSourcesCommand', () => {
       expect(parsed.message).toContain('Failed to test source.');
       expect(process.exitCode).toBe(1);
     });
+
+    // `test` takes a required uuid (never a picker) and is documented as
+    // needing no interactive terminal — this is the primary scripted use case
+    // (`markpost sources test <uuid> --json | jq`), mirroring `list`'s own
+    // non-TTY guard test above.
+    it('still tests on a non-TTY (neither stdin nor stdout is a terminal)', async () => {
+      process.stdin.isTTY = false;
+      process.stdout.isTTY = false;
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(testResult);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', '--json']);
+
+      expect(testSource).toHaveBeenCalledWith('abc-123');
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('strips control characters from untrusted test-result fields before printing', async () => {
+      // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
+      const control = String.fromCharCode(0x1b);
+      const evilResult: SourceTestResult = {
+        ...testResult,
+        signatureCheck: {
+          status: 'verified',
+          message: `stored secret is valid${control}[2J`,
+        },
+        fieldMapping: {
+          ...testResult.fieldMapping,
+          title: `Evil${control}Title`,
+          // `frontmatter` is `unknown` and JSON-stringified before printing.
+          // JSON.stringify itself escapes a raw control byte into the literal
+          // 6-character sequence `\u001b`, so it can never reach the terminal
+          // as a real ESC byte even before sanitizeForTerminal runs — this
+          // pins that behavior down rather than assuming it.
+          frontmatter: { note: `evil${control}note` },
+        },
+      };
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(evilResult);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123']);
+
+      expect(loggedText()).not.toContain(control);
+      expect(loggedText()).toContain('stored secret is valid [2J');
+      expect(loggedText()).toContain('Evil Title');
+      expect(loggedText()).toContain('evil\\u001bnote');
+    });
+
+    // `signatureCheck`/`fieldMapping` are declared required, but that's only a
+    // compile-time claim over parsed JSON — a drifted or malformed server
+    // response could omit either nested object, or ship `tags` as something
+    // other than an array. The printer must degrade to a best-effort preview
+    // rather than throw a raw TypeError past this exit-code check.
+    it('prints a best-effort preview instead of throwing on a malformed result', async () => {
+      const malformedResult = {
+        provider: null,
+        payload: {},
+      } as unknown as SourceTestResult;
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(malformedResult);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await expect(
+        runSourcesCommand(['test', 'abc-123']),
+      ).resolves.not.toThrow();
+
+      expect(loggedText()).toContain('Signature check');
+      expect(process.exitCode).toBeUndefined();
+    });
   });
 
   // The unified --json failure contract: rejecting --json on a non-list
