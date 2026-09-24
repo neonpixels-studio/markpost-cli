@@ -3,14 +3,9 @@ import chalk from 'chalk';
 import { fetchRecordExport, writeExportFile } from '@/libs/export.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, warnPartialRead } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import {
-  hasJsonFlag,
-  JSON_ERROR_PARTIAL_READ,
-  printJson,
-  printJsonError,
-} from '@/libs/output.js';
+import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { RecordExportRow } from '@/types/records.types.js';
 
 export const USAGE = `Usage: markpost export [options]
@@ -133,47 +128,55 @@ const printExportRow = (row: RecordExportRow): void => {
   }
 };
 
-// Shared by both `reportIncompleteExport` conditions below: chalk prose on
-// stderr in plain mode, or the unified `{ error, message }` JSON contract
-// under `--json` — mirroring `warnPartialRead` in libs/errors.ts (used by
-// records.ts/events.ts for their own partial-read warning) so a script
-// parsing stderr never has to distinguish export's warning shape from theirs.
-const warnIncomplete = (message: string, json: boolean): void => {
-  if (json) {
-    printJsonError(JSON_ERROR_PARTIAL_READ, message);
-    return;
+// A capped export and a batch of malformed rows are independent reasons the
+// returned data can be incomplete, so each gets its own clause, joined into
+// one warning — one call to `warnPartialRead` (not one per clause) so a
+// `--json` consumer always finds exactly one JSON object on stderr, matching
+// every other `--json` failure's "one object" contract (see README "JSON
+// failure contract"). `truncated`/`skippedCount` also ride along as
+// machine-readable `details` so a script doesn't have to parse `message`
+// prose to tell which reason(s) applied.
+const describeIncompleteExport = (
+  truncated: boolean,
+  skippedCount: number,
+): string[] => {
+  const reasons: string[] = [];
+
+  if (truncated) {
+    reasons.push(
+      'the export was truncated at the server-side row limit — only the most recent rows were included',
+    );
   }
 
-  console.error(chalk.yellow(`Warning: ${message}`));
+  if (skippedCount > 0) {
+    reasons.push(
+      `the server returned ${skippedCount} malformed row(s), which were skipped`,
+    );
+  }
+
+  return reasons;
 };
 
-// A capped export or a batch of malformed rows both mean the returned data is
-// incomplete even though the request succeeded, so both warn (stderr, so
-// `--json`/`--out` output stays clean on its own channel) AND set a non-zero
-// exit — mirroring the partial-read convention in records.ts/events.ts, since
-// the warning alone is invisible to a script or cron job checking `$?`.
+// Delegates the actual warning (chalk prose vs `--json` contract, and setting
+// a non-zero exit) to `warnPartialRead` in libs/errors.ts — the same reporter
+// records.ts/events.ts use for their own partial-read warning — rather than
+// re-implementing that branching here, so the wording and `--json`/plain-text
+// split can't drift between commands (see its doc comment).
 const reportIncompleteExport = (
   truncated: boolean,
   skippedCount: number,
   json: boolean,
 ): void => {
-  if (truncated) {
-    warnIncomplete(
-      'The export was truncated at the server-side row limit — only the most recent rows were included.',
-      json,
-    );
+  const reasons = describeIncompleteExport(truncated, skippedCount);
+
+  if (reasons.length === 0) {
+    return;
   }
 
-  if (skippedCount > 0) {
-    warnIncomplete(
-      `The server returned ${skippedCount} malformed row(s), which were skipped.`,
-      json,
-    );
-  }
+  const combinedReason = reasons.join('; ');
+  const message = `${combinedReason.charAt(0).toUpperCase()}${combinedReason.slice(1)}.`;
 
-  if (truncated || skippedCount > 0) {
-    process.exitCode = 1;
-  }
+  warnPartialRead(json, message, { truncated, skippedCount });
 };
 
 // Writes the already-fetched rows to disk and reports where they landed. A

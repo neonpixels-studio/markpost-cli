@@ -213,6 +213,25 @@ describe('runExportCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    it('combines both reasons into a single warning when truncated and skipped rows both apply', async () => {
+      const { fetchRecordExport } = await import('@/libs/export.js');
+      vi.mocked(fetchRecordExport).mockResolvedValue({
+        ok: true,
+        rows: [firstRow],
+        truncated: true,
+        skippedCount: 2,
+      });
+      const { runExportCommand } = await import('@/commands/export.js');
+
+      await runExportCommand([]);
+
+      expect(console.error).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.error).mock.calls[0][0] as string;
+      expect(output).toContain('truncated');
+      expect(output).toContain('2 malformed row(s)');
+      expect(process.exitCode).toBe(1);
+    });
+
     it('does not warn or exit non-zero for a complete export', async () => {
       const { fetchRecordExport } = await import('@/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
@@ -288,6 +307,8 @@ describe('runExportCommand', () => {
       expect(JSON.parse(errorOutput)).toEqual({
         error: 'partial_read',
         message: expect.stringContaining('truncated'),
+        truncated: true,
+        skippedCount: 0,
       });
       // The partial data on stdout and the non-zero exit must both survive
       // alongside the JSON error object on stderr.
@@ -313,13 +334,19 @@ describe('runExportCommand', () => {
       expect(JSON.parse(errorOutput)).toEqual({
         error: 'partial_read',
         message: expect.stringContaining('3 malformed row(s)'),
+        truncated: false,
+        skippedCount: 3,
       });
       const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
       expect(JSON.parse(output)).toHaveLength(1);
       expect(process.exitCode).toBe(1);
     });
 
-    it('emits two separate partial_read JSON error objects when both truncated and skipped rows apply under --json', async () => {
+    // Exactly one JSON object on stderr even when both reasons apply —
+    // mirroring every other `--json` failure's "one object" contract (see
+    // README "JSON failure contract") so a script doing a single
+    // `JSON.parse(stderr)` never sees two concatenated objects.
+    it('combines both reasons into a single partial_read JSON error object when truncated and skipped rows both apply under --json', async () => {
       const { fetchRecordExport } = await import('@/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
@@ -331,18 +358,16 @@ describe('runExportCommand', () => {
 
       await runExportCommand(['--json']);
 
-      expect(console.error).toHaveBeenCalledTimes(2);
-      const [truncatedOutput, skippedOutput] = vi
-        .mocked(console.error)
-        .mock.calls.map(([arg]) => JSON.parse(arg as string));
-      expect(truncatedOutput).toEqual({
+      expect(console.error).toHaveBeenCalledTimes(1);
+      const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
+      const parsed = JSON.parse(errorOutput);
+      expect(parsed).toEqual({
         error: 'partial_read',
         message: expect.stringContaining('truncated'),
+        truncated: true,
+        skippedCount: 2,
       });
-      expect(skippedOutput).toEqual({
-        error: 'partial_read',
-        message: expect.stringContaining('2 malformed row(s)'),
-      });
+      expect(parsed.message).toContain('2 malformed row(s)');
       expect(process.exitCode).toBe(1);
     });
 
