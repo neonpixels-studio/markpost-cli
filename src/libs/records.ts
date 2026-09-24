@@ -477,16 +477,20 @@ export type MarkSyncedResult = {
 };
 
 // The `records[]` item markpost's bulk PATCH expects: the uuid to match plus
-// the attributes to set. The CLI always sets `status`, `syncedAt`, and
-// `filePath` together — moving a written record out of `pending` so the next
-// run's pending-only fetch skips it. `filePath` is sent deliberately: markpost
-// stores it on the record so its UI can show where a synced note landed — the
-// user's own local path going to their own account, not a third-party leak.
-const buildBulkRecordPayload = (item: MarkSyncedItem, syncedAt: string) => {
+// the attributes to set. The CLI always sets `status` and `filePath` together
+// — moving a written record out of `pending` so the next run's pending-only
+// fetch skips it. `filePath` is sent deliberately: markpost stores it on the
+// record so its UI can show where a synced note landed — the user's own local
+// path going to their own account, not a third-party leak. `syncedAt` is
+// deliberately NOT sent: markpost's PATCH /api/records rejects any request
+// that includes a client-supplied `syncedAt` with a 422 (markpost#271 on this
+// bulk endpoint, markpost#297 on the single-uuid endpoint) and stamps it
+// itself when the update moves a record to "synced" — the server, not the
+// client clock, is authoritative for when a record actually synced.
+const buildBulkRecordPayload = (item: MarkSyncedItem) => {
   return {
     uuid: item.uuid,
     status: SYNCED_STATUS,
-    syncedAt,
     filePath: item.filePath,
   };
 };
@@ -583,7 +587,6 @@ type MarkSyncedChunkResult = {
 // rather than aborting on a misread status.
 const markSyncedChunk = async (
   items: MarkSyncedItem[],
-  syncedAt: string,
 ): Promise<MarkSyncedChunkResult> => {
   try {
     const body = (await authedRequest('/api/records', {
@@ -595,9 +598,7 @@ const markSyncedChunk = async (
         data: {
           type: 'records',
           attributes: {
-            records: items.map((item) =>
-              buildBulkRecordPayload(item, syncedAt),
-            ),
+            records: items.map((item) => buildBulkRecordPayload(item)),
           },
         },
       }),
@@ -709,8 +710,9 @@ const withAbortedTail = (
 // markpost's bulk PATCH /api/records (server/api/records/index.patch.ts). This
 // is the non-destructive counterpart to `deleteRecords`: with autoDelete off,
 // moving each record out of `pending` is what stops the next run's pending-only
-// fetch from re-writing it. `syncedAt` is injected (defaulting to now) so
-// callers and tests can pin the timestamp.
+// fetch from re-writing it. The request never includes `syncedAt` — the server
+// stamps it itself (see `buildBulkRecordPayload`) — so the CLI has no local
+// timestamp to compute or pin here.
 //
 // Chunks the input into `ceil(N / MAX_MARK_SYNCED_BATCH_SIZE)` requests so a
 // large first sync settles up to 100 records per PATCH instead of one request
@@ -737,7 +739,6 @@ const withAbortedTail = (
 // on `'permanent'` (see `MarkAbortReason`).
 export const markRecordsSynced = async (
   items: MarkSyncedItem[],
-  syncedAt: string = new Date().toISOString(),
 ): Promise<MarkSyncedResult> => {
   const outcomes: MarkSyncedOutcome[] = [];
   let anySynced = false;
@@ -753,7 +754,7 @@ export const markRecordsSynced = async (
       outcomes: chunkOutcomes,
       abortReason,
       message,
-    } = await markSyncedChunk(chunk, syncedAt);
+    } = await markSyncedChunk(chunk);
 
     outcomes.push(...chunkOutcomes);
     anySynced = anySynced || chunkOutcomes.includes(MARK_SYNCED);
