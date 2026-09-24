@@ -408,9 +408,19 @@ describe('runExportCommand', () => {
 
       expect(fetchRecordExport).not.toHaveBeenCalled();
       expect(writeExportFile).not.toHaveBeenCalled();
-      expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('Cannot combine --out and --json.'),
+      // `--json` was on argv, so this is a usage error reported through the
+      // JSON contract, not chalk prose — pin the `usage` code (issue #208) so
+      // a regression to the old fetch-path catch can't silently pass a
+      // substring match against `fetch_failed` JSON too. Also pin the "exactly
+      // one object on stderr" contract (README "JSON failure contract") so a
+      // regression that also emits the human usage block in --json mode can't
+      // slip past unnoticed on call index 1.
+      expect(console.error).toHaveBeenCalledTimes(1);
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
       );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('Cannot combine --out and --json.');
       expect(process.exitCode).toBe(1);
     });
 
@@ -610,10 +620,18 @@ describe('runExportCommand', () => {
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Unexpected argument "bogus"'),
     );
+    // Same failWithUsage path as the unknown-flag case below — pin the usage
+    // block here too so the two usage-error tests stay in sync by design,
+    // not by accident.
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Usage: markpost export'),
+    );
     expect(process.exitCode).toBe(1);
   });
 
-  it('surfaces an error and never fetches when given an unknown flag', async () => {
+  // A bad flag now routes through failWithUsage, so the non-JSON path prints
+  // the usage block, not bare prose — mirroring records.ts/events.ts (#208).
+  it('surfaces an error and the usage block, and never fetches, on an unknown flag', async () => {
     const { checkConfig } = await import('@/libs/config.js');
     const { fetchRecordExport } = await import('@/libs/export.js');
     const { runExportCommand } = await import('@/commands/export.js');
@@ -624,6 +642,9 @@ describe('runExportCommand', () => {
     expect(fetchRecordExport).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('bogus'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Usage: markpost export'),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -664,21 +685,46 @@ describe('runExportCommand', () => {
   });
 
   describe('--json failure contract', () => {
-    // Mirrors get.ts/records.ts: a bad flag throws out of the arg parser and
-    // is caught by the command's single outer catch, which always reports
-    // through the fetch_failed shape (there is no separate usage-coded path
-    // for a thrown parse error here, unlike the subcommand-group commands'
-    // dedicated failWithSubcommandUsage call).
-    it('emits a fetch_failed-coded JSON error for an unknown flag', async () => {
+    // A bad flag is a usage error, not a fetch failure — it must report the
+    // documented `usage` code, never `fetch_failed` (issue #208). Arg parsing
+    // used to share the fetch's single outer catch, which miscoded it.
+    it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
+      const { fetchRecordExport } = await import('@/libs/export.js');
       const { runExportCommand } = await import('@/commands/export.js');
 
       await runExportCommand(['--bogus', '--json']);
 
+      expect(fetchRecordExport).not.toHaveBeenCalled();
+      // stdout is the `jq` data channel for --json — a usage error must not
+      // print anything there.
+      expect(console.log).not.toHaveBeenCalled();
+      // Exactly one object on stderr (README "JSON failure contract") — a
+      // regression that also emits the human usage block in --json mode
+      // would otherwise slip past on call index 1.
+      expect(console.error).toHaveBeenCalledTimes(1);
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
-      expect(parsed.error).toBe('fetch_failed');
+      expect(parsed.error).toBe('usage');
       expect(parsed.message).toContain('bogus');
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A stray positional is likewise a usage error, not fetch_failed.
+    it('emits a usage-coded JSON error, not fetch_failed, for a stray positional', async () => {
+      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { runExportCommand } = await import('@/commands/export.js');
+
+      await runExportCommand(['bogus', '--json']);
+
+      expect(fetchRecordExport).not.toHaveBeenCalled();
+      expect(console.log).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledTimes(1);
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('Unexpected argument "bogus"');
       expect(process.exitCode).toBe(1);
     });
 
