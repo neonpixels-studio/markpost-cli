@@ -5,7 +5,12 @@ import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { hasJsonFlag, printJson } from '@/libs/output.js';
+import {
+  hasJsonFlag,
+  JSON_ERROR_PARTIAL_READ,
+  printJson,
+  printJsonError,
+} from '@/libs/output.js';
 import { RecordExportRow } from '@/types/records.types.js';
 
 export const USAGE = `Usage: markpost export [options]
@@ -128,6 +133,20 @@ const printExportRow = (row: RecordExportRow): void => {
   }
 };
 
+// Shared by both `reportIncompleteExport` conditions below: chalk prose on
+// stderr in plain mode, or the unified `{ error, message }` JSON contract
+// under `--json` — mirroring `warnPartialRead` in libs/errors.ts (used by
+// records.ts/events.ts for their own partial-read warning) so a script
+// parsing stderr never has to distinguish export's warning shape from theirs.
+const warnIncomplete = (message: string, json: boolean): void => {
+  if (json) {
+    printJsonError(JSON_ERROR_PARTIAL_READ, message);
+    return;
+  }
+
+  console.error(chalk.yellow(`Warning: ${message}`));
+};
+
 // A capped export or a batch of malformed rows both mean the returned data is
 // incomplete even though the request succeeded, so both warn (stderr, so
 // `--json`/`--out` output stays clean on its own channel) AND set a non-zero
@@ -136,20 +155,19 @@ const printExportRow = (row: RecordExportRow): void => {
 const reportIncompleteExport = (
   truncated: boolean,
   skippedCount: number,
+  json: boolean,
 ): void => {
   if (truncated) {
-    console.error(
-      chalk.yellow(
-        'Warning: the export was truncated at the server-side row limit — only the most recent rows were included.',
-      ),
+    warnIncomplete(
+      'The export was truncated at the server-side row limit — only the most recent rows were included.',
+      json,
     );
   }
 
   if (skippedCount > 0) {
-    console.error(
-      chalk.yellow(
-        `Warning: the server returned ${skippedCount} malformed row(s), which were skipped.`,
-      ),
+    warnIncomplete(
+      `The server returned ${skippedCount} malformed row(s), which were skipped.`,
+      json,
     );
   }
 
@@ -208,7 +226,7 @@ const runExport = async (
   }
 
   const { rows, truncated, skippedCount } = result;
-  reportIncompleteExport(truncated, skippedCount);
+  reportIncompleteExport(truncated, skippedCount, json);
 
   if (outputPath) {
     writeToOutputFile(outputPath, rows, force, skippedCount);
