@@ -307,8 +307,6 @@ describe('runExportCommand', () => {
       expect(JSON.parse(errorOutput)).toEqual({
         error: 'partial_read',
         message: expect.stringContaining('truncated'),
-        truncated: true,
-        skippedCount: 0,
       });
       // The partial data on stdout and the non-zero exit must both survive
       // alongside the JSON error object on stderr.
@@ -334,8 +332,6 @@ describe('runExportCommand', () => {
       expect(JSON.parse(errorOutput)).toEqual({
         error: 'partial_read',
         message: expect.stringContaining('3 malformed row(s)'),
-        truncated: false,
-        skippedCount: 3,
       });
       const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
       expect(JSON.parse(output)).toHaveLength(1);
@@ -364,8 +360,6 @@ describe('runExportCommand', () => {
       expect(parsed).toEqual({
         error: 'partial_read',
         message: expect.stringContaining('truncated'),
-        truncated: true,
-        skippedCount: 2,
       });
       expect(parsed.message).toContain('2 malformed row(s)');
       expect(process.exitCode).toBe(1);

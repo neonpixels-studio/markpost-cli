@@ -75,22 +75,17 @@ describe('warnPartialRead', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  // export.ts (issue #205) overrides both the message and the details to
-  // describe its own reason(s) for an incomplete result (a server-side row
-  // cap and/or skipped malformed rows) instead of the default paginated-read
-  // wording, while still going through this one shared reporter.
-  it('uses the given message and details instead of the default when both are provided', () => {
-    warnPartialRead(true, 'The export was truncated.', {
-      truncated: true,
-      skippedCount: 0,
-    });
+  // export.ts (issue #205) overrides the default message to describe its own
+  // reason(s) for an incomplete result (a server-side row cap and/or skipped
+  // malformed rows) instead of the default paginated-read wording, while
+  // still going through this one shared reporter.
+  it('uses the given message instead of the default when one is provided', () => {
+    warnPartialRead(true, 'The export was truncated.');
 
     const output = vi.mocked(console.error).mock.calls[0][0] as string;
     expect(JSON.parse(output)).toEqual({
       error: 'partial_read',
       message: 'The export was truncated.',
-      truncated: true,
-      skippedCount: 0,
     });
     expect(process.exitCode).toBe(1);
   });
@@ -101,5 +96,17 @@ describe('warnPartialRead', () => {
     const output = vi.mocked(console.error).mock.calls[0][0] as string;
     expect(output).toBe('Warning: The export was truncated.');
     expect(process.exitCode).toBe(1);
+  });
+
+  // The default constant is safe by construction, but an override is
+  // caller-built text with no sanitization guarantee of its own — a
+  // server-derived reason could otherwise carry a live terminal escape
+  // straight to stderr (see the doc comment above `warnPartialRead`).
+  it('sanitizes a control character in a caller-supplied message in plain-text mode', () => {
+    warnPartialRead(false, 'Truncated\x1b[31m message');
+
+    const output = vi.mocked(console.error).mock.calls[0][0] as string;
+    expect(output).not.toContain('\x1b');
+    expect(output).toContain('Truncated');
   });
 });

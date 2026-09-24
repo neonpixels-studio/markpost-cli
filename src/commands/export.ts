@@ -129,13 +129,8 @@ const printExportRow = (row: RecordExportRow): void => {
 };
 
 // A capped export and a batch of malformed rows are independent reasons the
-// returned data can be incomplete, so each gets its own clause, joined into
-// one warning — one call to `warnPartialRead` (not one per clause) so a
-// `--json` consumer always finds exactly one JSON object on stderr, matching
-// every other `--json` failure's "one object" contract (see README "JSON
-// failure contract"). `truncated`/`skippedCount` also ride along as
-// machine-readable `details` so a script doesn't have to parse `message`
-// prose to tell which reason(s) applied.
+// export can be incomplete, so each gets its own lowercase clause here; the
+// caller below joins whichever clauses apply into one sentence.
 const describeIncompleteExport = (
   truncated: boolean,
   skippedCount: number,
@@ -157,11 +152,15 @@ const describeIncompleteExport = (
   return reasons;
 };
 
-// Delegates the actual warning (chalk prose vs `--json` contract, and setting
-// a non-zero exit) to `warnPartialRead` in libs/errors.ts — the same reporter
+// Joins every applicable reason into one sentence and reports it with a
+// single call to `warnPartialRead` in libs/errors.ts — the same reporter
 // records.ts/events.ts use for their own partial-read warning — rather than
-// re-implementing that branching here, so the wording and `--json`/plain-text
-// split can't drift between commands (see its doc comment).
+// one call per reason or a local reimplementation of the `--json`/plain-text
+// branching. One call keeps `warnPartialRead`'s "wording and branching can't
+// drift between commands" guarantee (see its doc comment) intact, and keeps a
+// `--json` consumer's parse simple: exactly one JSON object on stderr,
+// matching every other `--json` failure's "one object" contract (see README
+// "JSON failure contract"), even when both reasons apply.
 const reportIncompleteExport = (
   truncated: boolean,
   skippedCount: number,
@@ -176,7 +175,7 @@ const reportIncompleteExport = (
   const combinedReason = reasons.join('; ');
   const message = `${combinedReason.charAt(0).toUpperCase()}${combinedReason.slice(1)}.`;
 
-  warnPartialRead(json, message, { truncated, skippedCount });
+  warnPartialRead(json, message);
 };
 
 // Writes the already-fetched rows to disk and reports where they landed. A

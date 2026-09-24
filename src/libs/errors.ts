@@ -4,6 +4,7 @@ import {
   JSON_ERROR_PARTIAL_READ,
   printJsonError,
 } from '@/libs/output.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 
 export const logErrorMessage = (title: string, message: string) => {
   return console.error(chalk.redBright(`${title}\n${message}`));
@@ -41,30 +42,30 @@ export const failWithMessage = (message: string, json = false): void => {
 // nominally succeeded. Shared by `records list`, `events list` (the CLI's two
 // paginated read commands), and `export` (whose result can be incomplete via
 // a server-side row cap and/or skipped malformed rows) so the wording and the
-// `--json`/plain-text branching can't drift between them. `message` and
-// `details` default to the paginated-read case; `export` overrides both to
-// describe its own reason(s) and to add machine-readable `truncated`/
-// `skippedCount` fields a script can key off instead of parsing `message`
-// prose. In `--json` mode the warning reuses the same `{ error, message }`
+// `--json`/plain-text branching can't drift between them. `message` defaults
+// to the paginated-read case; `export` overrides it to describe its own
+// reason(s). In `--json` mode the warning reuses the same `{ error, message }`
 // shape as every other `--json` failure — no separate JSON-error shape
 // invented for this case — but under its own `partial_read` code (not
 // `fetch_failed`): unlike every other `--json` failure, stdout still carries
 // valid (if truncated) data here, and a script needs to tell that apart from
-// a request that returned nothing at all.
+// a request that returned nothing at all. The plain-text path sanitizes
+// `message` (mirroring `failWithMessage`'s callers) since, unlike the default
+// constant, an override is caller-built text that isn't guaranteed
+// terminal-safe.
 const PARTIAL_READ_MESSAGE =
   'A later page failed to fetch — this list may be incomplete.';
 
 export const warnPartialRead = (
   json: boolean,
   message: string = PARTIAL_READ_MESSAGE,
-  details: Record<string, unknown> = {},
 ): void => {
   process.exitCode = 1;
 
   if (json) {
-    printJsonError(JSON_ERROR_PARTIAL_READ, message, details);
+    printJsonError(JSON_ERROR_PARTIAL_READ, message);
     return;
   }
 
-  console.error(chalk.yellow(`Warning: ${message}`));
+  console.error(chalk.yellow(`Warning: ${sanitizeForTerminal(message)}`));
 };
