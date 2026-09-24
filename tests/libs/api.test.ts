@@ -24,7 +24,7 @@ import { logErrorMessage } from '@/libs/errors.js';
 import { ApiError, ApiResourceObject, ApiResponse } from '@/types/api.types.js';
 
 vi.mock('@/libs/config.js', () => ({
-  config: { get: vi.fn() },
+  getConfigValue: vi.fn(),
 }));
 
 vi.mock('@/libs/errors.js', async (importOriginal) => ({
@@ -62,9 +62,31 @@ describe('getApiToken', () => {
     expect(getApiToken()).toBe('test-token');
   });
 
-  it('returns undefined when API_TOKEN is not set', () => {
+  it('returns undefined when neither API_TOKEN nor the stored config value is set', async () => {
     delete process.env.API_TOKEN;
+    const { getConfigValue } = await import('@/libs/config.js');
+    vi.mocked(getConfigValue).mockReturnValue(undefined);
     expect(getApiToken()).toBeUndefined();
+  });
+
+  // Falls back to the stored config value so a machine with no exported
+  // API_TOKEN still authenticates with whatever `markpost config set
+  // apiToken` last wrote.
+  it('falls back to the stored config value when API_TOKEN is not set', async () => {
+    delete process.env.API_TOKEN;
+    const { getConfigValue } = await import('@/libs/config.js');
+    vi.mocked(getConfigValue).mockReturnValue('stored-token');
+    expect(getApiToken()).toBe('stored-token');
+  });
+
+  // API_TOKEN is the documented override — it must win even when a different
+  // value is already stored, matching the precedence `ensureConfigValue`
+  // (libs/config.ts) treats as authoritative for a fresh, unconfigured field.
+  it('prefers API_TOKEN over a different stored config value', async () => {
+    process.env.API_TOKEN = 'env-token';
+    const { getConfigValue } = await import('@/libs/config.js');
+    vi.mocked(getConfigValue).mockReturnValue('stored-token');
+    expect(getApiToken()).toBe('env-token');
   });
 });
 

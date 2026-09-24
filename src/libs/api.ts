@@ -1,4 +1,4 @@
-import { config } from '@/libs/config.js';
+import { getConfigValue } from '@/libs/config.js';
 import { ApiError, ApiErrorEnvelope, ApiResponse } from '@/types/api.types.js';
 import { logErrorMessage, messageFromError } from '@/libs/errors.js';
 
@@ -6,8 +6,8 @@ export const getBaseUrl = () => {
   return process.env.BASE_URL ?? 'https://sync.danholloran.me';
 };
 
-export const getApiToken = () => {
-  return process.env.API_TOKEN ?? config.get('apiToken');
+export const getApiToken = (): string | undefined => {
+  return process.env.API_TOKEN ?? getConfigValue('apiToken');
 };
 
 // How long any API request may stall before it's aborted. Without this a
