@@ -1969,24 +1969,27 @@ describe('markRecordsSynced', () => {
   // the first chunk being checked.
   it('never sends a client-computed syncedAt in the bulk PATCH body, across chunks', async () => {
     mockBulkPatchEcho();
-    await markRecordsSynced(items(150));
+    await markRecordsSynced(items(MAX_MARK_SYNCED_BATCH_SIZE + 50));
     const calls = vi.mocked(global.fetch).mock.calls;
-    expect(calls).toHaveLength(2);
+    expect(chunkSizes()).toEqual([MAX_MARK_SYNCED_BATCH_SIZE, 50]);
+
     calls.forEach(([requestUrl, requestInit]) => {
       expect(requestUrl).toBe('https://example.com/api/records');
       expect(requestInit?.method).toBe('PATCH');
+    });
+
+    const sentRecords = calls.flatMap(([, requestInit]) => {
       const sentBody = JSON.parse(String(requestInit?.body));
-      const sentRecords = sentBody.data.attributes.records as {
-        [key: string]: unknown;
-      }[];
-      sentRecords.forEach((sentRecord) => {
-        expect(sentRecord).not.toHaveProperty('syncedAt');
-        expect(Object.keys(sentRecord).sort()).toEqual([
-          'filePath',
-          'status',
-          'uuid',
-        ]);
-      });
+
+      return sentBody.data.attributes.records as { [key: string]: unknown }[];
+    });
+
+    sentRecords.forEach((sentRecord) => {
+      expect(Object.keys(sentRecord).sort()).toEqual([
+        'filePath',
+        'status',
+        'uuid',
+      ]);
     });
   });
 
