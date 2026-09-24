@@ -411,7 +411,11 @@ describe('runExportCommand', () => {
       // `--json` was on argv, so this is a usage error reported through the
       // JSON contract, not chalk prose — pin the `usage` code (issue #208) so
       // a regression to the old fetch-path catch can't silently pass a
-      // substring match against `fetch_failed` JSON too.
+      // substring match against `fetch_failed` JSON too. Also pin the "exactly
+      // one object on stderr" contract (README "JSON failure contract") so a
+      // regression that also emits the human usage block in --json mode can't
+      // slip past unnoticed on call index 1.
+      expect(console.error).toHaveBeenCalledTimes(1);
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
@@ -685,6 +689,10 @@ describe('runExportCommand', () => {
       await runExportCommand(['--bogus', '--json']);
 
       expect(fetchRecordExport).not.toHaveBeenCalled();
+      // Exactly one object on stderr (README "JSON failure contract") — a
+      // regression that also emits the human usage block in --json mode
+      // would otherwise slip past on call index 1.
+      expect(console.error).toHaveBeenCalledTimes(1);
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
@@ -701,6 +709,7 @@ describe('runExportCommand', () => {
       await runExportCommand(['bogus', '--json']);
 
       expect(fetchRecordExport).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledTimes(1);
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );

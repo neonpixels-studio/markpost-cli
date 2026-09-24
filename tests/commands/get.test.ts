@@ -439,6 +439,9 @@ describe('runGetCommand', () => {
     expect(checkConfig).not.toHaveBeenCalled();
     expect(fetchRecord).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('bogus'),
+    );
+    expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Usage: markpost get'),
     );
     expect(process.exitCode).toBe(1);
@@ -797,6 +800,10 @@ describe('runGetCommand', () => {
 
       expect(fetchRecord).not.toHaveBeenCalled();
       expect(console.log).not.toHaveBeenCalled();
+      // Exactly one object on stderr (README "JSON failure contract") — a
+      // regression that also emits the human usage block in --json mode
+      // would otherwise slip past on call index 1.
+      expect(console.error).toHaveBeenCalledTimes(1);
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
