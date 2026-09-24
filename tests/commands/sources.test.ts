@@ -1761,10 +1761,11 @@ describe('runSourcesCommand', () => {
 
     // `signatureCheck`/`fieldMapping` are declared required, but that's only a
     // compile-time claim over parsed JSON — a drifted or malformed server
-    // response could omit either nested object, or ship `tags` as something
-    // other than an array. The printer must degrade to a best-effort preview
-    // rather than throw a raw TypeError past this exit-code check.
-    it('prints a best-effort preview instead of throwing on a malformed result', async () => {
+    // response omitting either would otherwise render as a clean, exit-0
+    // preview of blank fields, reading as a benign result when nothing was
+    // actually verified. The command must fail loud instead, exactly like the
+    // `!result` case, rather than throw OR silently print blanks.
+    it('fails loud (exit 1), not a blank preview, when the result is missing signatureCheck/fieldMapping', async () => {
       const malformedResult = {
         provider: null,
         payload: {},
@@ -1777,7 +1778,60 @@ describe('runSourcesCommand', () => {
         runSourcesCommand(['test', 'abc-123']),
       ).resolves.not.toThrow();
 
-      expect(loggedText()).toContain('Signature check');
+      expect(loggedText()).not.toContain('Signature check');
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to test source.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // `tags` is one level deeper than the whole-object guard above: a field
+    // present but reshaped (not an array) is a smaller, more plausible drift
+    // than `fieldMapping` vanishing entirely, so it degrades to an empty tags
+    // line rather than failing the whole command.
+    it('renders an empty tags line rather than throwing when tags is not an array', async () => {
+      const malformedResult: SourceTestResult = {
+        ...testResult,
+        fieldMapping: {
+          ...testResult.fieldMapping,
+          tags: null as unknown as string[],
+        },
+      };
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(malformedResult);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await expect(
+        runSourcesCommand(['test', 'abc-123']),
+      ).resolves.not.toThrow();
+
+      expect(loggedText()).toContain('tags:');
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    // A `status` this codebase's union doesn't know about must never resolve a
+    // JS prototype member (e.g. `Object.prototype.toString`) via property
+    // lookup — the same threat `SOURCES_HANDLERS`' `Map` choice guards
+    // against for subcommand names. `__proto__` is the sharpest case: as a
+    // plain-object key it returns a real, non-nullish value and would bypass
+    // the `?? chalk.yellowBright` fallback entirely.
+    it('colors an unrecognized status yellow instead of resolving a prototype member', async () => {
+      const proteanResult: SourceTestResult = {
+        ...testResult,
+        signatureCheck: {
+          status: '__proto__' as SourceTestResult['signatureCheck']['status'],
+          message: 'unrecognized status from a drifted server',
+        },
+      };
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(proteanResult);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await expect(
+        runSourcesCommand(['test', 'abc-123']),
+      ).resolves.not.toThrow();
+
+      expect(loggedText()).toContain('__proto__');
       expect(process.exitCode).toBeUndefined();
     });
   });
