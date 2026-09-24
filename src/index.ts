@@ -2,6 +2,7 @@
 
 import {
   deleteRecords,
+  DeleteRecordsResult,
   fetchAllRecords,
   markRecordsSynced,
   MARK_SYNCED,
@@ -1093,32 +1094,42 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // failure) and route it to the same null branch below, so the user gets
     // both the "why" and the specific "remain on the server" consequence with a
     // non-zero exit — not the generic outer catch's "Something went wrong!".
-    // A PERMANENT delete failure (dead token, forbidden account) will recur on
-    // every pass, so it must also stop the autoSync self-scheduling below —
-    // otherwise the daemon wakes every few minutes, re-fetches the same pending
-    // records, and re-writes them as `-2`/`-3` duplicates against a server it
-    // already knows it can't delete from. A transient failure (rate-limit/5xx,
-    // timeout) is worth another pass, so it keeps autoSync alive. Captured here
-    // so the failure branch can tell the two apart.
-    let deletePermanentlyFailed = false;
-    const deleteMeta = await deleteRecords(
+    // A PERMANENT delete failure will recur on every pass, so it must also stop
+    // the autoSync self-scheduling below — otherwise the daemon wakes every few
+    // minutes, re-fetches the same pending records, and re-writes them as
+    // `-2`/`-3` duplicates against a server it already knows it can't delete
+    // from. Two shapes count as permanent: a thrown dead-token / forbidden
+    // account (classified here via `isPermanentApiFailure`), and a returned
+    // categorical request-shape abort — a repeated 400/422 whose envelope is
+    // wrong and fails identically every pass (`permanentlyFailed`, #204). A
+    // transient failure (rate-limit/5xx, timeout, a plain per-chunk failure) is
+    // worth another pass, so it keeps autoSync alive.
+    const deleteResult = await deleteRecords(
       settleableRecords.map(({ record }) => record.uuid),
-    ).catch((error: unknown) => {
-      deletePermanentlyFailed = isPermanentApiFailure(error);
+    ).catch((error: unknown): DeleteRecordsResult => {
       // Sanitize before printing, same threat as the outer catch: a
       // server- or API-derived message can embed an escape.
       console.error(
         chalk.redBright(sanitizeForTerminal(describeApiError(error))),
       );
 
-      return null;
+      return { meta: null, permanentlyFailed: isPermanentApiFailure(error) };
     });
+
+    const { meta: deleteMeta, permanentlyFailed: deletePermanentlyFailed } =
+      deleteResult;
 
     // Reporting success here would lie (records still on the server,
     // re-fetched and duplicated next run). Surface the failure loudly instead.
     if (!deleteMeta) {
+      // A permanent failure stops the daemon; say so when one was running, so
+      // the message can't imply a "next run" that won't happen.
+      const daemonClause =
+        deletePermanentlyFailed && autoSync
+          ? ' A permanent error (a dead token, a forbidden account, or a rejected request shape) will recur every pass, so auto-sync was stopped; fix the cause reported above and sync again.'
+          : '';
       spinner.error(
-        'Failed to delete records from the server — they were written locally but remain on the server.',
+        `Failed to delete records from the server — they were written locally but remain on the server.${daemonClause}`,
       );
       process.exitCode = 1;
       // Don't keep rescheduling into a known-permanent failure; a transient one
