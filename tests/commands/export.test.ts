@@ -620,6 +620,12 @@ describe('runExportCommand', () => {
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('Unexpected argument "bogus"'),
     );
+    // Same failWithUsage path as the unknown-flag case below — pin the usage
+    // block here too so the two usage-error tests stay in sync by design,
+    // not by accident.
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Usage: markpost export'),
+    );
     expect(process.exitCode).toBe(1);
   });
 
@@ -689,6 +695,9 @@ describe('runExportCommand', () => {
       await runExportCommand(['--bogus', '--json']);
 
       expect(fetchRecordExport).not.toHaveBeenCalled();
+      // stdout is the `jq` data channel for --json — a usage error must not
+      // print anything there.
+      expect(console.log).not.toHaveBeenCalled();
       // Exactly one object on stderr (README "JSON failure contract") — a
       // regression that also emits the human usage block in --json mode
       // would otherwise slip past on call index 1.
@@ -709,11 +718,13 @@ describe('runExportCommand', () => {
       await runExportCommand(['bogus', '--json']);
 
       expect(fetchRecordExport).not.toHaveBeenCalled();
+      expect(console.log).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledTimes(1);
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
       expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('Unexpected argument "bogus"');
       expect(process.exitCode).toBe(1);
     });
 
