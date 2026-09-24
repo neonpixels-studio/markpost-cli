@@ -76,9 +76,9 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 
 // `parseArgs` accepts any number of uuids and `--json` in either order and
 // throws on an unknown flag (the command's usage catch surfaces it as a
-// `usage` error, not `fetch_failed`). Every
-// distinct positional is a requested uuid — none are silently dropped
-// (issue #173). Positionals are filtered for blanks so a stray empty-string
+// `usage` error, not `fetch_failed`). Every distinct positional is a
+// requested uuid — none are silently dropped (issue #173). Positionals are
+// filtered for blanks so a stray empty-string
 // argument can't masquerade as a requested uuid (matching push's identical
 // blank-filtering of its own positionals). `uuids` is deduplicated (`Set`
 // preserves insertion order) so a repeated uuid — e.g. from a copy-paste or a

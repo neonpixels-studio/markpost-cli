@@ -408,9 +408,15 @@ describe('runExportCommand', () => {
 
       expect(fetchRecordExport).not.toHaveBeenCalled();
       expect(writeExportFile).not.toHaveBeenCalled();
-      expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('Cannot combine --out and --json.'),
+      // `--json` was on argv, so this is a usage error reported through the
+      // JSON contract, not chalk prose — pin the `usage` code (issue #208) so
+      // a regression to the old fetch-path catch can't silently pass a
+      // substring match against `fetch_failed` JSON too.
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
       );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('Cannot combine --out and --json.');
       expect(process.exitCode).toBe(1);
     });
 
@@ -683,7 +689,6 @@ describe('runExportCommand', () => {
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
       expect(parsed.error).toBe('usage');
-      expect(parsed.error).not.toBe('fetch_failed');
       expect(parsed.message).toContain('bogus');
       expect(process.exitCode).toBe(1);
     });
@@ -700,7 +705,6 @@ describe('runExportCommand', () => {
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
       expect(parsed.error).toBe('usage');
-      expect(parsed.error).not.toBe('fetch_failed');
       expect(process.exitCode).toBe(1);
     });
 

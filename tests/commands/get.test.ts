@@ -801,7 +801,6 @@ describe('runGetCommand', () => {
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
       expect(parsed.error).toBe('usage');
-      expect(parsed.error).not.toBe('fetch_failed');
       expect(parsed.message).toContain('bogus');
       expect(process.exitCode).toBe(1);
     });

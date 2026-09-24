@@ -68,10 +68,10 @@ export const runExportCommand = async (args: string[]): Promise<void> => {
 
 // `parseArgs` handles both `--out path` and `--out=path`, and throws on an
 // unknown flag or a missing value, which the command's usage catch surfaces
-// to the user as a `usage` error, not `fetch_failed`. `--out` and `--json` are
-// mutually exclusive: one writes a file,
-// the other is a stdout data channel, and combining them would leave the
-// caller guessing which one actually happened.
+// to the user as a `usage` error, not `fetch_failed`. `--out` and `--json`
+// are mutually exclusive: one writes a file, the other is a stdout data
+// channel, and combining them would leave the caller guessing which one
+// actually happened.
 const parseExportArgs = (
   args: string[],
 ): { outputPath: string | undefined; force: boolean } => {
