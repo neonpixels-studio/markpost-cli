@@ -1759,12 +1759,8 @@ describe('runSourcesCommand', () => {
       expect(loggedText()).toContain('evil\\u001bnote');
     });
 
-    // `signatureCheck`/`fieldMapping` are declared required, but that's only a
-    // compile-time claim over parsed JSON — a drifted or malformed server
-    // response omitting either would otherwise render as a clean, exit-0
-    // preview of blank fields, reading as a benign result when nothing was
-    // actually verified. The command must fail loud instead, exactly like the
-    // `!result` case, rather than throw OR silently print blanks.
+    // See testSourceCommand's drift guard for why this fails loud rather than
+    // throwing or rendering a blank preview.
     it('fails loud (exit 1), not a blank preview, when the result is missing signatureCheck/fieldMapping', async () => {
       const malformedResult = {
         provider: null,
@@ -1779,8 +1775,10 @@ describe('runSourcesCommand', () => {
       ).resolves.not.toThrow();
 
       expect(loggedText()).not.toContain('Signature check');
+      // Distinct from the `!result` case's "Failed to test source." — this
+      // path is a malformed 200, not a request failure.
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to test source.'),
+        expect.stringContaining('unexpected result'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -1833,6 +1831,60 @@ describe('runSourcesCommand', () => {
 
       expect(loggedText()).toContain('__proto__');
       expect(process.exitCode).toBeUndefined();
+    });
+
+    // `test` reports a diagnostic; it doesn't gate on the outcome. Every
+    // status — including `failed`, the one result a user is most likely to
+    // script against — must still exit 0 and render its own color/text, not
+    // fall through to a different entry in SIGNATURE_STATUS_COLORS.
+    it.each([
+      ['failed' as const, 'the signature did not verify'],
+      ['not_required' as const, 'no provider is configured'],
+      ['not_verifiable' as const, 'stored only as a one-way hash'],
+    ])(
+      'exits 0 and renders the "%s" status like any other diagnostic outcome',
+      async (status, message) => {
+        const { testSource } = await import('@/libs/sources.js');
+        vi.mocked(testSource).mockResolvedValue({
+          ...testResult,
+          signatureCheck: { status, message },
+        });
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand(['test', 'abc-123']);
+
+        expect(loggedText()).toContain(status);
+        expect(loggedText()).toContain(message);
+        expect(process.exitCode).toBeUndefined();
+      },
+    );
+
+    it('renders "none" for a null provider (a slug-only source)', async () => {
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue({
+        ...testResult,
+        provider: null,
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123']);
+
+      expect(loggedText()).toContain('none');
+    });
+
+    it('emits a usage-coded JSON error on stderr when --json is used with no uuid', async () => {
+      const { testSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('requires a uuid');
+      expect(testSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     });
   });
 

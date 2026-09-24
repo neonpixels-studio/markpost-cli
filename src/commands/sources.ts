@@ -706,18 +706,11 @@ const rotateSecretCommand = async (uuid?: string): Promise<void> => {
   await rotateSecretForSource(target);
 };
 
-// A pass is green, a rejection red, and the two inconclusive states
-// (not_required / not_verifiable) yellow — so the outcome is legible at a
-// glance. Keyed by the raw (pre-sanitize) status, not the sanitized display
-// text, so a status carrying a stray control character still matches; typing
-// the key `SourceTestSignatureStatus` also means a status this union doesn't
-// know about fails the build here instead of silently falling through to
-// yellow forever. A `Map`, not an object literal — `status` is server-derived
-// text, and an object literal keyed by an untrusted string resolves
-// `"__proto__"`/`"toString"` to a real (non-nullish) prototype member instead
-// of `undefined`, throwing past the `?? chalk.yellowBright` fallback. This is
-// the same reasoning `SOURCES_HANDLERS` above documents for using a `Map`
-// over an object for subcommand dispatch.
+// A `Map`, not an object literal keyed by server-derived text — same reason
+// `SOURCES_HANDLERS` above uses one: a `"__proto__"`/`"toString"` status would
+// otherwise resolve a real prototype member instead of `undefined`. A pass is
+// green, a rejection red, the two inconclusive states yellow, and an
+// unrecognized status also falls back to yellow (see colorizeSignatureStatus).
 const SIGNATURE_STATUS_COLORS = new Map<
   SourceTestSignatureStatus,
   (text: string) => string
@@ -742,14 +735,16 @@ const colorizeSignatureStatus = (
 // `content` is coerced to a single line by the single-line sanitizer, which is
 // fine for a preview. `frontmatter` is `unknown`, so it's JSON-stringified
 // first, then sanitized (an object value could itself carry an escape).
+// `signatureCheck`/`fieldMapping` are guaranteed present by the caller's drift
+// guard (see `testSourceCommand`); `tags` is still checked here since a
+// reshaped-but-present field is a smaller, more plausible drift than the
+// whole object vanishing.
 //
-// `signatureCheck`/`fieldMapping` are guaranteed present by the caller (see
-// `testSourceCommand`'s drift guard) — a malformed response that omits either
-// entirely is rejected there rather than rendered as a misleadingly clean,
-// exit-0 preview of blank fields. `tags`, one level deeper, is still explicitly
-// array-checked: a field present but reshaped (e.g. `null`, or a
-// comma-joined string) is a smaller, more plausible drift than the whole
-// object vanishing, and `.join` would otherwise throw.
+// This always exits 0 regardless of `signatureCheck.status` — `test` is a
+// diagnostic preview (like `list`/`get`), not a pass/fail gate. A `failed` or
+// `not_verifiable` result is a legitimate, successfully-reported outcome; the
+// caller distinguishes them by reading the colored/JSON status, not the exit
+// code.
 const printTestResult = (result: SourceTestResult): void => {
   const { signatureCheck, fieldMapping } = result;
   const tags = Array.isArray(fieldMapping.tags) ? fieldMapping.tags : [];
@@ -794,13 +789,21 @@ const testSourceCommand = async (
 
   const result = await testSource(uuid);
 
-  // `signatureCheck`/`fieldMapping` are declared required, but that's only a
-  // compile-time claim over parsed JSON — a drifted or malformed server
-  // response omitting either would otherwise render as a clean, exit-0
-  // preview of blank fields, reading as a benign result when nothing was
-  // actually verified. Fail loud instead, exactly like the `!result` case.
-  if (!result || !result.signatureCheck || !result.fieldMapping) {
+  if (!result) {
     failWithMessage('Failed to test source.', json);
+    return;
+  }
+
+  // Declared required, but that's only a compile-time claim over parsed
+  // JSON — a drifted/malformed 200 response omitting either would otherwise
+  // render as a clean, exit-0 preview of blank fields. Distinct message from
+  // the `!result` case above: the request succeeded, the response shape
+  // didn't — pointing a script at the server instead of its own network/token.
+  if (!result.signatureCheck || !result.fieldMapping) {
+    failWithMessage(
+      'The test ran, but the server returned an unexpected result (missing signatureCheck or fieldMapping).',
+      json,
+    );
     return;
   }
 
