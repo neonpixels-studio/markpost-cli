@@ -1,9 +1,10 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
+import { confirm } from '@inquirer/prompts';
 import { createToken, fetchTokens, revokeToken } from '@/libs/tokens.js';
-import { checkConfig } from '@/libs/config.js';
+import { checkConfig, getConfigValue } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
+import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { CreateTokenInput, Token } from '@/types/tokens.types.js';
@@ -12,11 +13,18 @@ export const USAGE = `Usage: markpost tokens <list|create|revoke> [id]
 
   list                                             List all API tokens (pass --json for machine-readable output)
   create --name <name> [--expires-in-days <days>]  Mint a new API token; the raw secret is shown once and cannot be retrieved again
-  revoke <id>                                      Revoke an API token by id`;
+  revoke <id>                                      Revoke an API token by id. Asks to confirm first (revoking is irreversible); pass --yes to skip the prompt (for scripts)`;
 
 const LIST_SUBCOMMAND = 'list';
 const CREATE_SUBCOMMAND = 'create';
+// `revoke` is the only subcommand `--yes` applies to, so it's named for the
+// guard that rejects the flag elsewhere as well as its handler-map key.
 const REVOKE_SUBCOMMAND = 'revoke';
+
+// The confirmation escape hatch, read straight from argv like `--json` so the
+// runner can reject it on the wrong subcommand — before any parseArgs runs —
+// exactly as `sources delete` treats it.
+const YES_FLAG = '--yes';
 
 const TOKEN_SECRET_NOTICE =
   'API token (shown once — copy it now, it cannot be retrieved later):';
@@ -197,13 +205,109 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
   printTokenSecret(secret);
 };
 
-const revokeTokenCommand = async (rest: string[]): Promise<void> => {
+// Fetch the token list and pick one out by id, or null if none matches.
+// Unlike sources' equivalent, fetchTokens does NOT swallow a failed fetch into
+// [] (see libs/tokens.ts), so a resolved list is complete and a non-match is
+// genuine — only a thrown fetch leaves the token truly unknown, which the
+// caller's `.catch` maps to `undefined`.
+const lookupTokenById = async (id: string): Promise<Token | null> => {
+  const tokens = await fetchTokens();
+  return tokens.find((candidate) => candidate.id === id) ?? null;
+};
+
+// The stored `apiToken` is the raw secret; the list only ever carries the
+// masked `prefix` (never the secret), so the one link between an id being
+// revoked and the token this CLI authenticates with is whether the stored
+// secret begins with that token's prefix. A truthy `prefix` guard keeps an
+// empty/malformed prefix (whose `startsWith('')` is always true) from
+// falsely flagging every token as the configured one.
+const isConfiguredToken = (token: Token): boolean => {
+  const configured = getConfigValue('apiToken');
+  return Boolean(
+    configured && token.prefix && configured.startsWith(token.prefix),
+  );
+};
+
+// The lookup is purely to name the token in the prompt and to spot the
+// configured-token case, so it's best-effort: a thrown fetch (`undefined`)
+// falls back to the bare id rather than blocking a revoke that would
+// otherwise succeed. The three outcomes stay distinct so a failed load is
+// never mis-reported as a confirmed non-match.
+const LOOKUP_FAILED_NOTE = 'token name unavailable — could not load the list';
+const NO_MATCH_NOTE = 'no matching token found';
+
+type RevokeConfirmation = {
+  label: string;
+  isConfigured: boolean;
+};
+
+const revokeConfirmationDetails = async (
+  id: string,
+): Promise<RevokeConfirmation> => {
+  const token = await lookupTokenById(id).catch(() => undefined);
+
+  if (token === undefined) {
+    return { label: `${id} (${LOOKUP_FAILED_NOTE})`, isConfigured: false };
+  }
+
+  if (token === null) {
+    return { label: `${id} (${NO_MATCH_NOTE})`, isConfigured: false };
+  }
+
+  return {
+    label: `${token.name} (${id})`,
+    isConfigured: isConfiguredToken(token),
+  };
+};
+
+// Revoking a token is irreversible: a revoked token stops authenticating
+// immediately and cannot be un-revoked. The label is sanitized because the
+// token name may have come from an untrusted API response. Defaults to "no"
+// so a bare Enter cancels rather than revokes. Isolated here so the revoke
+// flow stays unit-testable by mocking the prompt — mirrors `confirmDeletion`
+// in commands/sources.ts.
+const CONFIGURED_TOKEN_WARNING =
+  'WARNING: this is the token this CLI is currently configured with — revoking it will lock this CLI out until you set a new one with `markpost config set apiToken <token>`.';
+
+const confirmRevocation = async (
+  label: string,
+  isConfigured: boolean,
+): Promise<boolean> => {
+  const configuredWarning = isConfigured ? ` ${CONFIGURED_TOKEN_WARNING}` : '';
+
+  return confirm({
+    message: `Revoke token ${sanitizeForTerminal(
+      label,
+    )}? This cannot be undone — the token stops authenticating immediately.${configuredWarning}`,
+    default: false,
+  });
+};
+
+// Compose the label/configured lookup with the prompt into one named step so
+// the call site reads as a sentence; the `||` at the call site is what
+// short-circuits this away (lookup included) under `--yes`.
+const confirmTokenRevocation = async (id: string): Promise<boolean> => {
+  const { label, isConfigured } = await revokeConfirmationDetails(id);
+
+  return confirmRevocation(label, isConfigured);
+};
+
+const revokeTokenCommand = async (
+  rest: string[],
+  skipConfirm: boolean,
+): Promise<void> => {
   // Parsed (not a bare destructure) so an unrecognized flag like
   // `--help` fails loud via parseArgs's strict mode instead of being sent
   // as a literal token id, and a second positional is caught explicitly
   // rather than silently dropped (a script revoking two ids would
   // otherwise see only the first one actually revoked and still exit 0).
-  const { positionals } = parseArgs({ args: rest, allowPositionals: true });
+  // `--yes` is declared so it's consumed as a flag rather than mis-parsed as
+  // the id; the runner already read it from argv into `skipConfirm`.
+  const { positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { yes: { type: 'boolean' } },
+  });
   const [id, ...extraPositionals] = positionals;
 
   if (!id || extraPositionals.length > 0) {
@@ -211,6 +315,13 @@ const revokeTokenCommand = async (rest: string[]): Promise<void> => {
       '`tokens revoke` takes exactly one id: `markpost tokens revoke <id>`.',
       USAGE,
     );
+    return;
+  }
+
+  const confirmed = skipConfirm || (await confirmTokenRevocation(id));
+
+  if (!confirmed) {
+    console.log('Revocation cancelled.');
     return;
   }
 
@@ -229,22 +340,61 @@ const revokeTokenCommand = async (rest: string[]): Promise<void> => {
 // Membership check and handler come from the same Map, so a valid subcommand
 // always has a handler — mirrors settings.ts/sources.ts. A Map (not an
 // object) keeps a subcommand named "toString" from resolving to a prototype
-// member. Every handler takes the same `(rest, json)` shape even though only
-// `list` reads `json`, so dispatch below is a single call with no
-// per-subcommand branch.
+// member. Every handler takes the same `(rest, json, skipConfirm)` shape even
+// though only `list` reads `json` and only `revoke` reads `skipConfirm`, so
+// dispatch below is a single call with no per-subcommand branch.
 const TOKENS_HANDLERS = new Map<
   string,
-  (rest: string[], json: boolean) => Promise<void>
+  (rest: string[], json: boolean, skipConfirm: boolean) => Promise<void>
 >([
   [LIST_SUBCOMMAND, (rest, json) => listTokensCommand(rest, json)],
   [CREATE_SUBCOMMAND, (rest) => createTokenCommand(rest)],
-  [REVOKE_SUBCOMMAND, (rest) => revokeTokenCommand(rest)],
+  [
+    REVOKE_SUBCOMMAND,
+    (rest, _json, skipConfirm) => revokeTokenCommand(rest, skipConfirm),
+  ],
 ]);
 
+// The invocation-level usage checks that all fail the same way (one usage
+// message, non-zero exit). Returns the message to show, or null when the
+// invocation is valid. Kept in one place so their ordering is a single unit
+// rather than separate guard blocks in the runner — mirrors `usageErrorFor`
+// in commands/sources.ts.
+const usageErrorFor = (
+  subcommand: string,
+  json: boolean,
+  skipConfirm: boolean,
+  isInteractive: boolean,
+): string | null => {
+  // Only `list` renders JSON; reject it elsewhere rather than silently
+  // ignoring it — `tokens create --json` would otherwise "succeed" with human
+  // text on stdout, losing the one-time secret it was trying to capture.
+  if (json && subcommand !== LIST_SUBCOMMAND) {
+    return `--json is only supported by \`tokens ${LIST_SUBCOMMAND}\`.`;
+  }
+
+  // --yes only skips the revoke confirmation; reject it elsewhere so a
+  // misplaced flag fails loudly instead of appearing to take effect.
+  if (skipConfirm && subcommand !== REVOKE_SUBCOMMAND) {
+    return `--yes is only supported by \`tokens ${REVOKE_SUBCOMMAND}\`.`;
+  }
+
+  // Without --yes, revoke prompts; inquirer needs both stdin and stdout to be
+  // a TTY, so a redirected/non-interactive run would otherwise hang. Refuse
+  // instead, pointing at the --yes escape hatch — mirrors `sources delete`.
+  if (subcommand === REVOKE_SUBCOMMAND && !skipConfirm && !isInteractive) {
+    return `\`tokens ${REVOKE_SUBCOMMAND}\` needs an interactive terminal to confirm; pass an id with --yes (\`markpost tokens ${REVOKE_SUBCOMMAND} <id> --yes\`) to revoke without a prompt.`;
+  }
+
+  return null;
+};
+
 export const runTokensCommand = async (args: string[]): Promise<void> => {
-  // Read `--json` straight from argv so every failure below is rendered in
-  // whichever contract the caller asked for, even one thrown before parsing.
+  // Read `--json` and `--yes` straight from argv so every failure below is
+  // rendered in whichever contract the caller asked for, even one thrown
+  // before parsing, and so the guards can reject a misplaced flag first.
   const json = hasJsonFlag(args);
+  const skipConfirm = args.includes(YES_FLAG);
   const [subcommand, ...rest] = args;
   const handler = TOKENS_HANDLERS.get(subcommand);
 
@@ -255,16 +405,15 @@ export const runTokensCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
-  // Only `list` renders JSON; reject it elsewhere rather than silently
-  // ignoring it — `tokens create --json` would otherwise "succeed" with
-  // human text on stdout, losing the one-time secret it was trying to
-  // capture (mirrors the same guard on `sources create`).
-  if (json && subcommand !== LIST_SUBCOMMAND) {
-    failWithUsage(
-      `--json is only supported by \`tokens ${LIST_SUBCOMMAND}\`.`,
-      USAGE,
-      json,
-    );
+  const usageError = usageErrorFor(
+    subcommand,
+    json,
+    skipConfirm,
+    isInteractiveTerminal(),
+  );
+
+  if (usageError) {
+    failWithUsage(usageError, USAGE, json);
     return;
   }
 
@@ -273,8 +422,15 @@ export const runTokensCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    await handler(rest, json);
+    await handler(rest, json, skipConfirm);
   } catch (error) {
+    // A deliberate Ctrl+C at the revoke prompt throws @inquirer's
+    // `ExitPromptError`; that's a user abort, not a command failure, so don't
+    // flag it non-zero — mirrors commands/sources.ts.
+    if (error instanceof Error && error.name === 'ExitPromptError') {
+      return;
+    }
+
     // Sanitize — an error surfaced from a tokens API call can be
     // server-derived and carry a terminal escape.
     failWithMessage(sanitizeForTerminal(String(error)), json);
