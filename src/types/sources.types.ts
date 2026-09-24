@@ -115,3 +115,56 @@ export type CreatedSourceResource = ApiResourceObject & {
   type: 'sources';
   attributes: CreatedSource;
 };
+
+// Mirrors markpost's POST /api/sources/[uuid]/test payload
+// (server/api/sources/[uuid]/test.post.ts). `payload` is an optional
+// caller-supplied sample the source's field mapping is previewed against;
+// omit it and the server uses its own default sample (buildTestEventSamplePayload).
+export type SourceTestInput = {
+  payload?: Record<string, unknown>;
+};
+
+// The four outcomes markpost's `buildSignatureCheck` reports for a test event:
+// `not_required` (a slug-only source with no provider), `verified` (the stored
+// secret produced a signature the app's own HMAC logic accepted), `failed`
+// (verification rejected it), and `not_verifiable` (a shared-secret provider
+// whose plaintext markpost only stores as a one-way hash, so it can't be
+// re-signed server-side). See test.post.ts for the exact semantics.
+export type SourceTestSignatureStatus =
+  'not_required' | 'verified' | 'failed' | 'not_verifiable';
+
+export type SourceTestSignatureCheck = {
+  status: SourceTestSignatureStatus;
+  message: string;
+};
+
+// The field-mapping preview markpost runs the sample payload through: the same
+// parse the real ingest path produces, minus the on-disk collision resolution
+// (so `filePath` is illustrative — a real delivery may be re-suffixed).
+export type SourceTestFieldMapping = {
+  title: string;
+  content: string;
+  tags: string[];
+  frontmatter: unknown;
+  filePath: string;
+};
+
+// The attributes of the `sourceTestEvents` resource the test endpoint returns:
+// the resolved sample payload, the signature-verification result, and the
+// field-mapping preview. Carries no secret, so (unlike CreatedSource) it is
+// safe to surface in full.
+export type SourceTestResult = {
+  provider: string | null;
+  payload: Record<string, unknown>;
+  signatureCheck: SourceTestSignatureCheck;
+  fieldMapping: SourceTestFieldMapping;
+};
+
+// The test endpoint returns its own resource type (`sourceTestEvents`), not a
+// `sources` resource — it is a diagnostic preview, not the source itself.
+export type SourceTestResource = ApiResourceObject & {
+  type: 'sourceTestEvents';
+  attributes: SourceTestResult;
+};
+
+export type SourceTestApiResponse = ApiResponse<SourceTestResource>;

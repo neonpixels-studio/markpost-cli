@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CreatedSource, Source } from '@/types/sources.types.js';
+import {
+  CreatedSource,
+  Source,
+  SourceTestResult,
+} from '@/types/sources.types.js';
 
 vi.mock('@/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
@@ -11,6 +15,7 @@ vi.mock('@/libs/sources.js', () => ({
   updateSource: vi.fn(),
   deleteSource: vi.fn(),
   rotateSourceSecret: vi.fn(),
+  testSource: vi.fn(),
 }));
 vi.mock('@inquirer/prompts', () => ({
   input: vi.fn(),
@@ -370,7 +375,9 @@ describe('runSourcesCommand', () => {
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchSources).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('--json is only supported by `sources list`.'),
+        expect.stringContaining(
+          '--json is only supported by `sources list` and `sources test`.',
+        ),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -1613,6 +1620,97 @@ describe('runSourcesCommand', () => {
     expect(console.error).not.toHaveBeenCalled();
   });
 
+  describe('test', () => {
+    const testResult: SourceTestResult = {
+      provider: 'github',
+      payload: { title: 'Test event from markpost', tags: ['test'] },
+      signatureCheck: {
+        status: 'verified',
+        message: "This source's stored secret produced a valid signature.",
+      },
+      fieldMapping: {
+        title: 'Test event from markpost',
+        content: 'This is a test event.',
+        tags: ['test'],
+        frontmatter: { source: 'github' },
+        filePath: '99-incoming/test-event.md',
+      },
+    };
+
+    it('calls testSource with the uuid and prints a human-readable preview', async () => {
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(testResult);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123']);
+
+      expect(testSource).toHaveBeenCalledWith('abc-123');
+      expect(loggedText()).toContain('Signature check');
+      expect(loggedText()).toContain('verified');
+      expect(loggedText()).toContain('99-incoming/test-event.md');
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('prints the full result as a single parseable JSON object with --json', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(testResult);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', '--json']);
+
+      // --json must reach checkConfig so it fails loud instead of prompting on
+      // stdout on an unconfigured machine.
+      expect(checkConfig).toHaveBeenCalledWith(true);
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toEqual(testResult);
+    });
+
+    it('requires a uuid — fails with usage and never calls the API', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { testSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test']);
+
+      expect(testSource).not.toHaveBeenCalled();
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('`sources test` requires a uuid'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('fails loud (exit 1) when the test call returns null', async () => {
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(null);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to test source.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('emits a fetch_failed JSON error on stderr when the test call returns null with --json', async () => {
+      const { testSource } = await import('@/libs/sources.js');
+      vi.mocked(testSource).mockResolvedValue(null);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('fetch_failed');
+      expect(parsed.message).toContain('Failed to test source.');
+      expect(process.exitCode).toBe(1);
+    });
+  });
+
   // The unified --json failure contract: rejecting --json on a non-list
   // subcommand and a thrown fetch failure on `list --json` both surface as one
   // parseable { error, message } shape on stderr.
@@ -1627,7 +1725,8 @@ describe('runSourcesCommand', () => {
       );
       expect(parsed).toEqual({
         error: 'usage',
-        message: '--json is only supported by `sources list`.',
+        message:
+          '--json is only supported by `sources list` and `sources test`.',
       });
       expect(process.exitCode).toBe(1);
     });

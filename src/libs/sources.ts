@@ -17,6 +17,9 @@ import {
   Source,
   SourceListApiResponse,
   SourceResource,
+  SourceTestInput,
+  SourceTestResource,
+  SourceTestResult,
   UpdateSourceInput,
 } from '@/types/sources.types.js';
 
@@ -106,6 +109,24 @@ export const rotateSourceSecret = async (
   writeSourceRequest<RotateSourceSecretInput, CreatedSourceResource>(
     `rotateSourceSecret["${uuid}"]`,
     `/api/sources/${encodeURIComponent(uuid)}/rotate-secret`,
+    'POST',
+    input,
+  );
+
+// Diagnostic-only: previews signature verification and field mapping for a
+// source against a sample payload without triggering a real provider delivery.
+// Reuses the shared write seam — the endpoint takes the same JSON:API envelope
+// (its handler reads only `data.attributes.payload`, ignoring `data.type`) —
+// but the response is a `sourceTestEvents` resource, not a `sources` one, so
+// `TResource` is `SourceTestResource`. Returns the preview attributes, or null
+// (logged) on failure, exactly like the other source writes.
+export const testSource = async (
+  uuid: string,
+  input: SourceTestInput = {},
+): Promise<SourceTestResult | null> =>
+  writeSourceRequest<SourceTestInput, SourceTestResource>(
+    `testSource["${uuid}"]`,
+    `/api/sources/${encodeURIComponent(uuid)}/test`,
     'POST',
     input,
   );
