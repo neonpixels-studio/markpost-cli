@@ -38,24 +38,33 @@ export const failWithMessage = (message: string, json = false): void => {
 // A partial (truncated) read — a later page failed mid-pagination but the
 // pages already collected are still usable — reported honestly: warn and set
 // a non-zero exit so a script/cron job notices even though the request
-// nominally succeeded. Shared by `records list` and `events list` (the CLI's
-// two paginated read commands) so the wording and the `--json`/plain-text
-// branching can't drift between them. In `--json` mode the warning reuses the
-// same `{ error, message }` shape as every other `--json` failure — no
-// separate JSON-error SHAPE invented for this case — but under its own
-// `partial_read` code (not `fetch_failed`): unlike every other `--json`
-// failure, stdout still carries valid (if truncated) data here, and a script
-// needs to tell that apart from a request that returned nothing at all.
+// nominally succeeded. Shared by `records list`, `events list` (the CLI's two
+// paginated read commands), and `export` (whose result can be incomplete via
+// a server-side row cap and/or skipped malformed rows) so the wording and the
+// `--json`/plain-text branching can't drift between them. `message` defaults
+// to the paginated-read case; `export` overrides it to describe its own
+// reason(s) — like `failWithMessage`, callers pass an already-sanitized
+// message (neither export's override nor the default constant here is
+// server-derived, so plain string literals are safe as-is). In `--json` mode
+// the warning reuses the same `{ error, message }`
+// shape as every other `--json` failure — no separate JSON-error shape
+// invented for this case — but under its own `partial_read` code (not
+// `fetch_failed`): unlike every other `--json` failure, stdout still carries
+// valid (if truncated) data here, and a script needs to tell that apart from
+// a request that returned nothing at all.
 const PARTIAL_READ_MESSAGE =
   'A later page failed to fetch — this list may be incomplete.';
 
-export const warnPartialRead = (json: boolean): void => {
+export const warnPartialRead = (
+  json: boolean,
+  message: string = PARTIAL_READ_MESSAGE,
+): void => {
   process.exitCode = 1;
 
   if (json) {
-    printJsonError(JSON_ERROR_PARTIAL_READ, PARTIAL_READ_MESSAGE);
+    printJsonError(JSON_ERROR_PARTIAL_READ, message);
     return;
   }
 
-  console.error(chalk.yellow(`Warning: ${PARTIAL_READ_MESSAGE}`));
+  console.error(chalk.yellow(`Warning: ${message}`));
 };

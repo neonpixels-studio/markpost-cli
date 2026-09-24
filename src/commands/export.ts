@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { fetchRecordExport, writeExportFile } from '@/libs/export.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, warnPartialRead } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { RecordExportRow } from '@/types/records.types.js';
@@ -128,34 +128,53 @@ const printExportRow = (row: RecordExportRow): void => {
   }
 };
 
-// A capped export or a batch of malformed rows both mean the returned data is
-// incomplete even though the request succeeded, so both warn (stderr, so
-// `--json`/`--out` output stays clean on its own channel) AND set a non-zero
-// exit — mirroring the partial-read convention in records.ts/events.ts, since
-// the warning alone is invisible to a script or cron job checking `$?`.
-const reportIncompleteExport = (
+// A capped export and a batch of malformed rows are independent reasons the
+// export can be incomplete, so each gets its own complete sentence here; the
+// caller below joins whichever sentences apply with a plain space — no
+// capitalization/punctuation surgery on the combined string, so a sentence
+// starting with a digit or quote can't break it.
+const describeIncompleteExport = (
   truncated: boolean,
   skippedCount: number,
-): void => {
+): string[] => {
+  const reasons: string[] = [];
+
   if (truncated) {
-    console.error(
-      chalk.yellow(
-        'Warning: the export was truncated at the server-side row limit — only the most recent rows were included.',
-      ),
+    reasons.push(
+      'The export was truncated at the server-side row limit — only the most recent rows were included.',
     );
   }
 
   if (skippedCount > 0) {
-    console.error(
-      chalk.yellow(
-        `Warning: the server returned ${skippedCount} malformed row(s), which were skipped.`,
-      ),
+    reasons.push(
+      `The server returned ${skippedCount} malformed row(s), which were skipped.`,
     );
   }
 
-  if (truncated || skippedCount > 0) {
-    process.exitCode = 1;
+  return reasons;
+};
+
+// Joins every applicable reason into one sentence and reports it with a
+// single call to `warnPartialRead` in libs/errors.ts — the same reporter
+// records.ts/events.ts use for their own partial-read warning — rather than
+// one call per reason or a local reimplementation of the `--json`/plain-text
+// branching. One call keeps `warnPartialRead`'s "wording and branching can't
+// drift between commands" guarantee (see its doc comment) intact, and keeps a
+// `--json` consumer's parse simple: exactly one JSON object on stderr,
+// matching every other `--json` failure's "one object" contract (see README
+// "JSON failure contract"), even when both reasons apply.
+const reportIncompleteExport = (
+  truncated: boolean,
+  skippedCount: number,
+  json: boolean,
+): void => {
+  const reasons = describeIncompleteExport(truncated, skippedCount);
+
+  if (reasons.length === 0) {
+    return;
   }
+
+  warnPartialRead(json, reasons.join(' '));
 };
 
 // Writes the already-fetched rows to disk and reports where they landed. A
@@ -197,7 +216,7 @@ const runExport = async (
   force: boolean,
   json: boolean,
 ): Promise<void> => {
-  const result = await fetchRecordExport();
+  const result = await fetchRecordExport(json);
 
   // A failed fetch must not masquerade as an empty backup — throw so the
   // command's catch reports it loudly and exits non-zero, mirroring
@@ -208,7 +227,7 @@ const runExport = async (
   }
 
   const { rows, truncated, skippedCount } = result;
-  reportIncompleteExport(truncated, skippedCount);
+  reportIncompleteExport(truncated, skippedCount, json);
 
   if (outputPath) {
     writeToOutputFile(outputPath, rows, force, skippedCount);
