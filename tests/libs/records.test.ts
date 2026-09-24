@@ -1928,10 +1928,9 @@ describe('markRecordsSynced', () => {
 
   it('sends one bulk PATCH per record chunk with the synced attributes', async () => {
     mockBulkPatchEcho();
-    await markRecordsSynced(
-      [{ uuid: 'abc-123', filePath: '/vault/test-title.md' }],
-      '2024-01-01T00:00:00.000Z',
-    );
+    await markRecordsSynced([
+      { uuid: 'abc-123', filePath: '/vault/test-title.md' },
+    ]);
     expect(global.fetch).toHaveBeenCalledWith(
       'https://example.com/api/records',
       expect.objectContaining({
@@ -1948,7 +1947,6 @@ describe('markRecordsSynced', () => {
                 {
                   uuid: 'abc-123',
                   status: 'synced',
-                  syncedAt: '2024-01-01T00:00:00.000Z',
                   filePath: '/vault/test-title.md',
                 },
               ],
@@ -1959,14 +1957,40 @@ describe('markRecordsSynced', () => {
     );
   });
 
-  it('defaults syncedAt to the current time when not supplied', async () => {
+  // Regression coverage for markpost#302: markpost's bulk PATCH /api/records
+  // 422s any request that includes a client-supplied `syncedAt`
+  // (markpost#271) — the server stamps it itself. This CLI has no separate
+  // single-uuid PATCH call (PATCH /api/records/:uuid, markpost#297, is never
+  // used here); a single written record still settles through this bulk
+  // endpoint with a one-item chunk, which is the "single-record
+  // sync-completion" case the issue describes. Asserts both the endpoint and
+  // that no record in the body — across a MULTI-chunk run, not just a lone
+  // record — ever carries `syncedAt`, so a regression can't hide behind only
+  // the first chunk being checked.
+  it('never sends a client-computed syncedAt in the bulk PATCH body, across chunks', async () => {
     mockBulkPatchEcho();
-    await markRecordsSynced([{ uuid: 'abc-123', filePath: '/vault/note.md' }]);
-    const requestInit = vi.mocked(global.fetch).mock.calls[0]?.[1];
-    const sentBody = JSON.parse(String(requestInit?.body));
-    const sentRecord = sentBody.data.attributes.records[0];
-    expect(sentRecord.syncedAt).toEqual(expect.any(String));
-    expect(Number.isNaN(Date.parse(sentRecord.syncedAt))).toBe(false);
+    await markRecordsSynced(items(MAX_MARK_SYNCED_BATCH_SIZE + 50));
+    const calls = vi.mocked(global.fetch).mock.calls;
+    expect(chunkSizes()).toEqual([MAX_MARK_SYNCED_BATCH_SIZE, 50]);
+
+    calls.forEach(([requestUrl, requestInit]) => {
+      expect(requestUrl).toBe('https://example.com/api/records');
+      expect(requestInit?.method).toBe('PATCH');
+    });
+
+    const sentRecords = calls.flatMap(([, requestInit]) => {
+      const sentBody = JSON.parse(String(requestInit?.body));
+
+      return sentBody.data.attributes.records as { [key: string]: unknown }[];
+    });
+
+    sentRecords.forEach((sentRecord) => {
+      expect(Object.keys(sentRecord).sort()).toEqual([
+        'filePath',
+        'status',
+        'uuid',
+      ]);
+    });
   });
 
   it('sends nothing and reports no outcomes for an empty input', async () => {
@@ -2016,9 +2040,9 @@ describe('markRecordsSynced', () => {
     expect(result.abortReason).toBe(null);
   });
 
-  it('pairs each record its own uuid, filePath, and syncedAt across chunks', async () => {
+  it('pairs each record its own uuid and filePath across chunks', async () => {
     mockBulkPatchEcho();
-    await markRecordsSynced(items(250), '2024-05-01T00:00:00.000Z');
+    await markRecordsSynced(items(250));
     // Inspect the SECOND chunk's body: a mis-pairing (e.g. every record getting
     // items[0].filePath) would still pass the size/uuid-echo assertions above.
     const secondBody = JSON.parse(
@@ -2028,13 +2052,11 @@ describe('markRecordsSynced', () => {
     expect(secondRecords[0]).toEqual({
       uuid: 'uuid-100',
       status: 'synced',
-      syncedAt: '2024-05-01T00:00:00.000Z',
       filePath: '/vault/note-100.md',
     });
     expect(secondRecords[49]).toEqual({
       uuid: 'uuid-149',
       status: 'synced',
-      syncedAt: '2024-05-01T00:00:00.000Z',
       filePath: '/vault/note-149.md',
     });
   });
