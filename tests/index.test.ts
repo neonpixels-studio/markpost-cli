@@ -585,7 +585,7 @@ describe('index', () => {
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -626,7 +626,7 @@ describe('index', () => {
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -661,7 +661,7 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce('/mock/output/title-2.md');
-    vi.mocked(deleteRecords).mockResolvedValueOnce({ deleted });
+    vi.mocked(deleteRecords).mockResolvedValueOnce({ meta: { deleted }, permanentlyFailed: false });
 
     return { mockRecord2, fetchAllRecords, deleteRecords, writeMarkdown };
   };
@@ -812,7 +812,7 @@ describe('index', () => {
         return `/mock/output/${record.uuid}.md`;
       },
     );
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -887,7 +887,7 @@ describe('index', () => {
     vi.mocked(fetchAllRecords)
       .mockResolvedValueOnce({ ok: true, records: [passOneRecord], partial: false })
       .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     // Stand-in for writeMarkdown that records the first writer of the shared
     // slug and snapshots the owner the map reports at each call, so the test can
@@ -1094,7 +1094,7 @@ describe('index', () => {
       partial: true,
     });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -1230,7 +1230,7 @@ describe('index', () => {
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -1249,7 +1249,7 @@ describe('index', () => {
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -1272,7 +1272,7 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -2030,7 +2030,7 @@ describe('index', () => {
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -2057,7 +2057,7 @@ describe('index', () => {
     vi.mocked(writeMarkdown)
       .mockReturnValueOnce('/mock/output/test-title.md')
       .mockReturnValueOnce(null);
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -2102,7 +2102,7 @@ describe('index', () => {
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
     vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
-    vi.mocked(deleteRecords).mockResolvedValue(null);
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: null, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -2197,6 +2197,93 @@ describe('index', () => {
     );
     expect(process.exitCode).toBe(1);
     expect(scheduledAutoSync).toBe(true);
+  });
+
+  // A CATEGORICAL request-shape delete abort (a repeated 400/422 whose envelope
+  // is wrong) doesn't throw — deleteRecords RETURNS `{ meta: null,
+  // permanentlyFailed: true }`. It recurs identically every pass, so the sync
+  // must fail loud AND stop autoSync from rescheduling, exactly like a thrown
+  // permanent (401) failure — otherwise the daemon re-fetches and re-writes the
+  // same records as duplicates against a server that keeps rejecting the same
+  // doomed DELETEs forever (#204). This would fail if the run passed the
+  // permanence bit through as `autoSync` (true) rather than stopping.
+  it('stops autoSync after a permanent (request-shape) delete abort that did not throw', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    let scheduledAutoSync: boolean | undefined;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
+      async (runSync) => {
+        scheduledAutoSync = await runSync();
+      },
+    );
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    // autoSync on, so a run that ignored `permanentlyFailed` would return `true`
+    // and keep the daemon alive on a doomed delete.
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoSync: true }));
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(deleteRecords).mockResolvedValue({
+      meta: null,
+      permanentlyFailed: true,
+    });
+
+    await import('@/index.js');
+
+    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to delete records'),
+    );
+    // The failure message must name the stopped daemon so it can't imply a
+    // "next run" that won't happen.
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('auto-sync was stopped'),
+    );
+    expect(process.exitCode).toBe(1);
+    // The run reported autoSync off, so the scheduler won't spin another pass.
+    expect(scheduledAutoSync).toBe(false);
+  });
+
+  // A request-shape delete abort with autoSync OFF (a one-shot `markpost sync`)
+  // still fails loud, but there's no daemon to stop — the message must NOT claim
+  // auto-sync was stopped when it was never running.
+  it('does not claim auto-sync was stopped for a request-shape abort when autoSync is off', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoSync: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(deleteRecords).mockResolvedValue({
+      meta: null,
+      permanentlyFailed: true,
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to delete records'),
+    );
+    expect(mockSpinner.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('auto-sync was stopped'),
+    );
+    expect(process.exitCode).toBe(1);
   });
 
   // Drives a mark-sync (autoDelete off) of `count` records where the bulk
@@ -2463,7 +2550,7 @@ describe('index', () => {
 
       return '/mock/output/title-2.md';
     });
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
   };
 
   it('contains a per-record write failure: keeps writing the rest and deletes only the written ones', async () => {
@@ -2652,7 +2739,7 @@ describe('index', () => {
 
       return '/mock/output/test-title.md';
     });
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -2684,7 +2771,7 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(() => {
       throw 'raw string failure';
     });
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 0 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 0 }, permanentlyFailed: false });
 
     await import('@/index.js');
 
@@ -2791,7 +2878,7 @@ describe('index', () => {
     vi.mocked(fetchAllRecords)
       .mockResolvedValueOnce({ ok: true, records: [mockRecord], partial: false })
       .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
     vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
       await runSync();
@@ -2825,7 +2912,7 @@ describe('index', () => {
     vi.mocked(fetchAllRecords)
       .mockResolvedValueOnce({ ok: true, records: [mockRecord], partial: false })
       .mockResolvedValueOnce({ ok: true, records: [passTwoRecord], partial: false });
-    vi.mocked(deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
     vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
       await runSync();
@@ -2929,7 +3016,7 @@ describe('index', () => {
       vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
       vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
       vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, secondRecord], partial: false });
-      vi.mocked(deleteRecords).mockResolvedValue({ deleted });
+      vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted }, permanentlyFailed: false });
       vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
       vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
         await runSync();
