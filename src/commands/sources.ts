@@ -6,6 +6,7 @@ import {
   deleteSource,
   fetchSources,
   rotateSourceSecret,
+  testSource,
   updateSource,
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
@@ -21,6 +22,8 @@ import {
   RotateSourceSecretInput,
   Source,
   SOURCE_TYPES,
+  SourceTestResult,
+  SourceTestSignatureStatus,
   SourceType,
 } from '@/types/sources.types.js';
 
@@ -31,13 +34,14 @@ import {
 export const WEBHOOK_INGEST_BASE = 'https://ingest.markpost.io/v1/hooks';
 export const EMAIL_DOMAIN = 'in.markpost.io';
 
-export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret> [uuid]
+export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret|test> [uuid]
 
   list                  List all sources (pass --json for machine-readable output)
   create                Create a new source (prompts for details)
   update [uuid]         Update a source's route folder; prompts to pick one if uuid is omitted
   delete [uuid]         Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
-  rotate-secret [uuid]  Rotate a provider source's signing secret; prompts to pick one if uuid is omitted`;
+  rotate-secret [uuid]  Rotate a provider source's signing secret; prompts to pick one if uuid is omitted
+  test <uuid>           Preview signature verification and field mapping for a source against a sample payload, without a real delivery (pass --json for machine-readable output)`;
 
 export const buildEndpointUrl = (
   sourceType: SourceType,
@@ -54,8 +58,7 @@ export const buildEndpointUrl = (
 // never pass the guard without a handler (which would otherwise risk falling
 // through to the destructive delete). A Map (not an object) keeps a subcommand
 // named "toString" from resolving to a prototype member.
-// Only `list` renders JSON; the other subcommands are interactive or emit a
-// one-off result, so --json means nothing to them.
+// Which subcommands render JSON is decided once, by JSON_SUBCOMMANDS below.
 const LIST_SUBCOMMAND = 'list';
 const CREATE_SUBCOMMAND = 'create';
 const UPDATE_SUBCOMMAND = 'update';
@@ -63,6 +66,14 @@ const UPDATE_SUBCOMMAND = 'update';
 // guard that rejects the flag elsewhere as well as its handler-map key.
 const DELETE_SUBCOMMAND = 'delete';
 const ROTATE_SECRET_SUBCOMMAND = 'rotate-secret';
+// `test` is non-interactive (it takes a required uuid, never a picker) and, like
+// `list`, renders JSON — so it's the second subcommand `--json` applies to.
+const TEST_SUBCOMMAND = 'test';
+
+// The subcommands `--json` is meaningful for: `list` (renders a JSON array) and
+// `test` (renders a JSON diagnostic). Every other subcommand is interactive or
+// emits a one-off human result, so --json is rejected for them (see usageErrorFor).
+const JSON_SUBCOMMANDS = new Set([LIST_SUBCOMMAND, TEST_SUBCOMMAND]);
 
 const SOURCES_HANDLERS = new Map<
   string,
@@ -80,6 +91,7 @@ const SOURCES_HANDLERS = new Map<
     (uuid, _json, skipConfirm) => deleteSourceCommand(uuid, skipConfirm),
   ],
   [ROTATE_SECRET_SUBCOMMAND, (uuid) => rotateSecretCommand(uuid)],
+  [TEST_SUBCOMMAND, (uuid, json) => testSourceCommand(uuid, json)],
 ]);
 
 // The message for the subcommand (if any) that can't complete without an
@@ -132,8 +144,15 @@ const usageErrorFor = (
   // Reject --json where it does nothing rather than silently ignoring it:
   // `sources create --json | jq` would otherwise "succeed" with human text on
   // stdout, losing the one-time signing secret it was trying to capture.
-  if (json && subcommand !== LIST_SUBCOMMAND) {
-    return `--json is only supported by \`sources ${LIST_SUBCOMMAND}\`.`;
+  if (json && !JSON_SUBCOMMANDS.has(subcommand)) {
+    return `--json is only supported by \`sources ${LIST_SUBCOMMAND}\` and \`sources ${TEST_SUBCOMMAND}\`.`;
+  }
+
+  // `test` acts on exactly one source and never opens a picker, so it needs an
+  // explicit uuid — mirroring the `--yes` delete contract. Checked before the
+  // interactivity guard since it holds whether or not the terminal is a TTY.
+  if (subcommand === TEST_SUBCOMMAND && !uuid) {
+    return `\`sources ${TEST_SUBCOMMAND}\` requires a uuid: \`markpost sources ${TEST_SUBCOMMAND} <uuid>\`.`;
   }
 
   // --yes only skips the delete confirmation; reject it elsewhere so a
@@ -163,7 +182,8 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   try {
     // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
     // still prompts rather than trying to delete a source named "--json") and
-    // rejects an unknown/mistyped flag. Only `list` reads json.
+    // rejects an unknown/mistyped flag. Which subcommands act on `json` is
+    // decided by JSON_SUBCOMMANDS below.
     const { positionals, values } = parseArgs({
       args,
       allowPositionals: true,
@@ -684,4 +704,117 @@ const rotateSecretCommand = async (uuid?: string): Promise<void> => {
   }
 
   await rotateSecretForSource(target);
+};
+
+// A `Map`, not an object literal keyed by server-derived text — same reason
+// `SOURCES_HANDLERS` above uses one: a `"__proto__"`/`"toString"` status would
+// otherwise resolve a real prototype member instead of `undefined`. A pass is
+// green, a rejection red, the two inconclusive states yellow, and an
+// unrecognized status also falls back to yellow (see colorizeSignatureStatus).
+const SIGNATURE_STATUS_COLORS = new Map<
+  SourceTestSignatureStatus,
+  (text: string) => string
+>([
+  ['verified', chalk.greenBright],
+  ['failed', chalk.redBright],
+  ['not_required', chalk.yellowBright],
+  ['not_verifiable', chalk.yellowBright],
+]);
+
+const colorizeSignatureStatus = (
+  status: SourceTestSignatureStatus | undefined,
+  displayText: string,
+): string => {
+  const colorize = status ? SIGNATURE_STATUS_COLORS.get(status) : undefined;
+
+  return (colorize ?? chalk.yellowBright)(displayText);
+};
+
+// Every field here is untrusted API output, so each is stripped of control/ANSI
+// escapes before printing (see terminal.ts), exactly as `printSource` does.
+// `content` is coerced to a single line by the single-line sanitizer, which is
+// fine for a preview. `frontmatter` is `unknown`, so it's JSON-stringified
+// first, then sanitized (an object value could itself carry an escape).
+// `signatureCheck`/`fieldMapping` are guaranteed present by the caller's drift
+// guard (see `testSourceCommand`); `tags` is still checked here since a
+// reshaped-but-present field is a smaller, more plausible drift than the
+// whole object vanishing.
+//
+// This always exits 0 regardless of `signatureCheck.status` — `test` is a
+// diagnostic preview (like `list`/`get`), not a pass/fail gate. A `failed` or
+// `not_verifiable` result is a legitimate, successfully-reported outcome; the
+// caller distinguishes them by reading the colored/JSON status, not the exit
+// code.
+const printTestResult = (result: SourceTestResult): void => {
+  const { signatureCheck, fieldMapping } = result;
+  const tags = Array.isArray(fieldMapping.tags) ? fieldMapping.tags : [];
+
+  console.log(
+    `Provider:       ${sanitizeForTerminal(result.provider ?? 'none')}`,
+  );
+  console.log(
+    `Sample payload: ${sanitizeForTerminal(JSON.stringify(result.payload))}`,
+  );
+  console.log(
+    chalk.bold(
+      `Signature check: ${colorizeSignatureStatus(
+        signatureCheck.status,
+        sanitizeForTerminal(signatureCheck.status),
+      )}`,
+    ),
+  );
+  console.log(`  ${sanitizeForTerminal(signatureCheck.message)}`);
+  console.log('');
+  console.log(chalk.bold('Field mapping preview:'));
+  console.log(`  title:       ${sanitizeForTerminal(fieldMapping.title)}`);
+  console.log(`  content:     ${sanitizeForTerminal(fieldMapping.content)}`);
+  console.log(`  tags:        ${sanitizeForTerminal(tags.join(', '))}`);
+  console.log(`  file path:   ${sanitizeForTerminal(fieldMapping.filePath)}`);
+  console.log(
+    `  frontmatter: ${sanitizeForTerminal(JSON.stringify(fieldMapping.frontmatter))}`,
+  );
+};
+
+const testSourceCommand = async (
+  uuid: string | undefined,
+  json: boolean,
+): Promise<void> => {
+  // usageErrorFor already rejects a missing uuid before any handler runs; this
+  // guard keeps the type honest and fails loud rather than silently if that
+  // ordering ever regresses.
+  if (!uuid) {
+    failWithMessage(`\`sources ${TEST_SUBCOMMAND}\` requires a uuid.`, json);
+    return;
+  }
+
+  const result = await testSource(uuid);
+
+  if (!result) {
+    failWithMessage('Failed to test source.', json);
+    return;
+  }
+
+  // Declared required, but that's only a compile-time claim over parsed
+  // JSON — a drifted/malformed 200 response omitting either would otherwise
+  // render as a clean, exit-0 preview of blank fields. Distinct message from
+  // the `!result` case above: the request succeeded, the response shape
+  // didn't — pointing a script at the server instead of its own network/token.
+  if (!result.signatureCheck || !result.fieldMapping) {
+    failWithMessage(
+      'The test ran, but the server returned an unexpected result (missing signatureCheck or fieldMapping).',
+      json,
+    );
+    return;
+  }
+
+  // The test result carries no one-time secret (unlike create/rotate-secret),
+  // so it is surfaced in full — a faithful passthrough keeps any new server
+  // field visible, matching the `get`/`records list` JSON paths rather than
+  // list's secret-guarding field whitelist.
+  if (json) {
+    printJson(result);
+    return;
+  }
+
+  printTestResult(result);
 };

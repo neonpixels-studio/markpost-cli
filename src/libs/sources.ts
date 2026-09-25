@@ -17,6 +17,9 @@ import {
   Source,
   SourceListApiResponse,
   SourceResource,
+  SourceTestInput,
+  SourceTestResource,
+  SourceTestResult,
   UpdateSourceInput,
 } from '@/types/sources.types.js';
 
@@ -26,10 +29,12 @@ const JSON_API_CONTENT_TYPE = 'application/vnd.api+json';
 // JSON:API `{ data: { type: 'sources', attributes } }` envelope and unwrap the
 // resource attributes off the response, falling back to null (and logging) on
 // failure. `context` labels the caller in the log line; `TResource` is the
-// JSON:API resource the endpoint returns (`SourceResource`, or
-// `CreatedSourceResource` for the two endpoints that reveal a one-time secret) —
-// keeping those envelope types live so they still guard against markpost's
-// `sourceSerializer` drifting (see src/types/sources.types.ts).
+// JSON:API resource the endpoint returns — `SourceResource`, `CreatedSourceResource`
+// for the two endpoints that reveal a one-time secret, or `SourceTestResource`
+// for `/test` (whose handler ignores `data.type`, tolerating the hardcoded
+// `'sources'` envelope even though it responds with a `sourceTestEvents`
+// resource) — keeping those envelope types live so they still guard against
+// markpost's `sourceSerializer` drifting (see src/types/sources.types.ts).
 const writeSourceRequest = async <
   TInput extends object,
   TResource extends { attributes: unknown },
@@ -106,6 +111,24 @@ export const rotateSourceSecret = async (
   writeSourceRequest<RotateSourceSecretInput, CreatedSourceResource>(
     `rotateSourceSecret["${uuid}"]`,
     `/api/sources/${encodeURIComponent(uuid)}/rotate-secret`,
+    'POST',
+    input,
+  );
+
+// Diagnostic-only: previews signature verification and field mapping for a
+// source against a sample payload without triggering a real provider delivery.
+// Reuses the shared write seam — the endpoint takes the same JSON:API envelope
+// (its handler reads only `data.attributes.payload`, ignoring `data.type`) —
+// but the response is a `sourceTestEvents` resource, not a `sources` one, so
+// `TResource` is `SourceTestResource`. Returns the preview attributes, or null
+// (logged) on failure, exactly like the other source writes.
+export const testSource = async (
+  uuid: string,
+  input: SourceTestInput = {},
+): Promise<SourceTestResult | null> =>
+  writeSourceRequest<SourceTestInput, SourceTestResource>(
+    `testSource["${uuid}"]`,
+    `/api/sources/${encodeURIComponent(uuid)}/test`,
     'POST',
     input,
   );

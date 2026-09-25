@@ -5,12 +5,17 @@ import {
   deleteSource,
   fetchSources,
   rotateSourceSecret,
+  testSource,
   updateSource,
 } from '@/libs/sources.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { logErrorMessage } from '@/libs/errors.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
-import { Source, SourceType } from '@/types/sources.types.js';
+import {
+  Source,
+  SourceTestResult,
+  SourceType,
+} from '@/types/sources.types.js';
 
 // @/libs/api.js imports @/libs/config.js, which constructs a real
 // `conf`-backed store (touching the developer's actual config directory) as
@@ -109,6 +114,11 @@ describe('sources API timeout propagation', () => {
     await expect(rotateSourceSecret('abc-123')).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
+  });
+
+  it('testSource rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(testSource('abc-123')).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 });
 
@@ -580,5 +590,103 @@ describe('deleteSource', () => {
   it('returns null on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await deleteSource('abc-123')).toBeNull();
+  });
+});
+
+describe('testSource', () => {
+  const testResult: SourceTestResult = {
+    provider: 'github',
+    payload: { title: 'Test event from markpost', tags: ['test'] },
+    signatureCheck: {
+      status: 'verified',
+      message: "This source's stored secret produced a valid signature.",
+    },
+    fieldMapping: {
+      title: 'Test event from markpost',
+      content: 'This is a test event.',
+      tags: ['test'],
+      frontmatter: { source: 'github' },
+      filePath: '99-incoming/test-event.md',
+    },
+  };
+
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('POSTs to the test path with the JSON:API envelope and empty attributes by default', async () => {
+    mockFetch({ data: { attributes: testResult } });
+    await testSource('abc-123');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/sources/abc-123/test',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: 'Bearer test-token',
+        },
+        body: JSON.stringify({
+          data: { type: 'sources', attributes: {} },
+        }),
+      }),
+    );
+  });
+
+  it('sends a supplied sample payload in the request body', async () => {
+    mockFetch({ data: { attributes: testResult } });
+    await testSource('abc-123', { payload: { title: 'Custom' } });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/sources/abc-123/test',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'sources',
+            attributes: { payload: { title: 'Custom' } },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('encodes the uuid into the URL path', async () => {
+    mockFetch({ data: { attributes: testResult } });
+    await testSource('a/../b');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/sources/a%2F..%2Fb/test',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('returns the test result attributes on success', async () => {
+    mockFetch({ data: { attributes: testResult } });
+    expect(await testSource('abc-123')).toEqual(testResult);
+  });
+
+  it('returns null and surfaces error details when the source is not testable', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [
+            {
+              title: 'Invalid Attribute',
+              detail:
+                'This source does not ingest via the JSON webhook path, so there is no signature or field-mapping behavior to test here.',
+            },
+          ],
+        },
+      },
+      false,
+    );
+    const result = await testSource('email-uuid');
+    expect(result).toBeNull();
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'testSource["email-uuid"]',
+      'Invalid Attribute: This source does not ingest via the JSON webhook path, so there is no signature or field-mapping behavior to test here.',
+    );
+  });
+
+  it('returns null on network failure', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    expect(await testSource('abc-123')).toBeNull();
   });
 });
