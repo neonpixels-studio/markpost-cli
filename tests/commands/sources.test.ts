@@ -626,6 +626,68 @@ describe('runSourcesCommand', () => {
       );
       expect(process.exitCode).toBe(1);
     });
+
+    // markpost's POST /api/sources accepts a fieldMapping attribute
+    // (server/api/sources/index.post.ts) that `create` never prompted for or
+    // sent (markpost-cli#220) — accepting the field-mapping opt-in prompt
+    // must send exactly the non-blank paths entered, in the shape the API
+    // contract expects (FieldMappingConfig).
+    it('prompts for and sends field mapping when the opt-in is accepted', async () => {
+      const { input, select, confirm } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      vi.mocked(select).mockResolvedValue('webhook');
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce('Webhook Source') // name
+        .mockResolvedValueOnce('99-incoming/') // routeFolder
+        .mockResolvedValueOnce('') // provider
+        .mockResolvedValueOnce('data.subject') // fieldMapping.title
+        .mockResolvedValueOnce('data.body') // fieldMapping.content
+        .mockResolvedValueOnce('') // fieldMapping.html
+        .mockResolvedValueOnce('') // fieldMapping.source
+        .mockResolvedValueOnce('') // fieldMapping.tags
+        .mockResolvedValueOnce(''); // fieldMapping.created
+      vi.mocked(createSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ default: false }),
+      );
+      expect(createSource).toHaveBeenCalledWith({
+        type: 'webhook',
+        name: 'Webhook Source',
+        routeFolder: '99-incoming/',
+        provider: undefined,
+        fieldMapping: { title: 'data.subject', content: 'data.body' },
+      });
+    });
+
+    // Declining the opt-in (the default under an unmocked/no confirm) must
+    // omit the attribute entirely rather than send an empty object — create
+    // then falls back to markpost's own server-side default.
+    it('omits fieldMapping from the create call when the opt-in is declined', async () => {
+      const { input, select, confirm } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      vi.mocked(select).mockResolvedValue('webhook');
+      vi.mocked(confirm).mockResolvedValue(false);
+      vi.mocked(input)
+        .mockResolvedValueOnce('Webhook Source')
+        .mockResolvedValueOnce('99-incoming/')
+        .mockResolvedValueOnce('');
+      vi.mocked(createSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      expect(createSource).toHaveBeenCalledWith({
+        type: 'webhook',
+        name: 'Webhook Source',
+        routeFolder: '99-incoming/',
+        provider: undefined,
+      });
+    });
   });
 
   describe('update', () => {
@@ -837,6 +899,63 @@ describe('runSourcesCommand', () => {
         expect.stringContaining('prompts for the route folder'),
       );
       expect(process.exitCode).toBe(1);
+    });
+
+    // markpost's PATCH /api/sources/[uuid] accepts a fieldMapping attribute
+    // (server/api/sources/[uuid].patch.ts) that `update` never prompted for
+    // or sent (markpost-cli#220) — accepting the opt-in with the route
+    // folder left unchanged must still send an update, carrying only the
+    // fieldMapping key.
+    it('sends fieldMapping alone when only the field-mapping opt-in is accepted', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(webhookSource.routeFolder) // route folder unchanged
+        .mockResolvedValueOnce('data.subject') // fieldMapping.title
+        .mockResolvedValueOnce('') // fieldMapping.content
+        .mockResolvedValueOnce('') // fieldMapping.html
+        .mockResolvedValueOnce('') // fieldMapping.source
+        .mockResolvedValueOnce('') // fieldMapping.tags
+        .mockResolvedValueOnce(''); // fieldMapping.created
+      vi.mocked(updateSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: { title: 'data.subject' },
+      });
+    });
+
+    // Both an actual route-folder change and an accepted field-mapping
+    // opt-in must land in the same PATCH call.
+    it('sends both routeFolder and fieldMapping when both are changed', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce('00-fixed/')
+        .mockResolvedValueOnce('data.subject')
+        .mockResolvedValueOnce('data.body')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      vi.mocked(updateSource).mockResolvedValue({
+        ...webhookSource,
+        routeFolder: '00-fixed/',
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        routeFolder: '00-fixed/',
+        fieldMapping: { title: 'data.subject', content: 'data.body' },
+      });
     });
   });
 
