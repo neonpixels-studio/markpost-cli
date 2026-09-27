@@ -938,6 +938,24 @@ describe('runRecordsCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    it('rejects an unknown flag instead of silently ignoring it', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--status',
+        'synced',
+      ]);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('status'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
     it('calls updateRecord with only the given attributes', async () => {
       const { updateRecord } = await import('@/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
@@ -1048,6 +1066,31 @@ describe('runRecordsCommand', () => {
 
       expect(console.log).not.toHaveBeenCalledWith(
         expect.stringContaining('write it to disk'),
+      );
+    });
+
+    // The updated record's title is untrusted API output (same as every
+    // record field the `list`/`get` printers sanitize), so a control
+    // character in it must not reach the terminal live via the success line.
+    it('strips control characters from the updated record before printing the success line', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue({
+        ...updatedRecord,
+        title: `Evil${control}Title`,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Evil']);
+
+      const printedControl = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Updated "Evil Title"'),
       );
     });
 
