@@ -17,6 +17,7 @@ import { hasJsonFlag, printJson } from '@/libs/output.js';
 import {
   FIELD_MAPPING_KEYS,
   FieldMappingConfig,
+  FieldMappingKey,
   isManualSecretProvider,
   isRotatableProvider,
   MANUAL_SECRET_PROVIDERS,
@@ -105,8 +106,9 @@ const SOURCES_HANDLERS = new Map<
 // documented escape hatch); `create` and `update` have no such flag — `create`
 // always prompts, and `update` always prompts for the route folder (and, if
 // accepted, field mapping), whether the target came from an explicit uuid or
-// the interactive picker — so both are guarded outright. `rotate-secret` only prompts when no uuid is
-// given (the picker), which is what's guarded here — its other prompt (a
+// the interactive picker — so both are guarded outright. `rotate-secret`
+// only prompts when no uuid is given (the picker), which is what's guarded
+// here — its other prompt (a
 // manual-secret provider's password) is guarded separately inside
 // collectRotateInput, since the provider isn't known this early (see there).
 const interactiveGuardMessageFor = (
@@ -338,13 +340,14 @@ const listSources = async (json: boolean): Promise<void> => {
 
 // One prompt per key markpost's field-mapping contract recognizes (see
 // FIELD_MAPPING_KEYS in src/types/sources.types.ts), in the same order
-// markpost's own FieldMappingModal.vue presents them. A blank answer is
-// dropped rather than stored — matching the server's own normalization
-// (server/utils/fieldMappingValidation.ts's normalizeAndValidate) — so
-// accepting every default without typing anything yields an empty mapping,
-// not six blank-string entries.
+// markpost's own FieldMappingModal.vue presents them. Answers are collected
+// first and filtered after the loop (rather than branching inside it) so a
+// blank answer is dropped without nesting an `if` inside the `for` — matching
+// the server's own normalization (server/utils/fieldMappingValidation.ts's
+// normalizeAndValidate), which likewise drops anything blank rather than
+// storing it.
 const collectFieldMapping = async (): Promise<FieldMappingConfig> => {
-  const fieldMapping: FieldMappingConfig = {};
+  const answers: [FieldMappingKey, string][] = [];
 
   for (const key of FIELD_MAPPING_KEYS) {
     const value = (
@@ -353,20 +356,26 @@ const collectFieldMapping = async (): Promise<FieldMappingConfig> => {
       })
     ).trim();
 
-    if (value) {
-      fieldMapping[key] = value;
-    }
+    answers.push([key, value]);
   }
 
-  return fieldMapping;
+  return Object.fromEntries(
+    answers.filter(([, value]) => value.length > 0),
+  ) as FieldMappingConfig;
 };
 
 // Field mapping is optional and easy to configure later via `sources update`,
 // so it stays behind an explicit opt-in rather than always asking six more
-// questions up front. Returns undefined when declined, so the caller can omit
-// the attribute entirely from the write — for `create` that leaves markpost's
-// own `attributes.fieldMapping ?? null` default in place, and for `update` it
-// leaves whatever is already stored untouched (see
+// questions up front. Returns undefined when declined *or* when every answer
+// came back blank — markpost's PATCH/POST handlers treat a supplied
+// fieldMapping as the complete replacement for whatever is stored (there is
+// no per-key merge; see server/api/sources/[uuid].patch.ts and
+// server/utils/fieldMappingValidation.ts), so an all-blank result must read
+// as "nothing to change" rather than as a deliberate clear-to-null — the
+// opt-in's whole point is to leave an untouched mapping alone when nothing
+// is actually typed. Omitting the attribute entirely lets `create` fall back
+// to markpost's own `attributes.fieldMapping ?? null` default, and lets
+// `update` leave whatever is already stored untouched (see
 // server/api/sources/[uuid].patch.ts's `"fieldMapping" in attributes` check).
 const promptFieldMapping = async (
   confirmMessage: string,
@@ -380,7 +389,9 @@ const promptFieldMapping = async (
     return undefined;
   }
 
-  return collectFieldMapping();
+  const fieldMapping = await collectFieldMapping();
+
+  return Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined;
 };
 
 const createSourceCommand = async (): Promise<void> => {
@@ -501,8 +512,10 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
 // carry the source's current field mapping — markpost's list/get responses
 // do return one (server/utils/response.ts's sourceSerializer), but the CLI's
 // read-side type doesn't surface it yet — so the field-mapping prompt below
-// always starts blank rather than prefilling what's already stored; declining
-// it (the default) leaves that stored mapping untouched.
+// always starts blank rather than prefilling what's already stored, and a
+// supplied mapping fully replaces (never merges with) whatever is there
+// already (see promptFieldMapping). Declining the opt-in, or accepting it
+// and leaving every field blank, both leave the stored mapping untouched.
 const promptAndApplyUpdates = async (target: Source): Promise<void> => {
   const routeFolder = (
     await input({
@@ -518,11 +531,14 @@ const promptAndApplyUpdates = async (target: Source): Promise<void> => {
 
   const routeFolderChanged = routeFolder !== target.routeFolder;
   const fieldMapping = await promptFieldMapping(
-    'Update field mapping now? (maps ingest payload fields to title/content/etc — leave unconfigured to keep whatever is already set)',
+    "Update field mapping now? (maps ingest payload fields to title/content/etc — this replaces the entire stored mapping, since the current one isn't shown here; leave unconfigured, or leave every field blank, to keep whatever is already set)",
   );
 
+  // Covers both "nothing typed differs" (route folder re-accepted as-is,
+  // field mapping declined) and "field mapping was offered but left blank" —
+  // either way there is nothing to send.
   if (!routeFolderChanged && fieldMapping === undefined) {
-    console.log('Route folder unchanged.');
+    console.log('Nothing to update: route folder and field mapping unchanged.');
     return;
   }
 

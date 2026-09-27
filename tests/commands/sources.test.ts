@@ -5,6 +5,13 @@ import {
   Source,
   SourceTestResult,
 } from '@/types/sources.types.js';
+// Aliased (not `confirm`) so it never shadows the many per-test
+// `const { ..., confirm } = await import('@inquirer/prompts')` destructures
+// throughout this file — both names refer to the same mocked singleton (see
+// the `beforeEach` reset below), but a shared name would make it unclear
+// whether a given call site was reading the module-scope import or its own
+// local one.
+import { confirm as confirmPrompt } from '@inquirer/prompts';
 
 vi.mock('@/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
@@ -126,6 +133,16 @@ describe('runSourcesCommand', () => {
     process.stdout.isTTY = true;
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    // `vi.clearAllMocks()` clears call history but not a previously-set
+    // `mockResolvedValue` — and the `@inquirer/prompts` mock is a stable
+    // singleton across `vi.resetModules()`, so a test earlier in the file
+    // (e.g. one of the field-mapping opt-in tests) that leaves `confirm`
+    // resolving `true` would otherwise leak into every later test that never
+    // touches it, silently flipping their field-mapping opt-in from declined
+    // to accepted. Reset it here so every test starts from the same
+    // "declined" default the field-mapping prompts are written to assume,
+    // matching an unmocked `confirm()`'s falsy resolution.
+    vi.mocked(confirmPrompt).mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -664,9 +681,11 @@ describe('runSourcesCommand', () => {
       });
     });
 
-    // Declining the opt-in (the default under an unmocked/no confirm) must
-    // omit the attribute entirely rather than send an empty object — create
-    // then falls back to markpost's own server-side default.
+    // Declining the opt-in must omit the attribute entirely rather than send
+    // an empty object — create then falls back to markpost's own server-side
+    // default. (An unmocked `confirm()` resolves the same falsy way — see the
+    // 'prompts for source details and creates the source' test above — but
+    // this one pins the behavior explicitly rather than relying on that.)
     it('omits fieldMapping from the create call when the opt-in is declined', async () => {
       const { input, select, confirm } = await import('@inquirer/prompts');
       const { createSource } = await import('@/libs/sources.js');
@@ -686,6 +705,75 @@ describe('runSourcesCommand', () => {
         name: 'Webhook Source',
         routeFolder: '99-incoming/',
         provider: undefined,
+      });
+    });
+
+    // Accepting the opt-in but leaving every field blank must not send an
+    // empty fieldMapping object — markpost's PATCH/POST handlers treat a
+    // supplied fieldMapping as a full replacement (never a merge), so on
+    // `create` this is harmless either way, but the same all-blank path is
+    // shared with `update`, where sending `{}` would wipe a stored mapping.
+    // Pinning the omitted-key behavior here too keeps the two call sites
+    // consistent.
+    it('omits fieldMapping from the create call when every field is left blank', async () => {
+      const { input, select, confirm } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      vi.mocked(select).mockResolvedValue('webhook');
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce('Webhook Source')
+        .mockResolvedValueOnce('99-incoming/')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('') // fieldMapping.title
+        .mockResolvedValueOnce('') // fieldMapping.content
+        .mockResolvedValueOnce('') // fieldMapping.html
+        .mockResolvedValueOnce('') // fieldMapping.source
+        .mockResolvedValueOnce('') // fieldMapping.tags
+        .mockResolvedValueOnce(''); // fieldMapping.created
+      vi.mocked(createSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      expect(createSource).toHaveBeenCalledWith({
+        type: 'webhook',
+        name: 'Webhook Source',
+        routeFolder: '99-incoming/',
+        provider: undefined,
+      });
+    });
+
+    // Proves collectFieldMapping's `.trim()` actually does something: a
+    // surrounding-whitespace answer is kept (trimmed), and a whitespace-only
+    // answer is dropped exactly like an empty string — without this test,
+    // deleting the `.trim()` call would still pass every other field-mapping
+    // test in this file.
+    it('trims a field-mapping answer and drops a whitespace-only one', async () => {
+      const { input, select, confirm } = await import('@inquirer/prompts');
+      const { createSource } = await import('@/libs/sources.js');
+      vi.mocked(select).mockResolvedValue('webhook');
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce('Webhook Source')
+        .mockResolvedValueOnce('99-incoming/')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('  data.subject  ') // fieldMapping.title
+        .mockResolvedValueOnce('   ') // fieldMapping.content — whitespace-only
+        .mockResolvedValueOnce('') // fieldMapping.html
+        .mockResolvedValueOnce('') // fieldMapping.source
+        .mockResolvedValueOnce('') // fieldMapping.tags
+        .mockResolvedValueOnce(''); // fieldMapping.created
+      vi.mocked(createSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create']);
+
+      expect(createSource).toHaveBeenCalledWith({
+        type: 'webhook',
+        name: 'Webhook Source',
+        routeFolder: '99-incoming/',
+        provider: undefined,
+        fieldMapping: { title: 'data.subject' },
       });
     });
   });
@@ -773,7 +861,7 @@ describe('runSourcesCommand', () => {
 
     it('reports an error and does not call updateSource when the route folder is cleared', async () => {
       const { fetchSources, updateSource } = await import('@/libs/sources.js');
-      const { input } = await import('@inquirer/prompts');
+      const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce('   ');
       const { runSourcesCommand } = await import('@/commands/sources.js');
@@ -784,6 +872,9 @@ describe('runSourcesCommand', () => {
       expect(console.error).toHaveBeenCalledWith(
         'Route folder cannot be empty.',
       );
+      // The empty-route-folder guard must return before the field-mapping
+      // opt-in is ever asked — an empty route folder is already a hard stop.
+      expect(confirm).not.toHaveBeenCalled();
     });
 
     it('does not call updateSource when the prefilled value is accepted unchanged', async () => {
@@ -796,7 +887,9 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['update', 'abc-123']);
 
       expect(updateSource).not.toHaveBeenCalled();
-      expect(console.log).toHaveBeenCalledWith('Route folder unchanged.');
+      expect(console.log).toHaveBeenCalledWith(
+        'Nothing to update: route folder and field mapping unchanged.',
+      );
     });
 
     it('does nothing when there are no sources to update and no uuid is given', async () => {
@@ -927,6 +1020,37 @@ describe('runSourcesCommand', () => {
       expect(updateSource).toHaveBeenCalledWith('abc-123', {
         fieldMapping: { title: 'data.subject' },
       });
+      // The opt-in must default to declined — a regression that flips this
+      // to `true` would start silently replacing every stored mapping.
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ default: false }),
+      );
+    });
+
+    // Field mapping must be reachable from the picker path too, not just the
+    // explicit-uuid path exercised above.
+    it('sends fieldMapping when the opt-in is accepted via the interactive picker', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, select, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(select).mockResolvedValue('abc-123');
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(webhookSource.routeFolder)
+        .mockResolvedValueOnce('data.subject')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      vi.mocked(updateSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: { title: 'data.subject' },
+      });
     });
 
     // Both an actual route-folder change and an accepted field-mapping
@@ -956,6 +1080,86 @@ describe('runSourcesCommand', () => {
         routeFolder: '00-fixed/',
         fieldMapping: { title: 'data.subject', content: 'data.body' },
       });
+    });
+
+    // Pins the decline explicitly (rather than relying on `confirm()`'s
+    // unmocked-falsy default, as the earlier uuid/picker tests do) alongside
+    // a real route-folder change, so the payload is proven to carry
+    // routeFolder alone with no fieldMapping key.
+    it('sends routeFolder alone when the field-mapping opt-in is explicitly declined', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(confirm).mockResolvedValue(false);
+      vi.mocked(input).mockResolvedValueOnce('00-fixed/');
+      vi.mocked(updateSource).mockResolvedValue({
+        ...webhookSource,
+        routeFolder: '00-fixed/',
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        routeFolder: '00-fixed/',
+      });
+    });
+
+    // Accepting the opt-in but leaving every field blank must not wipe the
+    // source's stored mapping — markpost's PATCH treats a supplied
+    // fieldMapping as a full replacement (server/api/sources/[uuid].patch.ts),
+    // so sending `{}` here would clear it. A real route-folder change still
+    // goes through; only fieldMapping is omitted.
+    it('omits fieldMapping (does not send an empty object) when every field is left blank', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce('00-fixed/')
+        .mockResolvedValueOnce('') // fieldMapping.title
+        .mockResolvedValueOnce('') // fieldMapping.content
+        .mockResolvedValueOnce('') // fieldMapping.html
+        .mockResolvedValueOnce('') // fieldMapping.source
+        .mockResolvedValueOnce('') // fieldMapping.tags
+        .mockResolvedValueOnce(''); // fieldMapping.created
+      vi.mocked(updateSource).mockResolvedValue({
+        ...webhookSource,
+        routeFolder: '00-fixed/',
+      });
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        routeFolder: '00-fixed/',
+      });
+    });
+
+    // The all-blank opt-in combined with an unchanged route folder must be a
+    // full no-op, exactly like declining outright — no call to updateSource,
+    // same as the existing 'accepted unchanged' case above.
+    it('makes no update call when the route folder is unchanged and every field-mapping field is left blank', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(webhookSource.routeFolder)
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        'Nothing to update: route folder and field mapping unchanged.',
+      );
     });
   });
 

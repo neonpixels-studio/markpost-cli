@@ -96,9 +96,9 @@ export const FIELD_MAPPING_KEYS = [
   'created',
 ] as const;
 
-export type FieldMappingConfig = Partial<
-  Record<(typeof FIELD_MAPPING_KEYS)[number], string>
->;
+export type FieldMappingKey = (typeof FIELD_MAPPING_KEYS)[number];
+
+export type FieldMappingConfig = Partial<Record<FieldMappingKey, string>>;
 
 export type CreateSourceInput = {
   type: SourceType;
@@ -111,7 +111,12 @@ export type CreateSourceInput = {
 // Mirrors markpost's PATCH /api/sources/[uuid] payload, which only accepts
 // routeFolder and fieldMapping updates. Per server/api/sources/[uuid].patch.ts,
 // omitting the key entirely leaves whatever is stored untouched; `null`
-// explicitly clears a stored mapping.
+// explicitly clears a stored mapping. The CLI's own `sources update` prompt
+// (src/commands/sources.ts) never produces `null` today — an all-blank
+// answer is read as "leave untouched", not "clear" (see promptFieldMapping) —
+// so `null` here documents the wire contract accurately rather than a
+// reachable CLI path; a dedicated "clear the mapping" choice is a possible
+// follow-up.
 export type UpdateSourceInput = {
   routeFolder?: string;
   fieldMapping?: FieldMappingConfig | null;
