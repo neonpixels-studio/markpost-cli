@@ -79,6 +79,12 @@ const TEST_SUBCOMMAND = 'test';
 // emits a one-off human result, so --json is rejected for them (see usageErrorFor).
 const JSON_SUBCOMMANDS = new Set([LIST_SUBCOMMAND, TEST_SUBCOMMAND]);
 
+// `list` acts on every source and `create` always prompts for its own
+// details, so neither handler reads the `uuid` positional at all (see
+// SOURCES_HANDLERS below) — a uuid-shaped argument given to either must fail
+// loudly (see usageErrorFor) rather than being silently accepted and ignored.
+const NO_UUID_SUBCOMMANDS = new Set([LIST_SUBCOMMAND, CREATE_SUBCOMMAND]);
+
 const SOURCES_HANDLERS = new Map<
   string,
   (
@@ -152,6 +158,14 @@ const usageErrorFor = (
     return `--json is only supported by \`sources ${LIST_SUBCOMMAND}\` and \`sources ${TEST_SUBCOMMAND}\`.`;
   }
 
+  // A stray positional past the subcommand itself, mistaken for a uuid —
+  // `list`/`create` never read one (issue #218: silently accepting and
+  // discarding it would be exactly the un-validated stray argument the
+  // parseSourcesArgs's own third-positional check exists to catch).
+  if (uuid !== undefined && NO_UUID_SUBCOMMANDS.has(subcommand)) {
+    return `\`sources ${subcommand}\` takes no arguments.`;
+  }
+
   // `test` acts on exactly one source and never opens a picker, so it needs an
   // explicit uuid — mirroring the `--yes` delete contract. Checked before the
   // interactivity guard since it holds whether or not the terminal is a TTY.
@@ -215,11 +229,8 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   // whichever contract the caller asked for, even one thrown before parsing.
   const json = hasJsonFlag(args);
 
-  // Parsed before the config check and the handler dispatch below, so a bad
-  // flag or stray positional reports the `usage` JSON code rather than the
-  // outer catch's `fetch_failed` — a usage error is not a fetch failure.
-  // `parseOrFailWithUsage` already reported the failure and returned `null`,
-  // so the guard below is a plain early return, not a second catch.
+  // Parsed before the config check and the handler dispatch below (see
+  // parseSourcesArgs above for why a throw here is a usage error).
   const parsed = parseOrFailWithUsage(
     () => parseSourcesArgs(args),
     USAGE,

@@ -43,31 +43,17 @@ export const failWithSubcommandUsage = (
   failWithUsage(message, usage, json);
 };
 
-// Shared by every "parse this command's (or subcommand's) own flags/
-// positionals in a dedicated try/catch, before checkConfig and the fetch"
-// call site (get.ts, export.ts, records.ts, events.ts, sources.ts,
-// tokens.ts): a thrown parse error is a usage mistake, not a fetch failure,
-// so it must report the `usage` JSON code (issue #208, and #218 for
-// sources.ts/tokens.ts) rather than whatever the caller's own catch would
-// otherwise miscode it as. Sanitizes the message — a thrown value can't be
-// trusted not to carry a terminal escape, same as every API-error path.
-export const failWithParseError = (
-  error: unknown,
-  usage: string,
-  json = false,
-): void => {
-  failWithUsage(sanitizeForTerminal(messageFromError(error)), usage, json);
-};
-
-// Wraps the "parse, and treat a throw as a usage error" shape itself: every
-// call site (sources.ts, tokens.ts's `list`/`create`/`revoke`) was writing the
-// same `let parsed; try { parsed = parseX(args); } catch (error) {
-// failWithParseError(...); return; }` block, one concern repeated past the
-// rule-of-three line. `parse` is a thunk (not the parsed args directly) so the
-// call, not just the catch, stays inside this function's own try. Returns
-// `null` on failure (already reported) so the caller's guard clause reads as
+// Runs `parse` (a thunk, so the call itself — not just the catch — stays
+// inside this function's own try) and treats a throw as a usage mistake, not
+// a fetch failure: sources.ts and tokens.ts's `list`/`create`/`revoke` each
+// parse their own flags/positionals before checkConfig and the fetch, and a
+// bad flag or stray positional must report the `usage` JSON code (issue
+// #218), not whatever the caller's own catch would otherwise miscode it as.
+// Sanitizes the message — a thrown value can't be trusted not to carry a
+// terminal escape, same as every API-error path. Returns `null` on failure
+// (already reported) so the caller's guard clause reads as
 // `if (!parsed) { return; }` rather than a second try/catch of its own.
-export const parseOrFailWithUsage = <ParsedArgs>(
+export const parseOrFailWithUsage = <ParsedArgs extends object>(
   parse: () => ParsedArgs,
   usage: string,
   json = false,
@@ -75,7 +61,7 @@ export const parseOrFailWithUsage = <ParsedArgs>(
   try {
     return parse();
   } catch (error) {
-    failWithParseError(error, usage, json);
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), usage, json);
     return null;
   }
 };

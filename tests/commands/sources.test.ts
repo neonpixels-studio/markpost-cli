@@ -1986,5 +1986,47 @@ describe('runSourcesCommand', () => {
       expect(parsed.message).toContain('extra');
       expect(process.exitCode).toBe(1);
     });
+
+    // `list` never reads its uuid slot (see SOURCES_HANDLERS) — a uuid-shaped
+    // argument must fail loudly, not be silently accepted and discarded.
+    it('emits a usage-coded JSON error for a uuid-shaped argument given to list', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', 'extra', '--json']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed).toEqual({
+        error: 'usage',
+        message: '`sources list` takes no arguments.',
+      });
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A thrown parse error's message can carry user-supplied text (an unknown
+    // flag name, a stray positional) — it must be sanitized before it reaches
+    // the terminal, same as every API-error path.
+    it('strips control characters from a hostile stray positional before printing', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { testSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', `evil${control}[2J`]);
+
+      expect(testSource).not.toHaveBeenCalled();
+      const printedControl = vi
+        .mocked(console.error)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('evil [2J'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
   });
 });

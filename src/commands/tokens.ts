@@ -112,14 +112,9 @@ const serializeTokenForJson = (token: Token): Required<Token> => ({
 
 // `list` takes no flags beyond `--json` and no positionals. Parsed (rather
 // than ignoring `rest` outright) so a typo like `list --jsn` or a stray
-// `list foo` fails loud via parseArgs's strict mode instead of silently
-// running the plain-text path with exit 0 — the same guarantee `create` and
-// `revoke` already have for their own arguments. A thrown parse error is a
-// usage mistake, not a fetch failure — `parseOrFailWithUsage` (below, in
-// listTokensCommand) reports it via the `usage` JSON code instead of letting
-// it propagate to the runner's outer catch, which would miscode it as
-// `fetch_failed` (issue #218, mirroring #208's fix to
-// get.ts/export.ts/records.ts/events.ts).
+// `list foo` fails loud via `parseOrFailWithUsage`'s strict mode instead of
+// silently running the plain-text path with exit 0 — the same guarantee
+// `create` and `revoke` already have for their own arguments (issue #218).
 const parseListArgs = (rest: string[]) =>
   parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
 
@@ -127,9 +122,7 @@ const listTokensCommand = async (
   rest: string[],
   json: boolean,
 ): Promise<void> => {
-  const parsed = parseOrFailWithUsage(() => parseListArgs(rest), USAGE, json);
-
-  if (!parsed) {
+  if (!parseOrFailWithUsage(() => parseListArgs(rest), USAGE, json)) {
     return;
   }
 
@@ -175,13 +168,10 @@ const resolveExpiresInDays = (
 
 // Return type left to inference (not hand-duplicated) so an option added
 // here can't silently drift out of sync with what `parseArgs` actually
-// returns. A thrown parse error is a usage mistake, not a fetch failure —
-// `parseOrFailWithUsage` (below, in createTokenCommand) reports it instead of
-// letting it propagate to the runner's outer catch, which would miscode it
-// as `fetch_failed` (issue #218, mirroring #208's fix elsewhere). `--json` is
-// already rejected for `create` by `usageErrorFor` before this runs, so every
-// usage error below is reported with `json` defaulted to its non-JSON
-// contract.
+// returns. A thrown parse error is a usage mistake (issue #218), reported by
+// `parseOrFailWithUsage` below rather than the runner's outer catch. `--json`
+// is already rejected for `create` by `usageErrorFor` before this runs, so
+// every usage error below defaults `json` to its non-JSON contract.
 const parseCreateArgs = (rest: string[]) =>
   parseArgs({
     args: rest,
@@ -349,14 +339,8 @@ const confirmTokenRevocation = async (id: string): Promise<boolean> => {
   return confirmRevocation(label, isConfigured);
 };
 
-// Return type left to inference, matching parseCreateArgs above. A thrown
-// parse error is a usage mistake, not a fetch failure —
-// `parseOrFailWithUsage` (below, in revokeTokenCommand) reports it instead of
-// letting it propagate to the runner's outer catch, which would miscode it
-// as `fetch_failed` (issue #218, mirroring #208's fix elsewhere). `--json` is
-// already rejected for `revoke` by `usageErrorFor` before this runs, so every
-// usage error below is reported with `json` defaulted to its non-JSON
-// contract, matching `createTokenCommand`.
+// Return type left to inference, matching parseCreateArgs above. Same
+// parse-throw-is-a-usage-error rationale as parseCreateArgs (issue #218).
 const parseRevokeArgs = (rest: string[]) =>
   parseArgs({
     args: rest,
@@ -369,9 +353,9 @@ const revokeTokenCommand = async (
   skipConfirm: boolean,
 ): Promise<void> => {
   // Parsed (not a bare destructure) so an unrecognized flag like
-  // `--help` fails loud via parseArgs's strict mode instead of being sent
-  // as a literal token id, and a second positional is caught explicitly
-  // rather than silently dropped (a script revoking two ids would
+  // `--help` fails loud via `parseOrFailWithUsage`'s strict mode instead of
+  // being sent as a literal token id, and a second positional is caught
+  // explicitly rather than silently dropped (a script revoking two ids would
   // otherwise see only the first one actually revoked and still exit 0).
   // `--yes` is declared so it's consumed as a flag rather than mis-parsed as
   // the id; the runner already read it from argv into `skipConfirm`.
