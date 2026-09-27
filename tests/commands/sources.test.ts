@@ -1886,6 +1886,117 @@ describe('runSourcesCommand', () => {
       expect(testSource).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     });
+
+    // --payload threads a caller-supplied sample through to `testSource`'s
+    // `SourceTestInput.payload` (issue #222) so a source's field mapping can
+    // be previewed against something other than the server's default sample.
+    describe('--payload', () => {
+      it('parses --payload as JSON and forwards it to testSource', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        vi.mocked(testSource).mockResolvedValue(testResult);
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand([
+          'test',
+          'abc-123',
+          '--payload',
+          '{"title":"Custom event","tags":["custom"]}',
+        ]);
+
+        expect(testSource).toHaveBeenCalledWith('abc-123', {
+          payload: { title: 'Custom event', tags: ['custom'] },
+        });
+        expect(process.exitCode).toBeUndefined();
+      });
+
+      it('omits the payload field on testSource entirely when --payload is not given', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        vi.mocked(testSource).mockResolvedValue(testResult);
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand(['test', 'abc-123']);
+
+        // A single-argument call, not `testSource('abc-123', {})` — matches
+        // `SourceTestInput`'s contract that an absent `payload` (not merely an
+        // empty object) is what makes the server fall back to its own sample.
+        expect(testSource).toHaveBeenCalledWith('abc-123');
+      });
+
+      it('rejects malformed JSON with a usage error and never calls testSource', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand([
+          'test',
+          'abc-123',
+          '--payload',
+          '{not valid json',
+        ]);
+
+        expect(testSource).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining('--payload must be valid JSON'),
+        );
+        expect(process.exitCode).toBe(1);
+      });
+
+      it.each([
+        ['an array', '["a","b"]'],
+        ['a string', '"just a string"'],
+        ['a number', '42'],
+        ['null', 'null'],
+      ])(
+        'rejects %s payload (valid JSON, not an object) with a usage error',
+        async (_description, rawPayload) => {
+          const { testSource } = await import('@/libs/sources.js');
+          const { runSourcesCommand } = await import('@/commands/sources.js');
+
+          await runSourcesCommand(['test', 'abc-123', '--payload', rawPayload]);
+
+          expect(testSource).not.toHaveBeenCalled();
+          expect(console.error).toHaveBeenCalledWith(
+            expect.stringContaining('--payload must be a JSON object'),
+          );
+          expect(process.exitCode).toBe(1);
+        },
+      );
+
+      it('emits a usage-coded JSON error on stderr for malformed --payload with --json', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand([
+          'test',
+          'abc-123',
+          '--json',
+          '--payload',
+          '{bad',
+        ]);
+
+        const parsed = JSON.parse(
+          vi.mocked(console.error).mock.calls[0][0] as string,
+        );
+        expect(parsed.error).toBe('usage');
+        expect(parsed.message).toContain('--payload must be valid JSON');
+        expect(testSource).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('rejects --payload on a subcommand other than test', async () => {
+        const { fetchSources } = await import('@/libs/sources.js');
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand(['list', '--payload', '{"a":1}']);
+
+        expect(fetchSources).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining(
+            '--payload is only supported by `sources test`',
+          ),
+        );
+        expect(process.exitCode).toBe(1);
+      });
+    });
   });
 
   // The unified --json failure contract: rejecting --json on a non-list
