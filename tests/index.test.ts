@@ -3028,8 +3028,302 @@ describe('index', () => {
       // Pass two (snapshot index 2) still carries both uuids.
       expect(snapshots[2].has('abc-123')).toBe(true);
       expect(snapshots[2].has('def-456')).toBe(true);
+      // Both uuids are still reported pending on pass two's fetch, so neither
+      // has genuinely settled — the sticky exit code from pass one's ambiguous
+      // delete must NOT be downgraded just because pass two itself ran clean
+      // (issue #221: a clean pass alone is not enough evidence).
+      expect(process.exitCode).toBe(1);
     },
   );
+
+  // Issue #221: once a pass sets process.exitCode = 1 (here, pass one's
+  // ambiguous delete count leaves both uuids tracked as unsettled), nothing
+  // used to reset it even after the condition that caused it had genuinely
+  // resolved. A later fetch that no longer reports a tracked uuid as pending
+  // is the server's own confirmation it settled — the narrow signal this fix
+  // relies on to downgrade the sticky failure.
+  it('resets the sticky exit code once every previously-unsettled uuid drops out of a later, complete fetch', async () => {
+    const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
+    // Pass one: both records fetched and written; the delete count (1 of 2) is
+    // ambiguous, so both uuids stay tracked as unsettled and the run fails.
+    // Pass two: a complete fetch reports neither uuid pending anymore — both
+    // genuinely settled since (the delete actually went through, or the
+    // records left `pending` some other way) — and nothing else fails.
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: true, records: [mockRecord, secondRecord], partial: false })
+      .mockResolvedValueOnce({ ok: true, records: [], partial: false });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
+    let exitCodeAfterPassOne: typeof process.exitCode;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      exitCodeAfterPassOne = process.exitCode;
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.success).toHaveBeenCalledWith('No new records, exiting...');
+    expect(deleteRecords).toHaveBeenCalledTimes(1);
+    // Pins that pass two actually downgraded a real 1, not that it was never
+    // set in the first place.
+    expect(exitCodeAfterPassOne).toBe(1);
+    expect(process.exitCode).toBe(0);
+  });
+
+  // Reconciliation must be selective, per uuid — not "any drift clears
+  // everything." A later fetch that still reports one previously-unsettled
+  // uuid pending (it genuinely didn't settle) must leave that uuid tracked
+  // even while a sibling uuid that really did drop out gets forgotten.
+  it('forgets only the previously-unsettled uuid that drops out of a later fetch, keeping a sibling that is still reported pending', async () => {
+    const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const snapshots: Array<Map<string, WrittenRecordState>> = [];
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
+    // Pass one: both records written; an ambiguous delete (1 of 2) leaves both
+    // tracked. Pass two: a complete fetch reports only def-456 still pending —
+    // abc-123 genuinely settled, def-456 didn't.
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: true, records: [mockRecord, secondRecord], partial: false })
+      .mockResolvedValueOnce({ ok: true, records: [secondRecord], partial: false });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Snapshot 2 is pass two's only write (def-456), taken right after
+    // reconciliation and before this pass's own delete. abc-123 is already
+    // gone (it dropped out of the fetch); def-456 is still there (the fetch
+    // still reports it pending, so reconciliation must not have touched it).
+    expect(snapshots[2].has('abc-123')).toBe(false);
+    expect(snapshots[2].get('def-456')?.path).toBe('/mock/output/def-456.md');
+  });
+
+  // Pins the "restore" branch specifically: a pass that is itself clean (no
+  // fresh failure) but still carries a genuinely-unresolved uuid — here, one
+  // deferred from the delete step entirely because its server revision was
+  // dropped for an unreconciled local edit (issue #110) — must have the prior
+  // sticky failure restored, not left cleared by the temporary reset at the
+  // top of the pass.
+  it('restores the sticky exit code when a previously-unsettled uuid is deferred (neither settled nor dropped from the fetch) on an otherwise clean pass', async () => {
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
+    // Pass one: an ambiguous delete (0 of 1) leaves abc-123 tracked and fails
+    // the run. Pass two fetches the same still-pending record again (so
+    // reconciliation must not touch it), but this time it's deferred from the
+    // delete step — held back, not attempted, not a failure in its own right.
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord], partial: false });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 0 }, permanentlyFailed: false });
+    // Mirrors captureWrittenPaths (the file is genuinely written either way),
+    // plus optionally marking the record dropped for pass two.
+    const writeAndTrack = (
+      record: Record,
+      state: Map<string, WrittenRecordState> | undefined,
+      dropped: Set<string> | undefined,
+    ): string => {
+      const filePath = `/mock/output/${record.uuid}.md`;
+      state?.set(record.uuid, {
+        path: filePath,
+        contentHash: 'hash',
+        identity: { deviceId: 1n, inode: 1n },
+      });
+      dropped?.add(record.uuid);
+      return filePath;
+    };
+    vi.mocked(writeMarkdown)
+      .mockImplementationOnce((record, _strategy, _seen, _frontmatter, state) =>
+        writeAndTrack(record, state, undefined),
+      )
+      .mockImplementationOnce(
+        (record, _strategy, _seen, _frontmatter, state, dropped) =>
+          writeAndTrack(record, state, dropped),
+      );
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Pass two never attempted a delete at all — the record was deferred, so
+    // deleteRecords is only called once (pass one's ambiguous attempt).
+    expect(deleteRecords).toHaveBeenCalledTimes(1);
+    expect(process.exitCode).toBe(1);
+  });
+
+  // The reconciliation isn't limited to the delete/mark-synced ambiguity: any
+  // failure that never tracked a uuid as unsettled (nothing was fetched to
+  // write) also clears once a later pass genuinely re-proves the operation
+  // works — here, a fetch failure (e.g. an expired token since refreshed).
+  // The written-state map was already empty going in, so there's nothing left
+  // to reconcile except the exit code itself.
+  it('resets the sticky exit code once a later pass cleanly re-proves a fetch that previously failed outright', async () => {
+    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
+    // Pass one: the fetch fails outright (nothing written, nothing tracked).
+    // Pass two: the same fetch succeeds cleanly with no pending records.
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true, records: [], partial: false });
+    let exitCodeAfterPassOne: typeof process.exitCode;
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      exitCodeAfterPassOne = process.exitCode;
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Pins that pass two actually downgraded a real 1, not that it was never
+    // set in the first place.
+    expect(exitCodeAfterPassOne).toBe(1);
+    expect(process.exitCode).toBe(0);
+  });
+
+  // If a later pass throws instead of running cleanly, the sticky failure it
+  // inherited must never be silently cleared — a crash is the opposite of
+  // genuine resolution, even though the temporary clear at the top of the
+  // pass means process.exitCode briefly reads as unset while it runs.
+  it('does not reset the sticky exit code when a later pass throws', async () => {
+    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
+    // Pass one: the fetch fails outright. Pass two: an unexpected error (not
+    // a classified API failure) throws from inside the try block.
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: false })
+      .mockRejectedValueOnce(new Error('unexpected'));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    expect(mockSpinner.error).toHaveBeenCalledWith('Something went wrong!');
+    expect(process.exitCode).toBe(1);
+  });
+
+  // The restore check must only count uuids that were ALREADY tracked before
+  // this pass started, never ones this same pass adds — otherwise a brand-new
+  // deferred record (issue #110; not a failure) would be mistaken for a
+  // leftover from a completely unrelated earlier failure, and the earlier
+  // failure would never get to clear even after it genuinely resolved.
+  it('resets the sticky exit code from an earlier fetch failure even when this pass defers a brand-new, unrelated record', async () => {
+    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: false }));
+    // Pass one: the fetch fails outright — nothing written, nothing tracked.
+    // Pass two: the fetch succeeds (the earlier failure genuinely resolved),
+    // but writes a brand-new record whose server revision was dropped for an
+    // unreconciled local edit, so it's deferred — tracked in the written-state
+    // map for the first time this pass, unrelated to pass one's failure.
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true, records: [mockRecord], partial: false });
+    vi.mocked(writeMarkdown).mockImplementation(
+      (record, _strategy, _seen, _frontmatter, state, dropped) => {
+        const filePath = `/mock/output/${record.uuid}.md`;
+        state?.set(record.uuid, {
+          path: filePath,
+          contentHash: 'hash',
+          identity: { deviceId: 1n, inode: 1n },
+        });
+        dropped?.add(record.uuid);
+        return filePath;
+      },
+    );
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    expect(process.exitCode).toBe(0);
+  });
+
+  // A mid-pagination failure means the fetch is incomplete — a genuinely
+  // still-pending uuid could simply live on the unfetched page, so its
+  // disappearance from THIS pass's (partial) list proves nothing. The sticky
+  // exit code must stay put even though nothing else about this pass failed.
+  it('does not drop previously-unsettled uuids from the written-state map on a partial fetch that omits them', async () => {
+    const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Two', createdAt: '2024-01-02T00:00:00Z' };
+    const thirdRecord: Record = { uuid: 'ghi-789', title: 'Title 3', content: 'Three', createdAt: '2024-01-03T00:00:00Z' };
+    const { fetchAllRecords, deleteRecords } = await import('@/libs/records.js');
+    const { writeMarkdown } = await import('@/libs/markdown.js');
+    const { fetchSettings } = await import('@/libs/settings.js');
+    const { runSyncWithAutoSchedule } = await import('@/libs/scheduler.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    const snapshots: Array<Map<string, WrittenRecordState>> = [];
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings({ autoDelete: true }));
+    vi.mocked(fetchAllRecords)
+      .mockResolvedValueOnce({ ok: true, records: [mockRecord, secondRecord], partial: false })
+      // Pass two: a different record on this (incomplete) page — `partial:
+      // true` means a later page failed, so abc-123/def-456's absence here is
+      // not trustworthy evidence they settled. A third record still fetches
+      // and writes so writeMarkdown fires and the map can be observed.
+      .mockResolvedValueOnce({ ok: true, records: [thirdRecord], partial: true });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
+    vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(async (runSync) => {
+      await runSync();
+      await runSync();
+    });
+
+    await import('@/index.js');
+
+    // Pass one wrote abc-123 and def-456 (snapshots 0 and 1); pass two writes
+    // ghi-789 (snapshot 2). If the partial guard were missing, reconciliation
+    // would have already dropped abc-123/def-456 by the time pass two's
+    // writeMarkdown call is snapshotted, since neither appears in its
+    // (incomplete) fetch.
+    expect(snapshots[2].has('abc-123')).toBe(true);
+    expect(snapshots[2].has('def-456')).toBe(true);
+    // The sticky failure from pass one's ambiguous delete must also still
+    // stand — nothing about pass two (itself an incomplete fetch) resolves it.
+    expect(process.exitCode).toBe(1);
+  });
 
   describe('sync --dry-run', () => {
     const secondRecord: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };

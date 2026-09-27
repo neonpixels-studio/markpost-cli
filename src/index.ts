@@ -84,6 +84,84 @@ const processSeenSlugs = new Map<string, string>();
 // processSeenSlugs carries.
 const processWrittenState = new Map<string, WrittenRecordState>();
 
+// A uuid left in the written-state map from an earlier pass means that pass's
+// server-side settle (mark-synced or delete) was ambiguous or failed outright,
+// so the record might still be pending — the map is this process's memory of
+// "not yet confirmed settled" (see processWrittenState above). A fresh,
+// trustworthy pending-only fetch is the server's own word on what's actually
+// still pending: any tracked uuid the fetch no longer returns has settled by
+// some means (the earlier ambiguous request went through after all, or the
+// record left `pending` some other way) — issue #221's "dropped out of the
+// next fetch" signal. Only call this with a *complete* fetch (`!partial`): a
+// truncated page can't rule a uuid out just because its page never arrived —
+// forgetting it here on incomplete evidence would also drop the reuse guard
+// that stops a still-pending record from spawning a suffixed duplicate file
+// next pass (issue #110).
+function reconcileSettledDrift(
+  writtenState: Map<string, WrittenRecordState>,
+  currentPendingUuids: ReadonlySet<string>,
+): void {
+  for (const uuid of writtenState.keys()) {
+    if (currentPendingUuids.has(uuid)) {
+      continue;
+    }
+
+    writtenState.delete(uuid);
+  }
+}
+
+// Decides, once per pass, whether a sticky exit code from an earlier pass may
+// finally clear. `exitCodeSetThisPass` is `process.exitCode` read right after
+// runDefaultSync cleared it for the duration of the pass (see there) — a
+// falsy value (`undefined`/`0`) means nothing in this pass's call graph
+// (fetch, write, settle, even a config check) raised a fresh failure of its
+// own; only that case is ever eligible to reset. Compared by truthiness
+// rather than `=== 1` so a future non-1 failure code is still treated as a
+// fresh failure, not silently swallowed. `unsettledUuidsBeforeThisPass` is a
+// snapshot of `writtenState`'s keys taken at the very top of the pass, before
+// this pass's own fetch/write could add anything to it — checking the map's
+// current keys against only *those* uuids (rather than the map's size) keeps
+// a brand-new deferred record from this same pass (issue #110; not a failure
+// in its own right) from being mistaken for a leftover from the earlier
+// failure. This is deliberately narrower than "reset on any clean pass": a
+// pass that's clean by luck but still leaves one of THOSE uuids genuinely
+// unresolved (reconcileSettledDrift above only drops entries a trustworthy
+// fetch actually disproved) must not have the earlier failure masked
+// (issue #221).
+function reconcileStickyExitCode(
+  exitCodeBeforeThisPass: typeof process.exitCode,
+  exitCodeSetThisPass: typeof process.exitCode,
+  unsettledUuidsBeforeThisPass: ReadonlySet<string>,
+  writtenState: Map<string, WrittenRecordState>,
+): void {
+  if (exitCodeSetThisPass) {
+    // A fresh failure this pass stands as-is — the clear at the top of the
+    // pass was only ever a temporary read, never a real reset.
+    return;
+  }
+
+  if (!exitCodeBeforeThisPass) {
+    // Nothing carried in to reconcile.
+    return;
+  }
+
+  const stillUnresolved = Array.from(unsettledUuidsBeforeThisPass).some(
+    (uuid) => writtenState.has(uuid),
+  );
+
+  if (stillUnresolved) {
+    // At least one uuid tracked before this pass started is still tracked
+    // now — restore the sticky failure the temporary clear hid.
+    process.exitCode = exitCodeBeforeThisPass;
+    return;
+  }
+
+  // Every uuid this process was unsure about going into this pass has been
+  // confirmed settled, and this pass raised nothing new: the earlier failure
+  // has genuinely resolved.
+  process.exitCode = 0;
+}
+
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
 const SYNC_COMMAND = 'sync';
@@ -876,6 +954,17 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
   // settings are read) never spins a daemon that just keeps crashing.
   let autoSync = false;
 
+  // Snapshot the incoming exit code, then clear it for the pass's duration so
+  // reconcileStickyExitCode (called in the `finally` below) can tell whether
+  // this pass raised a fresh failure of its own. Also snapshot which uuids
+  // were already tracked as unsettled going in, before this pass's own
+  // fetch/write can add to that map — only THOSE uuids count toward "still
+  // unresolved" there, so a brand-new deferred record from this same pass
+  // can't be mistaken for a leftover from the earlier failure.
+  const exitCodeBeforeThisPass = process.exitCode;
+  const unsettledUuidsBeforeThisPass = new Set(processWrittenState.keys());
+  process.exitCode = undefined;
+
   try {
     // A missing-config exit must never arm the auto-sync daemon, so return a
     // literal false rather than the `autoSync` initializer that merely happens
@@ -955,6 +1044,14 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     }
 
     const allRecords = recordsResult.records;
+
+    // See reconcileSettledDrift for why this is gated on a complete fetch.
+    if (!recordsResult.partial) {
+      reconcileSettledDrift(
+        processWrittenState,
+        new Set(allRecords.map((record) => record.uuid)),
+      );
+    }
 
     // A later page failed mid-pagination: sync what was fetched, but fail loud
     // (error mark + non-zero exit) so cron never treats a truncated sync as a
@@ -1186,5 +1283,12 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // Don't self-schedule after an unexpected failure — a crashing run
     // shouldn't spin a daemon that just keeps crashing.
     return false;
+  } finally {
+    reconcileStickyExitCode(
+      exitCodeBeforeThisPass,
+      process.exitCode,
+      unsettledUuidsBeforeThisPass,
+      processWrittenState,
+    );
   }
 }
