@@ -117,7 +117,7 @@ const SOURCES_HANDLERS = new Map<
 // manual-secret provider's password) is guarded separately inside
 // collectRotateInput, since the provider isn't known this early (see there).
 const interactiveGuardMessageFor = (
-  subcommand: string,
+  subcommand: string | undefined,
   uuid: string | undefined,
   skipConfirm: boolean,
 ): string | null => {
@@ -145,7 +145,7 @@ const interactiveGuardMessageFor = (
 // invocation is valid. Kept in one place so their ordering is a single unit
 // rather than four near-identical guard blocks in the runner.
 const usageErrorFor = (
-  subcommand: string,
+  subcommand: string | undefined,
   uuid: string | undefined,
   json: boolean,
   skipConfirm: boolean,
@@ -154,15 +154,22 @@ const usageErrorFor = (
   // Reject --json where it does nothing rather than silently ignoring it:
   // `sources create --json | jq` would otherwise "succeed" with human text on
   // stdout, losing the one-time signing secret it was trying to capture.
-  if (json && !JSON_SUBCOMMANDS.has(subcommand)) {
+  if (json && (subcommand === undefined || !JSON_SUBCOMMANDS.has(subcommand))) {
     return `--json is only supported by \`sources ${LIST_SUBCOMMAND}\` and \`sources ${TEST_SUBCOMMAND}\`.`;
   }
 
   // A stray positional past the subcommand itself, mistaken for a uuid —
   // `list`/`create` never read one (issue #218: silently accepting and
   // discarding it would be exactly the un-validated stray argument the
-  // parseSourcesArgs's own third-positional check exists to catch).
-  if (uuid !== undefined && NO_UUID_SUBCOMMANDS.has(subcommand)) {
+  // parseSourcesArgs's own third-positional check exists to catch). The
+  // `subcommand !== undefined` half is only for the type checker: by the time
+  // this runs the caller has already rejected a missing subcommand, via the
+  // `!handler` guard.
+  if (
+    uuid !== undefined &&
+    subcommand !== undefined &&
+    NO_UUID_SUBCOMMANDS.has(subcommand)
+  ) {
     return `\`sources ${subcommand}\` takes no arguments.`;
   }
 
@@ -202,7 +209,7 @@ const usageErrorFor = (
 const parseSourcesArgs = (
   args: string[],
 ): {
-  subcommand: string;
+  subcommand: string | undefined;
   uuid: string | undefined;
   skipConfirm: boolean;
 } => {
@@ -242,7 +249,11 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   }
 
   const { subcommand, uuid, skipConfirm } = parsed;
-  const handler = SOURCES_HANDLERS.get(subcommand);
+  // `subcommand` is `undefined` for a bare `sources` invocation (no
+  // positionals at all) — `Map.get` needs a `string` key, and no subcommand
+  // is ever named the empty string, so it's a safe stand-in that still misses
+  // the lookup exactly like `undefined` would.
+  const handler = SOURCES_HANDLERS.get(subcommand ?? '');
 
   // Validate before the config check so a bad subcommand fails on usage
   // alone, without needing a configured account. The bad-subcommand case

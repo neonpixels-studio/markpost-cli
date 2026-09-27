@@ -2006,6 +2006,48 @@ describe('runSourcesCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    // The human-readable path for the same rejection — must print the usage
+    // block, not silently list everything with exit 0. `--json` would hit the
+    // separate `--json` rejection first, so this has to be the non-JSON case.
+    it('exits 1 with the usage block for a uuid-shaped argument given to list', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', 'extra']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        '`sources list` takes no arguments.',
+      );
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // `create` is the other subcommand in NO_UUID_SUBCOMMANDS — covered
+    // separately so deleting it from that set wouldn't leave every test
+    // green (create always prompts, so createSource must never be called).
+    it('exits 1 with the usage block for a uuid-shaped argument given to create', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { createSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create', 'extra']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(createSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        '`sources create` takes no arguments.',
+      );
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
     // A thrown parse error's message can carry user-supplied text (an unknown
     // flag name, a stray positional) — it must be sanitized before it reaches
     // the terminal, same as every API-error path.
