@@ -189,9 +189,13 @@ const usageErrorFor = (
   json: boolean,
   skipConfirm: boolean,
   isInteractive: boolean,
-  payloadFlag: string | undefined,
-  payloadError: string | undefined,
+  // Bundled into one object (rather than two adjacent `string | undefined`
+  // positional args) so the two can't be silently swapped at the call site —
+  // that would type-check either way and let a malformed --payload pass
+  // validation.
+  payloadInput: { flag: string | undefined; error: string | undefined },
 ): string | null => {
+  const { flag: payloadFlag, error: payloadError } = payloadInput;
   // Reject --json where it does nothing rather than silently ignoring it:
   // `sources create --json | jq` would otherwise "succeed" with human text on
   // stdout, losing the one-time signing secret it was trying to capture.
@@ -286,8 +290,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       json,
       skipConfirm,
       isInteractive,
-      payloadFlag,
-      payloadError,
+      { flag: payloadFlag, error: payloadError },
     );
 
     if (usageError) {

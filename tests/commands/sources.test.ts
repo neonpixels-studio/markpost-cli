@@ -2068,7 +2068,53 @@ describe('runSourcesCommand', () => {
         await runSourcesCommand(['test', 'abc-123', '--payload']);
 
         expect(testSource).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining('--payload'),
+        );
         expect(process.exitCode).toBe(1);
+      });
+
+      it('emits a usage-coded JSON error on stderr for a non-object --payload with --json', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand([
+          'test',
+          'abc-123',
+          '--json',
+          '--payload',
+          '[1,2,3]',
+        ]);
+
+        const parsed = JSON.parse(
+          vi.mocked(console.error).mock.calls[0][0] as string,
+        );
+        expect(parsed.error).toBe('usage');
+        expect(parsed.message).toContain('--payload must be a JSON object');
+        expect(testSource).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('prints pure JSON on stdout for a successful --payload run with --json', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        vi.mocked(testSource).mockResolvedValue(testResult);
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand([
+          'test',
+          'abc-123',
+          '--json',
+          '--payload',
+          '{"title":"Custom event"}',
+        ]);
+
+        expect(testSource).toHaveBeenCalledWith('abc-123', {
+          payload: { title: 'Custom event' },
+        });
+        expect(console.log).toHaveBeenCalledTimes(1);
+        const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+        expect(JSON.parse(output)).toEqual(testResult);
+        expect(process.exitCode).toBeUndefined();
       });
     });
   });
