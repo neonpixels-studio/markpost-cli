@@ -34,7 +34,8 @@ List options:
   --search <text>    Filter by text in the title or content
   --json             Print the records as JSON instead of formatted text
 
-Update options:
+Update options (at least one of --title/--content is required; neither may be
+blank — pass a non-empty value):
   --title <text>    New title for the record
   --content <text>  New content for the record
   --json            Print the updated record as JSON instead of formatted text`;
@@ -338,10 +339,15 @@ const updateRecordAndReport = async (
     ),
   );
 
+  // State-neutral wording on purpose: `pending` here can mean the server just
+  // requeued a previously-synced record for resync (markpost#306), or that the
+  // record was already pending before this edit and was never written to disk
+  // in the first place. Either way "the next sync run will write it to disk"
+  // is accurate; claiming a fresh "re-sync" transition would not be.
   if (updated.status === PENDING_STATUS) {
     console.log(
       chalk.yellow(
-        'Record is pending — it will be re-synced to disk on the next sync run.',
+        'Record is pending — the next sync run will write it to disk.',
       ),
     );
   }
