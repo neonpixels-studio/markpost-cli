@@ -13,9 +13,9 @@ import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
 import {
-  failWithParseError,
   failWithSubcommandUsage,
   failWithUsage,
+  parseOrFailWithUsage,
 } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import {
@@ -180,11 +180,11 @@ const usageErrorFor = (
 
 // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
 // still prompts rather than trying to delete a source named "--json") and
-// throws on an unknown/mistyped flag, which the command's dedicated usage
-// catch below surfaces as a `usage` error, not `fetch_failed` (issue #218,
-// mirroring #208's fix to get.ts/export.ts/records.ts/events.ts). A third
-// positional — `uuid` is the only one any subcommand takes — is likewise a
-// stray argument and must fail loudly rather than being silently discarded.
+// throws on an unknown/mistyped flag, which the caller's `parseOrFailWithUsage`
+// surfaces as a `usage` error, not `fetch_failed` (issue #218, mirroring
+// #208's fix to get.ts/export.ts/records.ts/events.ts). A third positional —
+// `uuid` is the only one any subcommand takes — is likewise a stray argument
+// and must fail loudly rather than being silently discarded.
 const parseSourcesArgs = (
   args: string[],
 ): {
@@ -215,21 +215,22 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   // whichever contract the caller asked for, even one thrown before parsing.
   const json = hasJsonFlag(args);
 
-  // Parsed in its own try/catch, before the config check and the handler
-  // dispatch below, so a bad flag or stray positional reports the `usage`
-  // JSON code rather than the outer catch's `fetch_failed` — a usage error is
-  // not a fetch failure.
-  let subcommand: string;
-  let uuid: string | undefined;
-  let skipConfirm: boolean;
+  // Parsed before the config check and the handler dispatch below, so a bad
+  // flag or stray positional reports the `usage` JSON code rather than the
+  // outer catch's `fetch_failed` — a usage error is not a fetch failure.
+  // `parseOrFailWithUsage` already reported the failure and returned `null`,
+  // so the guard below is a plain early return, not a second catch.
+  const parsed = parseOrFailWithUsage(
+    () => parseSourcesArgs(args),
+    USAGE,
+    json,
+  );
 
-  try {
-    ({ subcommand, uuid, skipConfirm } = parseSourcesArgs(args));
-  } catch (error) {
-    failWithParseError(error, USAGE, json);
+  if (!parsed) {
     return;
   }
 
+  const { subcommand, uuid, skipConfirm } = parsed;
   const handler = SOURCES_HANDLERS.get(subcommand);
 
   // Validate before the config check so a bad subcommand fails on usage

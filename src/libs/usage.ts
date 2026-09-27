@@ -58,3 +58,24 @@ export const failWithParseError = (
 ): void => {
   failWithUsage(sanitizeForTerminal(messageFromError(error)), usage, json);
 };
+
+// Wraps the "parse, and treat a throw as a usage error" shape itself: every
+// call site (sources.ts, tokens.ts's `list`/`create`/`revoke`) was writing the
+// same `let parsed; try { parsed = parseX(args); } catch (error) {
+// failWithParseError(...); return; }` block, one concern repeated past the
+// rule-of-three line. `parse` is a thunk (not the parsed args directly) so the
+// call, not just the catch, stays inside this function's own try. Returns
+// `null` on failure (already reported) so the caller's guard clause reads as
+// `if (!parsed) { return; }` rather than a second try/catch of its own.
+export const parseOrFailWithUsage = <ParsedArgs>(
+  parse: () => ParsedArgs,
+  usage: string,
+  json = false,
+): ParsedArgs | null => {
+  try {
+    return parse();
+  } catch (error) {
+    failWithParseError(error, usage, json);
+    return null;
+  }
+};
