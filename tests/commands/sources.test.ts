@@ -1922,6 +1922,20 @@ describe('runSourcesCommand', () => {
         expect(testSource).toHaveBeenCalledWith('abc-123');
       });
 
+      // Distinct from the "not given" case above: an explicit empty object is
+      // a caller-supplied sample (however empty), so it must still reach
+      // `testSource` as `{ payload: {} }`, not be treated as "absent" and
+      // dropped like the previous test's bare `testSource('abc-123')` call.
+      it('forwards an explicit empty object rather than treating it as absent', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        vi.mocked(testSource).mockResolvedValue(testResult);
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand(['test', 'abc-123', '--payload', '{}']);
+
+        expect(testSource).toHaveBeenCalledWith('abc-123', { payload: {} });
+      });
+
       it('rejects malformed JSON with a usage error and never calls testSource', async () => {
         const { testSource } = await import('@/libs/sources.js');
         const { runSourcesCommand } = await import('@/commands/sources.js');
@@ -1994,6 +2008,26 @@ describe('runSourcesCommand', () => {
             '--payload is only supported by `sources test`',
           ),
         );
+        expect(process.exitCode).toBe(1);
+      });
+
+      // Pins the ordering `usageErrorFor` checks in: a missing uuid is caught
+      // before a malformed --payload is ever reported, so the one uuid-less
+      // invocation with a bad payload gets the "requires a uuid" message, not
+      // the JSON one — and testSource is never reached either way.
+      it('reports the missing-uuid error, not the malformed-payload one, when both are wrong', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand(['test', '--payload', '{bad']);
+
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining('requires a uuid'),
+        );
+        expect(console.error).not.toHaveBeenCalledWith(
+          expect.stringContaining('--payload must be valid JSON'),
+        );
+        expect(testSource).not.toHaveBeenCalled();
         expect(process.exitCode).toBe(1);
       });
     });

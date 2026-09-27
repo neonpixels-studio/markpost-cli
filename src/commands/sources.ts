@@ -138,16 +138,23 @@ const interactiveGuardMessageFor = (
 // `--payload` arrives as a raw JSON string on argv; `testSource`'s contract
 // (`SourceTestInput.payload`) wants a parsed plain object, not text, an array,
 // or another primitive, so this is the one place that bridges the flag to the
-// API shape. Throws rather than returning null/undefined so both call sites
-// (the usage-error check and the handler that builds the real request) share
-// the same validation instead of re-deriving it.
+// API shape. Throws rather than returning null/undefined — `parsePayloadFlag`
+// below is the single place that catches it, so every caller gets the same
+// validation without re-deriving it.
 const parseTestPayload = (raw: string): Record<string, unknown> => {
   let parsed: unknown;
 
   try {
     parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`--payload must be valid JSON: ${raw}`);
+  } catch (error) {
+    // Report JSON.parse's own reason (e.g. "Unexpected token o in JSON at
+    // position 1") rather than echoing `raw` back — that's more actionable
+    // than repeating text the user just typed, and it means this message
+    // never has to carry (and sanitize) untrusted flag content.
+    throw new Error(
+      `--payload must be valid JSON: ${messageFromError(error)}`,
+      { cause: error },
+    );
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -157,6 +164,26 @@ const parseTestPayload = (raw: string): Record<string, unknown> => {
   }
 
   return parsed as Record<string, unknown>;
+};
+
+// Parses --payload exactly once, up front: a malformed value becomes a usage
+// error string (for `usageErrorFor` to surface) and a valid one becomes the
+// object `testSourceCommand` sends to `testSource` — no second parse, and no
+// "this can't throw, I promise" comment papering over a call that could.
+// Absent flag is the common case (every subcommand but `test` in practice),
+// so it's the guard clause rather than a branch of the try.
+const parsePayloadFlag = (
+  payloadFlag: string | undefined,
+): { payload?: Record<string, unknown>; error?: string } => {
+  if (payloadFlag === undefined) {
+    return {};
+  }
+
+  try {
+    return { payload: parseTestPayload(payloadFlag) };
+  } catch (error) {
+    return { error: messageFromError(error) };
+  }
 };
 
 // The invocation-level usage checks that all fail the same way (one usage
@@ -170,6 +197,7 @@ const usageErrorFor = (
   skipConfirm: boolean,
   isInteractive: boolean,
   payloadFlag: string | undefined,
+  payloadError: string | undefined,
 ): string | null => {
   // Reject --json where it does nothing rather than silently ignoring it:
   // `sources create --json | jq` would otherwise "succeed" with human text on
@@ -198,14 +226,11 @@ const usageErrorFor = (
     return `--payload is only supported by \`sources ${TEST_SUBCOMMAND}\`.`;
   }
 
-  // Validate the JSON up front so a malformed --payload fails on usage alone,
-  // before a request ever reaches the server.
-  if (payloadFlag !== undefined && subcommand === TEST_SUBCOMMAND) {
-    try {
-      parseTestPayload(payloadFlag);
-    } catch (error) {
-      return messageFromError(error);
-    }
+  // `payloadError` is already the fully-formed message from `parsePayloadFlag`
+  // (called once, before this function runs) — fail on it directly rather
+  // than re-parsing --payload here too.
+  if (payloadError) {
+    return payloadError;
   }
 
   // --yes promises a non-interactive delete, so it needs an explicit uuid —
@@ -243,6 +268,9 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     const [subcommand, uuid] = positionals;
     const skipConfirm = Boolean(values.yes);
     const payloadFlag = values.payload;
+    // Parsed exactly once, ahead of both the usage check and the handler
+    // call — see `parsePayloadFlag`.
+    const { payload, error: payloadError } = parsePayloadFlag(payloadFlag);
     const handler = SOURCES_HANDLERS.get(subcommand);
 
     // Validate before the config check so a bad subcommand fails on usage
@@ -265,6 +293,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       skipConfirm,
       isInteractive,
       payloadFlag,
+      payloadError,
     );
 
     if (usageError) {
@@ -275,11 +304,6 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     if (!(await checkConfig(json))) {
       return;
     }
-
-    // Already validated by usageErrorFor above (which rejects a malformed
-    // --payload before this point), so parsing again here can't throw.
-    const payload =
-      payloadFlag !== undefined ? parseTestPayload(payloadFlag) : undefined;
 
     await handler(uuid, json, skipConfirm, payload);
   } catch (error) {
