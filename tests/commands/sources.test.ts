@@ -1892,6 +1892,27 @@ describe('runSourcesCommand', () => {
       expect(testSource).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     });
+
+    // The human-readable path for the same stray-positional rejection
+    // covered under --json in the "--json failure contract" describe below —
+    // it must print the usage block (not silently succeed) with exit 1.
+    it('exits 1 with the usage block on a stray positional past the uuid', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { testSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', 'extra']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(testSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('extra'),
+      );
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
   });
 
   // The unified --json failure contract: rejecting --json on a non-list

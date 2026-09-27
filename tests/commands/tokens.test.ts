@@ -337,6 +337,39 @@ describe('runTokensCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    // Regression guard: `create`/`revoke` reject --json before their own arg
+    // parsing runs (see above), but createTokenCommand/revokeTokenCommand
+    // also thread `json` into their own usage errors independent of that
+    // ordering (issue #218) — pin the JSON contract here too so the two
+    // checks can drift without a test noticing.
+    it('still emits a usage-coded JSON error when --json and a bad flag are both present on create', async () => {
+      const { createToken } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['create', '--name', 'x', '--bogus', '--json']);
+
+      expect(createToken).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('still emits a usage-coded JSON error when --json and a bad flag are both present on revoke', async () => {
+      const { revokeToken } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['revoke', '--bogus', '--json']);
+
+      expect(revokeToken).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
     // `list` takes no positionals and no flag besides `--json`; a typo'd
     // flag or a stray argument must fail loud instead of silently running
     // the plain-text path with exit 0 — the same guarantee `create` and
@@ -401,6 +434,7 @@ describe('runTokensCommand', () => {
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
       expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('foo');
       expect(process.exitCode).toBe(1);
     });
 

@@ -10,9 +10,13 @@ import {
   updateSource,
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, messageFromError } from '@/libs/errors.js';
+import { failWithMessage } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
+import {
+  failWithParseError,
+  failWithSubcommandUsage,
+  failWithUsage,
+} from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import {
   isManualSecretProvider,
@@ -222,7 +226,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   try {
     ({ subcommand, uuid, skipConfirm } = parseSourcesArgs(args));
   } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+    failWithParseError(error, USAGE, json);
     return;
   }
 

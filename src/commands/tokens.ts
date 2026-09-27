@@ -4,9 +4,13 @@ import { confirm } from '@inquirer/prompts';
 import { createToken, fetchTokens, revokeToken } from '@/libs/tokens.js';
 import { checkConfig } from '@/libs/config.js';
 import { getApiToken } from '@/libs/api.js';
-import { failWithMessage, messageFromError } from '@/libs/errors.js';
+import { failWithMessage } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
+import {
+  failWithParseError,
+  failWithSubcommandUsage,
+  failWithUsage,
+} from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { CreateTokenInput, Token } from '@/types/tokens.types.js';
 
@@ -111,19 +115,23 @@ const serializeTokenForJson = (token: Token): Required<Token> => ({
 // `list foo` fails loud via parseArgs's strict mode instead of silently
 // running the plain-text path with exit 0 — the same guarantee `create` and
 // `revoke` already have for their own arguments.
+const parseListArgs = (rest: string[]): void => {
+  parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+};
+
 const listTokensCommand = async (
   rest: string[],
   json: boolean,
 ): Promise<void> => {
-  // A bad flag/stray positional here is a usage error, not a fetch
-  // failure — caught locally (rather than left to propagate to the runner's
-  // outer catch, which would miscode it as `fetch_failed`) and reported via
-  // the `usage` JSON code instead (issue #218, mirroring #208's fix to
-  // get.ts/export.ts/records.ts/events.ts).
+  // A thrown parse error here is a usage mistake, not a fetch failure —
+  // caught in its own try/catch (rather than left to propagate to the
+  // runner's outer one, which would miscode it as `fetch_failed`) and
+  // reported via `failWithParseError` instead (issue #218, mirroring #208's
+  // fix to get.ts/export.ts/records.ts/events.ts).
   try {
-    parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+    parseListArgs(rest);
   } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+    failWithParseError(error, USAGE, json);
     return;
   }
 
@@ -167,31 +175,43 @@ const resolveExpiresInDays = (
   return WHOLE_NUMBER_PATTERN.test(raw.trim()) ? Number(raw) : null;
 };
 
-const createTokenCommand = async (rest: string[]): Promise<void> => {
-  // A bad flag/stray positional here is a usage error, not a fetch
-  // failure — caught locally (rather than left to propagate to the runner's
-  // outer catch, which would miscode it as `fetch_failed`) and reported via
-  // the `usage` JSON code instead (issue #218, mirroring #208's fix to
-  // get.ts/export.ts/records.ts/events.ts). `--json` is already rejected for
-  // `create` by `usageErrorFor` before this runs, so `failWithUsage` below is
-  // always called with its default (non-JSON) contract.
-  let values: { name?: string; 'expires-in-days'?: string };
+// Return type left to inference (not hand-duplicated) so an option added
+// here can't silently drift out of sync with what `parseArgs` actually
+// returns.
+const parseCreateArgs = (rest: string[]) =>
+  parseArgs({
+    args: rest,
+    options: {
+      name: { type: 'string' },
+      'expires-in-days': { type: 'string' },
+    },
+  });
+
+const createTokenCommand = async (
+  rest: string[],
+  json: boolean,
+): Promise<void> => {
+  // A thrown parse error here is a usage mistake, not a fetch failure —
+  // caught in its own try/catch (rather than left to propagate to the
+  // runner's outer one, which would miscode it as `fetch_failed`) and
+  // reported via `failWithParseError` instead (issue #218, mirroring #208's
+  // fix to get.ts/export.ts/records.ts/events.ts). `json` is threaded through
+  // (rather than assumed false) so every usage error below stays correct
+  // under `--json` independent of `usageErrorFor` already rejecting it for
+  // `create` earlier — the two checks shouldn't have to agree by accident.
+  let parsed: ReturnType<typeof parseCreateArgs>;
 
   try {
-    ({ values } = parseArgs({
-      args: rest,
-      options: {
-        name: { type: 'string' },
-        'expires-in-days': { type: 'string' },
-      },
-    }));
+    parsed = parseCreateArgs(rest);
   } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE);
+    failWithParseError(error, USAGE, json);
     return;
   }
 
+  const { values } = parsed;
+
   if (!values.name) {
-    failWithUsage('`tokens create` requires --name <name>.', USAGE);
+    failWithUsage('`tokens create` requires --name <name>.', USAGE, json);
     return;
   }
 
@@ -201,6 +221,7 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
     failWithUsage(
       `--expires-in-days must be a whole number, got \`${values['expires-in-days']}\`.`,
       USAGE,
+      json,
     );
     return;
   }
@@ -339,9 +360,18 @@ const confirmTokenRevocation = async (id: string): Promise<boolean> => {
   return confirmRevocation(label, isConfigured);
 };
 
+// Return type left to inference, matching parseCreateArgs above.
+const parseRevokeArgs = (rest: string[]) =>
+  parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { yes: { type: 'boolean' } },
+  });
+
 const revokeTokenCommand = async (
   rest: string[],
   skipConfirm: boolean,
+  json: boolean,
 ): Promise<void> => {
   // Parsed (not a bare destructure) so an unrecognized flag like
   // `--help` fails loud via parseArgs's strict mode instead of being sent
@@ -349,31 +379,29 @@ const revokeTokenCommand = async (
   // rather than silently dropped (a script revoking two ids would
   // otherwise see only the first one actually revoked and still exit 0).
   // `--yes` is declared so it's consumed as a flag rather than mis-parsed as
-  // the id; the runner already read it from argv into `skipConfirm`. An
-  // unknown flag here is a usage error, not a fetch failure — caught locally
-  // (rather than left to propagate to the runner's outer catch, which would
-  // miscode it as `fetch_failed`) and reported via the `usage` JSON code
-  // instead (issue #218, mirroring #208's fix to
-  // get.ts/export.ts/records.ts/events.ts).
-  let positionals: string[];
+  // the id; the runner already read it from argv into `skipConfirm`. A
+  // thrown parse error is a usage mistake, not a fetch failure — caught in
+  // its own try/catch (rather than left to propagate to the runner's outer
+  // one, which would miscode it as `fetch_failed`) and reported via
+  // `failWithParseError` instead (issue #218, mirroring #208's fix to
+  // get.ts/export.ts/records.ts/events.ts). `json` is threaded through for
+  // the same reason as `createTokenCommand` above.
+  let parsed: ReturnType<typeof parseRevokeArgs>;
 
   try {
-    ({ positionals } = parseArgs({
-      args: rest,
-      allowPositionals: true,
-      options: { yes: { type: 'boolean' } },
-    }));
+    parsed = parseRevokeArgs(rest);
   } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE);
+    failWithParseError(error, USAGE, json);
     return;
   }
 
-  const [id, ...extraPositionals] = positionals;
+  const [id, ...extraPositionals] = parsed.positionals;
 
   if (!id || extraPositionals.length > 0) {
     failWithUsage(
       '`tokens revoke` takes exactly one id: `markpost tokens revoke <id>`.',
       USAGE,
+      json,
     );
     return;
   }
@@ -400,18 +428,20 @@ const revokeTokenCommand = async (
 // Membership check and handler come from the same Map, so a valid subcommand
 // always has a handler — mirrors settings.ts/sources.ts. A Map (not an
 // object) keeps a subcommand named "toString" from resolving to a prototype
-// member. Every handler takes the same `(rest, json, skipConfirm)` shape even
-// though only `list` reads `json` and only `revoke` reads `skipConfirm`, so
-// dispatch below is a single call with no per-subcommand branch.
+// member. Every handler takes the same `(rest, json, skipConfirm)` shape —
+// `json` is threaded to every handler (each reports its own usage errors
+// under the caller's chosen contract, see failWithParseError above), though
+// only `revoke` reads `skipConfirm` — so dispatch below is a single call with
+// no per-subcommand branch.
 const TOKENS_HANDLERS = new Map<
   string,
   (rest: string[], json: boolean, skipConfirm: boolean) => Promise<void>
 >([
   [LIST_SUBCOMMAND, (rest, json) => listTokensCommand(rest, json)],
-  [CREATE_SUBCOMMAND, (rest) => createTokenCommand(rest)],
+  [CREATE_SUBCOMMAND, (rest, json) => createTokenCommand(rest, json)],
   [
     REVOKE_SUBCOMMAND,
-    (rest, _json, skipConfirm) => revokeTokenCommand(rest, skipConfirm),
+    (rest, json, skipConfirm) => revokeTokenCommand(rest, skipConfirm, json),
   ],
 ]);
 
