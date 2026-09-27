@@ -10,7 +10,7 @@ import {
   updateSource,
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
@@ -174,54 +174,87 @@ const usageErrorFor = (
   return null;
 };
 
+// `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
+// still prompts rather than trying to delete a source named "--json") and
+// throws on an unknown/mistyped flag, which the command's dedicated usage
+// catch below surfaces as a `usage` error, not `fetch_failed` (issue #218,
+// mirroring #208's fix to get.ts/export.ts/records.ts/events.ts). A third
+// positional — `uuid` is the only one any subcommand takes — is likewise a
+// stray argument and must fail loudly rather than being silently discarded.
+const parseSourcesArgs = (
+  args: string[],
+): {
+  subcommand: string;
+  uuid: string | undefined;
+  skipConfirm: boolean;
+} => {
+  const { positionals, values } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      json: { type: 'boolean' },
+      yes: { type: 'boolean' },
+    },
+  });
+
+  if (positionals.length > 2) {
+    throw new Error(`Unexpected argument "${positionals[2]}".`);
+  }
+
+  const [subcommand, uuid] = positionals;
+
+  return { subcommand, uuid, skipConfirm: Boolean(values.yes) };
+};
+
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
   // whichever contract the caller asked for, even one thrown before parsing.
   const json = hasJsonFlag(args);
 
+  // Parsed in its own try/catch, before the config check and the handler
+  // dispatch below, so a bad flag or stray positional reports the `usage`
+  // JSON code rather than the outer catch's `fetch_failed` — a usage error is
+  // not a fetch failure.
+  let subcommand: string;
+  let uuid: string | undefined;
+  let skipConfirm: boolean;
+
   try {
-    // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
-    // still prompts rather than trying to delete a source named "--json") and
-    // rejects an unknown/mistyped flag. Which subcommands act on `json` is
-    // decided by JSON_SUBCOMMANDS below.
-    const { positionals, values } = parseArgs({
-      args,
-      allowPositionals: true,
-      options: {
-        json: { type: 'boolean' },
-        yes: { type: 'boolean' },
-      },
-    });
-    const [subcommand, uuid] = positionals;
-    const skipConfirm = Boolean(values.yes);
-    const handler = SOURCES_HANDLERS.get(subcommand);
+    ({ subcommand, uuid, skipConfirm } = parseSourcesArgs(args));
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+    return;
+  }
 
-    // Validate before the config check so a bad subcommand fails on usage
-    // alone, without needing a configured account. The bad-subcommand case
-    // fails differently (it prints the subcommand), so it stays here; the rest
-    // share one usage-error shape and live in `usageErrorFor`.
-    if (!handler) {
-      failWithSubcommandUsage(subcommand, USAGE, json);
-      return;
-    }
+  const handler = SOURCES_HANDLERS.get(subcommand);
 
-    // A prompt needs both streams to be a terminal: inquirer reads stdin and
-    // renders to stdout, so a redirect on either makes create/update/delete's
-    // prompts (and rotate-secret's picker) unanswerable.
-    const isInteractive = isInteractiveTerminal();
-    const usageError = usageErrorFor(
-      subcommand,
-      uuid,
-      json,
-      skipConfirm,
-      isInteractive,
-    );
+  // Validate before the config check so a bad subcommand fails on usage
+  // alone, without needing a configured account. The bad-subcommand case
+  // fails differently (it prints the subcommand), so it stays here; the rest
+  // share one usage-error shape and live in `usageErrorFor`.
+  if (!handler) {
+    failWithSubcommandUsage(subcommand, USAGE, json);
+    return;
+  }
 
-    if (usageError) {
-      failWithUsage(usageError, USAGE, json);
-      return;
-    }
+  // A prompt needs both streams to be a terminal: inquirer reads stdin and
+  // renders to stdout, so a redirect on either makes create/update/delete's
+  // prompts (and rotate-secret's picker) unanswerable.
+  const isInteractive = isInteractiveTerminal();
+  const usageError = usageErrorFor(
+    subcommand,
+    uuid,
+    json,
+    skipConfirm,
+    isInteractive,
+  );
 
+  if (usageError) {
+    failWithUsage(usageError, USAGE, json);
+    return;
+  }
+
+  try {
     if (!(await checkConfig(json))) {
       return;
     }

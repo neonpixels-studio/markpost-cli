@@ -409,7 +409,10 @@ describe('runSourcesCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
-    it('exits 1 on a mistyped flag instead of silently printing human text', async () => {
+    // A bad flag now routes through failWithUsage, so the non-JSON path
+    // prints the usage block, not bare/generic prose — mirroring
+    // get.ts/export.ts/records.ts/events.ts (issue #218, #208).
+    it('exits 1 with the usage block on a mistyped flag instead of silently printing human text', async () => {
       const { checkConfig } = await import('@/libs/config.js');
       const { fetchSources } = await import('@/libs/sources.js');
       const { runSourcesCommand } = await import('@/commands/sources.js');
@@ -418,6 +421,9 @@ describe('runSourcesCommand', () => {
 
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
       expect(process.exitCode).toBe(1);
     });
 
@@ -1920,6 +1926,43 @@ describe('runSourcesCommand', () => {
       );
       expect(parsed.error).toBe('fetch_failed');
       expect(parsed.message).toContain('boom');
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A bad flag is a usage error, not a fetch failure — it must report the
+    // documented `usage` code, never `fetch_failed` (issue #218, mirroring
+    // #208's fix elsewhere). The whole-command `parseArgs` call used to share
+    // the handler dispatch's outer catch, which miscoded it.
+    it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--bogus', '--json']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('bogus');
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A third positional (`uuid` is the only one any subcommand takes) is
+    // likewise a usage error, not silently discarded or miscoded as
+    // fetch_failed.
+    it('emits a usage-coded JSON error, not fetch_failed, for a stray positional', async () => {
+      const { testSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', 'extra', '--json']);
+
+      expect(testSource).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('extra');
       expect(process.exitCode).toBe(1);
     });
   });

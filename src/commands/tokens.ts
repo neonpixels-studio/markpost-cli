@@ -4,7 +4,7 @@ import { confirm } from '@inquirer/prompts';
 import { createToken, fetchTokens, revokeToken } from '@/libs/tokens.js';
 import { checkConfig } from '@/libs/config.js';
 import { getApiToken } from '@/libs/api.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
 import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
@@ -115,7 +115,17 @@ const listTokensCommand = async (
   rest: string[],
   json: boolean,
 ): Promise<void> => {
-  parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+  // A bad flag/stray positional here is a usage error, not a fetch
+  // failure — caught locally (rather than left to propagate to the runner's
+  // outer catch, which would miscode it as `fetch_failed`) and reported via
+  // the `usage` JSON code instead (issue #218, mirroring #208's fix to
+  // get.ts/export.ts/records.ts/events.ts).
+  try {
+    parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+    return;
+  }
 
   const tokens = await fetchTokens();
 
@@ -158,13 +168,27 @@ const resolveExpiresInDays = (
 };
 
 const createTokenCommand = async (rest: string[]): Promise<void> => {
-  const { values } = parseArgs({
-    args: rest,
-    options: {
-      name: { type: 'string' },
-      'expires-in-days': { type: 'string' },
-    },
-  });
+  // A bad flag/stray positional here is a usage error, not a fetch
+  // failure — caught locally (rather than left to propagate to the runner's
+  // outer catch, which would miscode it as `fetch_failed`) and reported via
+  // the `usage` JSON code instead (issue #218, mirroring #208's fix to
+  // get.ts/export.ts/records.ts/events.ts). `--json` is already rejected for
+  // `create` by `usageErrorFor` before this runs, so `failWithUsage` below is
+  // always called with its default (non-JSON) contract.
+  let values: { name?: string; 'expires-in-days'?: string };
+
+  try {
+    ({ values } = parseArgs({
+      args: rest,
+      options: {
+        name: { type: 'string' },
+        'expires-in-days': { type: 'string' },
+      },
+    }));
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE);
+    return;
+  }
 
   if (!values.name) {
     failWithUsage('`tokens create` requires --name <name>.', USAGE);
@@ -325,12 +349,25 @@ const revokeTokenCommand = async (
   // rather than silently dropped (a script revoking two ids would
   // otherwise see only the first one actually revoked and still exit 0).
   // `--yes` is declared so it's consumed as a flag rather than mis-parsed as
-  // the id; the runner already read it from argv into `skipConfirm`.
-  const { positionals } = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: { yes: { type: 'boolean' } },
-  });
+  // the id; the runner already read it from argv into `skipConfirm`. An
+  // unknown flag here is a usage error, not a fetch failure — caught locally
+  // (rather than left to propagate to the runner's outer catch, which would
+  // miscode it as `fetch_failed`) and reported via the `usage` JSON code
+  // instead (issue #218, mirroring #208's fix to
+  // get.ts/export.ts/records.ts/events.ts).
+  let positionals: string[];
+
+  try {
+    ({ positionals } = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      options: { yes: { type: 'boolean' } },
+    }));
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE);
+    return;
+  }
+
   const [id, ...extraPositionals] = positionals;
 
   if (!id || extraPositionals.length > 0) {
