@@ -3,7 +3,9 @@ import chalk from 'chalk';
 import {
   ERROR_STATUS,
   fetchAllRecords,
+  PENDING_STATUS,
   RecordListFilters,
+  updateRecord,
 } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
@@ -17,15 +19,25 @@ import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
-export const USAGE = `Usage: markpost records list [options]
+const LIST_SUBCOMMAND = 'list';
+const UPDATE_SUBCOMMAND = 'update';
 
-  list  List records, optionally filtered by source, status, or search text
+export const USAGE = `Usage: markpost records <list|update> [options]
 
-Options:
+  list           List records, optionally filtered by source, status, or search text
+  update <uuid>  Edit an existing record's title and/or content — requeues it to
+                 pending (for resync) if the record was already synced
+
+List options:
   --source <type>    Filter by source type (markpost reports the valid types if the value is rejected)
   --status <status>  Filter by record status (synced, pending, or error)
   --search <text>    Filter by text in the title or content
-  --json             Print the records as JSON instead of formatted text`;
+  --json             Print the records as JSON instead of formatted text
+
+Update options:
+  --title <text>    New title for the record
+  --content <text>  New content for the record
+  --json            Print the updated record as JSON instead of formatted text`;
 
 export const runRecordsCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
@@ -33,9 +45,14 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
   const json = hasJsonFlag(args);
   const [subcommand] = args;
 
+  if (subcommand === UPDATE_SUBCOMMAND) {
+    await runUpdateCommand(args, json);
+    return;
+  }
+
   // Validate before the config check so a bad subcommand fails on usage alone,
   // without needing a configured account.
-  if (subcommand !== 'list') {
+  if (subcommand !== LIST_SUBCOMMAND) {
     failWithSubcommandUsage(subcommand, USAGE, json);
     return;
   }
@@ -209,4 +226,159 @@ const listRecords = async (
   }
 
   records.forEach(printRecord);
+};
+
+type UpdateRecordArgs = {
+  uuid: string;
+  title?: string;
+  content?: string;
+};
+
+// Collapses a flag's parsed occurrences (an array under `multiple: true`,
+// mirroring normalizeFilter above) into a single value — rejecting a flag
+// passed more than once (ambiguous) and a present-but-empty value (almost
+// certainly a typo, e.g. `--title=` when a shell variable expanded empty).
+// Unlike normalizeFilter, this returns `undefined` when the flag was never
+// given at all — parseUpdateArgs needs to tell "omitted" (the field is left
+// untouched by the PATCH) apart from "given", which a flag's mere absence vs.
+// an empty string can't express on its own.
+const extractUpdateFlag = (
+  flag: string,
+  occurrences: string[] | undefined,
+): string | undefined => {
+  if (occurrences === undefined) {
+    return undefined;
+  }
+
+  if (occurrences.length > 1) {
+    throw new Error(`--${flag} was given more than once. Pass it only once.`);
+  }
+
+  const value = occurrences[0];
+
+  if (value.trim().length === 0) {
+    throw new Error(`--${flag} needs a non-empty value.`);
+  }
+
+  return value;
+};
+
+// `parseArgs` handles both `--title foo` and `--title=foo`, and throws on an
+// unknown flag or a missing value, which the update usage catch surfaces to
+// the user. positionals[0] is the `update` subcommand itself (mirroring
+// parseListArgs' identical `list` handling); positionals[1] is the uuid, and
+// anything past it is a stray argument.
+const parseUpdateArgs = (args: string[]): UpdateRecordArgs => {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      title: { type: 'string', multiple: true },
+      content: { type: 'string', multiple: true },
+      json: { type: 'boolean' },
+    },
+  });
+
+  const [, uuid, ...extraPositionals] = positionals;
+
+  if (!uuid) {
+    throw new Error(
+      'No uuid given. Usage: markpost records update <uuid> [--title <text>] [--content <text>]',
+    );
+  }
+
+  if (extraPositionals.length > 0) {
+    throw new Error(`Unexpected argument "${extraPositionals[0]}".`);
+  }
+
+  const title = extractUpdateFlag('title', values.title);
+  const content = extractUpdateFlag('content', values.content);
+
+  // Neither flag given is a no-op request that would otherwise reach the
+  // server as an empty attributes object and be rejected there (see
+  // markpost's emptyUpdateError) — fail loud here instead, before a network
+  // round trip.
+  if (title === undefined && content === undefined) {
+    throw new Error('Nothing to update: pass --title and/or --content.');
+  }
+
+  return { uuid, title, content };
+};
+
+// Applies the edit and reports the result: the updated record (pretty or
+// --json), plus an explicit confirmation when the server's response shows the
+// record is now `pending` — the resync-requeue behavior markpost's PATCH
+// endpoint performs when an already-synced record's title/content changes
+// (markpost#306). A record that was already pending/error before the edit
+// also reads `pending`/`error` here, so this reports the record's current
+// state honestly rather than claiming a transition that may not have
+// happened.
+const updateRecordAndReport = async (
+  { uuid, title, content }: UpdateRecordArgs,
+  json: boolean,
+): Promise<void> => {
+  const updated = await updateRecord(uuid, { title, content });
+
+  if (!updated) {
+    failWithMessage(
+      `Failed to update record "${sanitizeForTerminal(uuid)}".`,
+      json,
+    );
+    return;
+  }
+
+  if (json) {
+    printJson(updated);
+    return;
+  }
+
+  console.log(
+    chalk.greenBright(
+      sanitizeForTerminal(`Updated "${updated.title}" (${updated.uuid})`),
+    ),
+  );
+
+  if (updated.status === PENDING_STATUS) {
+    console.log(
+      chalk.yellow(
+        'Record is pending — it will be re-synced to disk on the next sync run.',
+      ),
+    );
+  }
+
+  printRecord(updated);
+};
+
+// `update <uuid>` edits an existing record's title/content via markpost's
+// single-record PATCH /api/records/{uuid} — the CLI's only write path for a
+// record that already exists (until now the only way to change a record was
+// delete-and-recreate, which loses the uuid and any source linkage).
+const runUpdateCommand = async (
+  args: string[],
+  json: boolean,
+): Promise<void> => {
+  // Parse in its own try/catch, before the config check, so a bad flag or a
+  // missing uuid fails on usage alone — mirrors runRecordsCommand's list path.
+  let updateArgs: UpdateRecordArgs;
+
+  try {
+    updateArgs = parseUpdateArgs(args);
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+    return;
+  }
+
+  try {
+    if (!(await checkConfig(json))) {
+      return;
+    }
+
+    await updateRecordAndReport(updateArgs, json);
+  } catch (error) {
+    // A systemic auth/5xx failure re-throws from updateRecord: surface its
+    // classified, actionable message with a non-zero exit rather than the
+    // generic "Failed to update record" a null return produces. Sanitize —
+    // the message can be server-derived.
+    failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
+  }
 };

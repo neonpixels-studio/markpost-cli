@@ -11,16 +11,23 @@ vi.mock('@/libs/records.js', async () => {
   // while keeping every other export undefined, so a command that starts
   // calling an unmocked function still fails loudly here instead of quietly
   // running the real implementation.
-  const { ERROR_STATUS } =
+  const { ERROR_STATUS, PENDING_STATUS } =
     await vi.importActual<typeof import('@/libs/records.js')>(
       '@/libs/records.js',
     );
 
-  return { ERROR_STATUS, fetchAllRecords: vi.fn(), deleteRecords: vi.fn() };
+  return {
+    ERROR_STATUS,
+    PENDING_STATUS,
+    fetchAllRecords: vi.fn(),
+    deleteRecords: vi.fn(),
+    updateRecord: vi.fn(),
+  };
 });
 vi.mock('chalk', () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
+    greenBright: vi.fn((value: unknown) => value),
     bold: vi.fn((value: unknown) => value),
     yellow: vi.fn((value: unknown) => value),
   },
@@ -803,6 +810,253 @@ describe('runRecordsCommand', () => {
         expect.stringContaining('the read failed partway through'),
       );
       expect(process.exitCode).toBe(1);
+    });
+  });
+
+  describe('update', () => {
+    const updatedRecord: Record = {
+      ...firstRecord,
+      title: 'Updated Title',
+      status: 'pending',
+      syncedAt: null,
+    };
+
+    it('errors with usage and never calls updateRecord when no uuid is given', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('No uuid given.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('errors with usage and never calls updateRecord when neither --title nor --content is given', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Nothing to update: pass --title and/or --content.',
+        ),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a present-but-empty --title instead of sending a blank update', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', '  ']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--title needs a non-empty value.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --title passed more than once', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--title',
+        'One',
+        '--title',
+        'Two',
+      ]);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '--title was given more than once. Pass it only once.',
+        ),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a stray extra positional argument', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        'extra',
+        '--title',
+        'New Title',
+      ]);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Unexpected argument "extra"'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('calls updateRecord with only the given attributes', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
+        title: 'Updated Title',
+        content: undefined,
+      });
+    });
+
+    it('passes both --title and --content through together', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--title',
+        'Updated Title',
+        '--content',
+        'New content',
+      ]);
+
+      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
+        title: 'Updated Title',
+        content: 'New content',
+      });
+    });
+
+    it('prints a success line and the updated record', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Updated "Updated Title"'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Updated Title'),
+      );
+      expect(process.exitCode).not.toBe(1);
+    });
+
+    // Surfaces the resync-requeue behavior (markpost#306): a record that came
+    // back `pending` after the edit gets an explicit confirmation line so the
+    // user knows it will be re-synced to disk.
+    it('confirms the resync requeue when the updated record is pending', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Record is pending — it will be re-synced to disk on the next sync run.',
+        ),
+      );
+    });
+
+    // A record whose status stays `synced` (e.g. off-contract response) must
+    // not falsely claim a resync.
+    it('does not print the resync confirmation for a record that stays synced', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue({
+        ...firstRecord,
+        status: 'synced',
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('re-synced to disk'),
+      );
+    });
+
+    it('prints the updated record as JSON with --json', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--title',
+        'Updated Title',
+        '--json',
+      ]);
+
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toMatchObject({
+        uuid: updatedRecord.uuid,
+        title: 'Updated Title',
+        status: 'pending',
+      });
+    });
+
+    it('fails loud with a non-zero exit when updateRecord returns null', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(null);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to update record "abc-123".'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('surfaces a systemic auth failure with a classified message and non-zero exit', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(updateRecord).mockRejectedValue(
+        new ApiRequestError('Invalid or missing API token', 401),
+      );
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Authentication failed (HTTP 401)'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('checks config before calling updateRecord', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(checkConfig).toHaveBeenCalledWith(false);
+    });
+
+    it('never calls updateRecord when checkConfig resolves false', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      vi.mocked(checkConfig).mockResolvedValueOnce(false);
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
     });
   });
 

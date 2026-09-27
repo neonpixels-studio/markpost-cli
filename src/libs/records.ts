@@ -819,6 +819,59 @@ export const fetchRecord = async (uuid: string): Promise<Record | null> => {
   }
 };
 
+// The attributes `markpost records update` may edit via the single-record
+// PATCH /api/records/{uuid} (server/api/records/[uuid].patch.ts): title and/or
+// content. `syncedAt` is deliberately never part of this type — the endpoint
+// rejects a client-supplied value with a 422 (mirroring the bulk endpoint's
+// own contract, see buildBulkRecordPayload above) and stamps it itself.
+export type UpdateRecordAttributes = {
+  title?: string;
+  content?: string;
+};
+
+// Edits an existing record's title/content. When the record was already
+// `synced`, the server requeues it to `pending` (and clears `syncedAt`) so the
+// next sync run rewrites the on-disk file with the new title/content
+// (markpost#306) — the returned record's `status` reflects that, which the
+// `records update` command reads to confirm the resync to the user.
+export const updateRecord = async (
+  uuid: string,
+  attributes: UpdateRecordAttributes,
+): Promise<Record | null> => {
+  try {
+    const body = (await authedRequest(
+      `/api/records/${encodeURIComponent(uuid)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+        },
+        body: JSON.stringify({
+          data: {
+            type: 'records',
+            attributes,
+          },
+        }),
+      },
+    )) as RecordApiResponse;
+
+    return unwrapResourceAttributes(body);
+  } catch (error) {
+    // Mirrors fetchRecord: a systemic auth/5xx failure is re-thrown so the
+    // command reports the real, classified cause rather than the generic
+    // "Failed to update record" a null return produces. A per-record 4xx
+    // (e.g. a 404 for a uuid that doesn't exist, or a 422 for an invalid
+    // title/content) stays non-systemic and returns null.
+    if (isSystemicApiFailure(error)) {
+      throw error;
+    }
+
+    logApiFailure(`updateRecord["${uuid}"]`, error);
+
+    return null;
+  }
+};
+
 // markpost's bulk delete handler (server/api/records/index.delete.ts) caps
 // each DELETE /api/records request at this many uuids (`MAX_DELETE_BATCH_SIZE`
 // in shared/utils/records.ts, which DELETE and PATCH currently share); a
