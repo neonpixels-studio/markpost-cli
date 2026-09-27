@@ -135,24 +135,20 @@ const interactiveGuardMessageFor = (
   return null;
 };
 
-// `--payload` arrives as a raw JSON string on argv; `testSource`'s contract
-// (`SourceTestInput.payload`) wants a parsed plain object, not text, an array,
-// or another primitive, so this is the one place that bridges the flag to the
-// API shape. Throws rather than returning null/undefined — `parsePayloadFlag`
-// below is the single place that catches it, so every caller gets the same
-// validation without re-deriving it.
+// Bridges --payload (a raw argv string) to `SourceTestInput.payload` (a
+// parsed plain object). `JSON.parse`'s own error message can quote back
+// characters from the input it rejected (e.g. an unexpected token), so it is
+// sanitized here — the same untrusted-terminal-output risk `sanitizeForTerminal`
+// guards everywhere else in this file, just sourced from argv instead of an
+// API response.
 const parseTestPayload = (raw: string): Record<string, unknown> => {
   let parsed: unknown;
 
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    // Report JSON.parse's own reason (e.g. "Unexpected token o in JSON at
-    // position 1") rather than echoing `raw` back — that's more actionable
-    // than repeating text the user just typed, and it means this message
-    // never has to carry (and sanitize) untrusted flag content.
     throw new Error(
-      `--payload must be valid JSON: ${messageFromError(error)}`,
+      `--payload must be valid JSON: ${sanitizeForTerminal(messageFromError(error))}`,
       { cause: error },
     );
   }
@@ -166,12 +162,9 @@ const parseTestPayload = (raw: string): Record<string, unknown> => {
   return parsed as Record<string, unknown>;
 };
 
-// Parses --payload exactly once, up front: a malformed value becomes a usage
-// error string (for `usageErrorFor` to surface) and a valid one becomes the
-// object `testSourceCommand` sends to `testSource` — no second parse, and no
-// "this can't throw, I promise" comment papering over a call that could.
-// Absent flag is the common case (every subcommand but `test` in practice),
-// so it's the guard clause rather than a branch of the try.
+// Parses --payload exactly once, up front, so both `usageErrorFor` (the
+// message) and `testSourceCommand` (the value) read the same result instead
+// of re-parsing.
 const parsePayloadFlag = (
   payloadFlag: string | undefined,
 ): { payload?: Record<string, unknown>; error?: string } => {
@@ -227,9 +220,10 @@ const usageErrorFor = (
   }
 
   // `payloadError` is already the fully-formed message from `parsePayloadFlag`
-  // (called once, before this function runs) — fail on it directly rather
-  // than re-parsing --payload here too.
-  if (payloadError) {
+  // — fail on it directly rather than re-parsing --payload here too. Checked
+  // against `undefined`, not truthiness, so an (unexpected) empty-string
+  // message still fails loud instead of silently passing validation.
+  if (payloadError !== undefined) {
     return payloadError;
   }
 

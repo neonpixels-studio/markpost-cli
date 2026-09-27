@@ -2030,6 +2030,46 @@ describe('runSourcesCommand', () => {
         expect(testSource).not.toHaveBeenCalled();
         expect(process.exitCode).toBe(1);
       });
+
+      // V8's JSON.parse error can quote back part of the rejected input (e.g.
+      // "Unexpected token '<char>', ... is not valid JSON"), so a --payload
+      // carrying a control/ANSI byte must not reach the terminal through that
+      // quoted fragment — same threat sanitizeForTerminal guards against for
+      // every other untrusted field in this file.
+      it('strips control characters from the JSON.parse error before printing it', async () => {
+        const control = String.fromCharCode(0x1b);
+        const { testSource } = await import('@/libs/sources.js');
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand([
+          'test',
+          'abc-123',
+          '--payload',
+          `${control}[31mnot json`,
+        ]);
+
+        expect(testSource).not.toHaveBeenCalled();
+        expect(loggedText()).not.toContain(control);
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining('--payload must be valid JSON'),
+        );
+        expect(process.exitCode).toBe(1);
+      });
+
+      // `--payload` is a `parseArgs` string option, so a value-less
+      // invocation (`--payload` as the last token) throws from `parseArgs`
+      // itself, before `usageErrorFor` ever runs — same as today's behavior
+      // for any other malformed flag on this command (e.g. an unknown
+      // option), which this pins down rather than assuming.
+      it('fails loud when --payload is given with no value', async () => {
+        const { testSource } = await import('@/libs/sources.js');
+        const { runSourcesCommand } = await import('@/commands/sources.js');
+
+        await runSourcesCommand(['test', 'abc-123', '--payload']);
+
+        expect(testSource).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      });
     });
   });
 
