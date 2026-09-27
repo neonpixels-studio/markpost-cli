@@ -235,6 +235,17 @@ type UpdateRecordArgs = {
   content?: string;
 };
 
+// Rejects the pathological uuid values that would make updateRecord's request
+// URL resolve to a DIFFERENT markpost endpoint than the single-record one this
+// command is built for: `.` and `..` are dot-segments a URL parser collapses
+// away during resolution (`/api/records/..` normalizes to `/api/`, not the
+// literal path), and a uuid containing `/` would inject an extra path
+// segment. `encodeURIComponent` (used when the request is built) doesn't stop
+// either case — it leaves a bare `.` untouched, and the collapse happens
+// during URL resolution, before the request ever reaches the server.
+const isPathUnsafeUuid = (uuid: string): boolean =>
+  uuid === '.' || uuid === '..' || uuid.includes('/');
+
 // Collapses a flag's parsed occurrences (an array under `multiple: true`,
 // mirroring normalizeFilter above) into a single value — rejecting a flag
 // passed more than once (ambiguous) and a present-but-empty value (almost
@@ -286,6 +297,10 @@ const parseUpdateArgs = (args: string[]): UpdateRecordArgs => {
     throw new Error(
       'No uuid given. Usage: markpost records update <uuid> [--title <text>] [--content <text>]',
     );
+  }
+
+  if (isPathUnsafeUuid(uuid)) {
+    throw new Error(`"${uuid}" is not a valid record uuid.`);
   }
 
   if (extraPositionals.length > 0) {

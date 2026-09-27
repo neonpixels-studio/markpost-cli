@@ -942,19 +942,36 @@ describe('runRecordsCommand', () => {
       const { updateRecord } = await import('@/libs/records.js');
       const { runRecordsCommand } = await import('@/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--status',
-        'synced',
-      ]);
+      // `--bogus` (not `--status`) so the assertion below can't be satisfied
+      // by the USAGE block's own list-options text, which mentions "status".
+      await runRecordsCommand(['update', 'abc-123', '--bogus', 'value']);
 
       expect(updateRecord).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('status'),
+        expect.stringContaining('bogus'),
       );
       expect(process.exitCode).toBe(1);
     });
+
+    // A uuid of `.`/`..` would make the request URL a URL parser collapses to
+    // a DIFFERENT markpost endpoint (the bulk PATCH, or the API root) than the
+    // single-record one this command targets — reject it before ever calling
+    // updateRecord (see isPathUnsafeUuid).
+    it.each(['.', '..', 'abc/123'])(
+      'rejects a path-unsafe uuid %j instead of sending the request',
+      async (unsafeUuid) => {
+        const { updateRecord } = await import('@/libs/records.js');
+        const { runRecordsCommand } = await import('@/commands/records.js');
+
+        await runRecordsCommand(['update', unsafeUuid, '--title', 'X']);
+
+        expect(updateRecord).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining('is not a valid record uuid'),
+        );
+        expect(process.exitCode).toBe(1);
+      },
+    );
 
     it('calls updateRecord with only the given attributes', async () => {
       const { updateRecord } = await import('@/libs/records.js');
