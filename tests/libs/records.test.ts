@@ -13,6 +13,7 @@ import {
   MARK_TIMED_OUT,
   MAX_DELETE_BATCH_SIZE,
   MAX_MARK_SYNCED_BATCH_SIZE,
+  updateRecord,
 } from '@/libs/records.js';
 import { ApiTimeoutError } from '@/libs/api.js';
 import { ApiDeleteMeta } from '@/types/api.types.js';
@@ -1165,6 +1166,105 @@ describe('fetchRecord', () => {
       },
     });
     expect(await fetchRecord('abc-123')).toEqual(mockRecord);
+  });
+});
+
+describe('updateRecord', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('PATCHes the correct UUID with the given attributes', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    await updateRecord('abc-123', { title: 'New Title' });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records/abc-123',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: {
+          Authorization: 'Bearer test-token',
+          'Content-Type': 'application/vnd.api+json',
+        },
+        body: JSON.stringify({
+          data: { type: 'records', attributes: { title: 'New Title' } },
+        }),
+      }),
+    );
+  });
+
+  it('returns the updated record attributes on success', async () => {
+    mockFetch({ data: { attributes: mockRecord } });
+    expect(
+      await updateRecord('abc-123', { title: 'Test Title' }),
+    ).toEqual(mockRecord);
+  });
+
+  it('returns null when the response contains errors', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [{ title: 'Invalid Attribute', detail: 'Title cannot be empty' }],
+        },
+      },
+      false,
+    );
+    expect(await updateRecord('abc-123', { title: '' })).toBeNull();
+  });
+
+  it('returns null on network failure', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+  });
+
+  // A systemic auth (401) failure is not a per-record validation failure —
+  // updateRecord re-throws it (like fetchRecord/createRecord) so the command
+  // reports the real cause with a non-zero exit, distinct from the null a
+  // genuine 4xx returns (mirrors issue #89's fix on the read path).
+  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({ data: { errors: [] } }),
+    });
+
+    await expect(
+      updateRecord('abc-123', { title: 'New Title' }),
+    ).rejects.toMatchObject({
+      statusCode: 401,
+      isSystemic: true,
+    });
+  });
+
+  // A genuine 404 (record not found) is NOT systemic: it stays a null return
+  // so the command reports "Failed to update record", not an auth error.
+  it('returns null for a non-systemic 404 (record not found)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: () =>
+        Promise.resolve({
+          errors: [{ title: 'Not Found', detail: 'No record was found' }],
+        }),
+    });
+
+    expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+  });
+
+  // The record's status/syncedAt after an edit reflect the server's resync
+  // requeue (markpost#306): an edited, previously-synced record comes back
+  // `pending` with `syncedAt: null`, which the `records update` command reads
+  // to confirm the resync to the user.
+  it('surfaces the requeued pending status on the returned record', async () => {
+    const requeuedRecord: Record = {
+      ...mockRecord,
+      status: 'pending',
+      syncedAt: null,
+    };
+    mockFetch({ data: { attributes: requeuedRecord } });
+
+    const result = await updateRecord('abc-123', { title: 'New Title' });
+
+    expect(result).toMatchObject({ status: 'pending', syncedAt: null });
   });
 });
 
