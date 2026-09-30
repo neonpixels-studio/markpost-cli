@@ -10,7 +10,7 @@ import {
   updateSource,
 } from '@/libs/sources.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
 import {
   failWithSubcommandUsage,
@@ -49,7 +49,7 @@ export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-
   update [uuid]         Update a source's route folder and/or field mapping; prompts to pick one if uuid is omitted
   delete [uuid]         Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
   rotate-secret [uuid]  Rotate a provider source's signing secret; prompts to pick one if uuid is omitted
-  test <uuid>           Preview signature verification and field mapping for a source against a sample payload, without a real delivery (pass --json for machine-readable output)`;
+  test <uuid>           Preview signature verification and field mapping for a source against a sample payload, without a real delivery (pass --json for machine-readable output, --payload '<json object>' to test against a custom sample instead of the server's default)`;
 
 export const buildEndpointUrl = (
   sourceType: SourceType,
@@ -95,6 +95,7 @@ const SOURCES_HANDLERS = new Map<
     uuid: string | undefined,
     json: boolean,
     skipConfirm: boolean,
+    payload: Record<string, unknown> | undefined,
   ) => Promise<void>
 >([
   [LIST_SUBCOMMAND, (_uuid, json) => listSources(json)],
@@ -105,7 +106,11 @@ const SOURCES_HANDLERS = new Map<
     (uuid, _json, skipConfirm) => deleteSourceCommand(uuid, skipConfirm),
   ],
   [ROTATE_SECRET_SUBCOMMAND, (uuid) => rotateSecretCommand(uuid)],
-  [TEST_SUBCOMMAND, (uuid, json) => testSourceCommand(uuid, json)],
+  [
+    TEST_SUBCOMMAND,
+    (uuid, json, _skipConfirm, payload) =>
+      testSourceCommand(uuid, json, payload),
+  ],
 ]);
 
 // The message for the subcommand (if any) that can't complete without an
@@ -145,6 +150,50 @@ const interactiveGuardMessageFor = (
   return null;
 };
 
+// Bridges --payload (a raw argv string) to `SourceTestInput.payload` (a
+// parsed plain object). `JSON.parse`'s own error message can quote back
+// characters from the input it rejected (e.g. an unexpected token), so it is
+// sanitized here — the same untrusted-terminal-output risk `sanitizeForTerminal`
+// guards everywhere else in this file, just sourced from argv instead of an
+// API response.
+const parseTestPayload = (raw: string): Record<string, unknown> => {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `--payload must be valid JSON: ${sanitizeForTerminal(messageFromError(error))}`,
+      { cause: error },
+    );
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `--payload must be a JSON object, e.g. --payload '{"foo":"bar"}'.`,
+    );
+  }
+
+  return parsed as Record<string, unknown>;
+};
+
+// Parses --payload exactly once, up front, so both `usageErrorFor` (the
+// message) and `testSourceCommand` (the value) read the same result instead
+// of re-parsing.
+const parsePayloadFlag = (
+  payloadFlag: string | undefined,
+): { payload?: Record<string, unknown>; error?: string } => {
+  if (payloadFlag === undefined) {
+    return {};
+  }
+
+  try {
+    return { payload: parseTestPayload(payloadFlag) };
+  } catch (error) {
+    return { error: messageFromError(error) };
+  }
+};
+
 // The invocation-level usage checks that all fail the same way (one usage
 // message, non-zero exit). Returns the message to show, or null when the
 // invocation is valid. Kept in one place so their ordering is a single unit
@@ -155,7 +204,13 @@ const usageErrorFor = (
   json: boolean,
   skipConfirm: boolean,
   isInteractive: boolean,
+  // Bundled into one object (rather than two adjacent `string | undefined`
+  // positional args) so the two can't be silently swapped at the call site —
+  // that would type-check either way and let a malformed --payload pass
+  // validation.
+  payloadInput: { flag: string | undefined; error: string | undefined },
 ): string | null => {
+  const { flag: payloadFlag, error: payloadError } = payloadInput;
   // Reject --json where it does nothing rather than silently ignoring it:
   // `sources create --json | jq` would otherwise "succeed" with human text on
   // stdout, losing the one-time signing secret it was trying to capture.
@@ -191,6 +246,21 @@ const usageErrorFor = (
     return `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\`.`;
   }
 
+  // --payload only makes sense for `test` (it's the sample the field mapping
+  // is previewed against); reject it elsewhere for the same reason --yes is
+  // rejected outside `delete`.
+  if (payloadFlag !== undefined && subcommand !== TEST_SUBCOMMAND) {
+    return `--payload is only supported by \`sources ${TEST_SUBCOMMAND}\`.`;
+  }
+
+  // `payloadError` is already the fully-formed message from `parsePayloadFlag`
+  // — fail on it directly rather than re-parsing --payload here too. Checked
+  // against `undefined`, not truthiness, so an (unexpected) empty-string
+  // message still fails loud instead of silently passing validation.
+  if (payloadError !== undefined) {
+    return payloadError;
+  }
+
   // --yes promises a non-interactive delete, so it needs an explicit uuid —
   // without one the picker still opens and a script blocks on it forever.
   if (skipConfirm && !uuid) {
@@ -217,6 +287,7 @@ const parseSourcesArgs = (
   subcommand: string | undefined;
   uuid: string | undefined;
   skipConfirm: boolean;
+  payloadFlag: string | undefined;
 } => {
   const { positionals, values } = parseArgs({
     args,
@@ -224,6 +295,7 @@ const parseSourcesArgs = (
     options: {
       json: { type: 'boolean' },
       yes: { type: 'boolean' },
+      payload: { type: 'string' },
     },
   });
 
@@ -233,7 +305,12 @@ const parseSourcesArgs = (
 
   const [subcommand, uuid] = positionals;
 
-  return { subcommand, uuid, skipConfirm: Boolean(values.yes) };
+  return {
+    subcommand,
+    uuid,
+    skipConfirm: Boolean(values.yes),
+    payloadFlag: values.payload,
+  };
 };
 
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
@@ -253,7 +330,10 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
-  const { subcommand, uuid, skipConfirm } = parsed;
+  const { subcommand, uuid, skipConfirm, payloadFlag } = parsed;
+  // Parsed exactly once, ahead of both the usage check and the handler call —
+  // see `parsePayloadFlag`.
+  const { payload, error: payloadError } = parsePayloadFlag(payloadFlag);
   // `subcommand` is `undefined` for a bare `sources` invocation (no
   // positionals at all) — `Map.get` needs a `string` key, and no subcommand
   // is ever named the empty string, so it's a safe stand-in that still misses
@@ -279,6 +359,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     json,
     skipConfirm,
     isInteractive,
+    { flag: payloadFlag, error: payloadError },
   );
 
   if (usageError) {
@@ -291,7 +372,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    await handler(uuid, json, skipConfirm);
+    await handler(uuid, json, skipConfirm, payload);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
     // that's a user abort, not a command failure, so don't flag it non-zero.
@@ -925,6 +1006,7 @@ const printTestResult = (result: SourceTestResult): void => {
 const testSourceCommand = async (
   uuid: string | undefined,
   json: boolean,
+  payload: Record<string, unknown> | undefined,
 ): Promise<void> => {
   // usageErrorFor already rejects a missing uuid before any handler runs; this
   // guard keeps the type honest and fails loud rather than silently if that
@@ -934,7 +1016,14 @@ const testSourceCommand = async (
     return;
   }
 
-  const result = await testSource(uuid);
+  // Omit the second argument entirely when --payload wasn't given (rather
+  // than passing `{}`), matching `SourceTestInput`'s contract: the server
+  // falls back to its own default sample only when `payload` is absent, not
+  // merely falsy.
+  const result =
+    payload !== undefined
+      ? await testSource(uuid, { payload })
+      : await testSource(uuid);
 
   if (!result) {
     failWithMessage('Failed to test source.', json);
