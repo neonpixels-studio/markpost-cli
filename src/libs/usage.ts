@@ -1,5 +1,7 @@
 import chalk from 'chalk';
+import { messageFromError } from '@/libs/errors.js';
 import { JSON_ERROR_USAGE, printJsonError } from '@/libs/output.js';
+import { sanitizeForTerminal } from '@/libs/terminal.js';
 
 // A missing or unknown subcommand (or required argument) is a usage error, not
 // a no-op. Print the offending detail plus the command's usage to stderr and
@@ -39,4 +41,27 @@ export const failWithSubcommandUsage = (
     ? `Unknown subcommand: ${subcommand}`
     : 'No subcommand given.';
   failWithUsage(message, usage, json);
+};
+
+// Runs `parse` (a thunk, so the call itself — not just the catch — stays
+// inside this function's own try) and treats a throw as a usage mistake, not
+// a fetch failure: sources.ts and tokens.ts's `list`/`create`/`revoke` each
+// parse their own flags/positionals before checkConfig and the fetch, and a
+// bad flag or stray positional must report the `usage` JSON code (issue
+// #218), not whatever the caller's own catch would otherwise miscode it as.
+// Sanitizes the message — a thrown value can't be trusted not to carry a
+// terminal escape, same as every API-error path. Returns `null` on failure
+// (already reported) so the caller's guard clause reads as
+// `if (!parsed) { return; }` rather than a second try/catch of its own.
+export const parseOrFailWithUsage = <ParsedArgs extends object>(
+  parse: () => ParsedArgs,
+  usage: string,
+  json = false,
+): ParsedArgs | null => {
+  try {
+    return parse();
+  } catch (error) {
+    failWithUsage(sanitizeForTerminal(messageFromError(error)), usage, json);
+    return null;
+  }
 };

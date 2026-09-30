@@ -12,7 +12,11 @@ import {
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
+import {
+  failWithSubcommandUsage,
+  failWithUsage,
+  parseOrFailWithUsage,
+} from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import {
   isManualSecretProvider,
@@ -75,6 +79,12 @@ const TEST_SUBCOMMAND = 'test';
 // emits a one-off human result, so --json is rejected for them (see usageErrorFor).
 const JSON_SUBCOMMANDS = new Set([LIST_SUBCOMMAND, TEST_SUBCOMMAND]);
 
+// `list` acts on every source and `create` always prompts for its own
+// details, so neither handler reads the `uuid` positional at all (see
+// SOURCES_HANDLERS below) — a uuid-shaped argument given to either must fail
+// loudly (see usageErrorFor) rather than being silently accepted and ignored.
+const NO_UUID_SUBCOMMANDS = new Set([LIST_SUBCOMMAND, CREATE_SUBCOMMAND]);
+
 const SOURCES_HANDLERS = new Map<
   string,
   (
@@ -107,7 +117,7 @@ const SOURCES_HANDLERS = new Map<
 // manual-secret provider's password) is guarded separately inside
 // collectRotateInput, since the provider isn't known this early (see there).
 const interactiveGuardMessageFor = (
-  subcommand: string,
+  subcommand: string | undefined,
   uuid: string | undefined,
   skipConfirm: boolean,
 ): string | null => {
@@ -135,7 +145,7 @@ const interactiveGuardMessageFor = (
 // invocation is valid. Kept in one place so their ordering is a single unit
 // rather than four near-identical guard blocks in the runner.
 const usageErrorFor = (
-  subcommand: string,
+  subcommand: string | undefined,
   uuid: string | undefined,
   json: boolean,
   skipConfirm: boolean,
@@ -144,8 +154,23 @@ const usageErrorFor = (
   // Reject --json where it does nothing rather than silently ignoring it:
   // `sources create --json | jq` would otherwise "succeed" with human text on
   // stdout, losing the one-time signing secret it was trying to capture.
-  if (json && !JSON_SUBCOMMANDS.has(subcommand)) {
+  if (json && (subcommand === undefined || !JSON_SUBCOMMANDS.has(subcommand))) {
     return `--json is only supported by \`sources ${LIST_SUBCOMMAND}\` and \`sources ${TEST_SUBCOMMAND}\`.`;
+  }
+
+  // A stray positional past the subcommand itself, mistaken for a uuid —
+  // `list`/`create` never read one (issue #218: silently accepting and
+  // discarding it would be exactly the un-validated stray argument the
+  // parseSourcesArgs's own third-positional check exists to catch). The
+  // `subcommand !== undefined` half is only for the type checker: by the time
+  // this runs the caller has already rejected a missing subcommand, via the
+  // `!handler` guard.
+  if (
+    uuid !== undefined &&
+    subcommand !== undefined &&
+    NO_UUID_SUBCOMMANDS.has(subcommand)
+  ) {
+    return `\`sources ${subcommand}\` takes no arguments.`;
   }
 
   // `test` acts on exactly one source and never opens a picker, so it needs an
@@ -174,54 +199,89 @@ const usageErrorFor = (
   return null;
 };
 
+// `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
+// still prompts rather than trying to delete a source named "--json") and
+// throws on an unknown/mistyped flag, which the caller's `parseOrFailWithUsage`
+// surfaces as a `usage` error, not `fetch_failed` (issue #218, mirroring
+// #208's fix to get.ts/export.ts/records.ts/events.ts). A third positional —
+// `uuid` is the only one any subcommand takes — is likewise a stray argument
+// and must fail loudly rather than being silently discarded.
+const parseSourcesArgs = (
+  args: string[],
+): {
+  subcommand: string | undefined;
+  uuid: string | undefined;
+  skipConfirm: boolean;
+} => {
+  const { positionals, values } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      json: { type: 'boolean' },
+      yes: { type: 'boolean' },
+    },
+  });
+
+  if (positionals.length > 2) {
+    throw new Error(`Unexpected argument "${positionals[2]}".`);
+  }
+
+  const [subcommand, uuid] = positionals;
+
+  return { subcommand, uuid, skipConfirm: Boolean(values.yes) };
+};
+
 export const runSourcesCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
   // whichever contract the caller asked for, even one thrown before parsing.
   const json = hasJsonFlag(args);
 
+  // Parsed before the config check and the handler dispatch below (see
+  // parseSourcesArgs above for why a throw here is a usage error).
+  const parsed = parseOrFailWithUsage(
+    () => parseSourcesArgs(args),
+    USAGE,
+    json,
+  );
+
+  if (!parsed) {
+    return;
+  }
+
+  const { subcommand, uuid, skipConfirm } = parsed;
+  // `subcommand` is `undefined` for a bare `sources` invocation (no
+  // positionals at all) — `Map.get` needs a `string` key, and no subcommand
+  // is ever named the empty string, so it's a safe stand-in that still misses
+  // the lookup exactly like `undefined` would.
+  const handler = SOURCES_HANDLERS.get(subcommand ?? '');
+
+  // Validate before the config check so a bad subcommand fails on usage
+  // alone, without needing a configured account. The bad-subcommand case
+  // fails differently (it prints the subcommand), so it stays here; the rest
+  // share one usage-error shape and live in `usageErrorFor`.
+  if (!handler) {
+    failWithSubcommandUsage(subcommand, USAGE, json);
+    return;
+  }
+
+  // A prompt needs both streams to be a terminal: inquirer reads stdin and
+  // renders to stdout, so a redirect on either makes create/update/delete's
+  // prompts (and rotate-secret's picker) unanswerable.
+  const isInteractive = isInteractiveTerminal();
+  const usageError = usageErrorFor(
+    subcommand,
+    uuid,
+    json,
+    skipConfirm,
+    isInteractive,
+  );
+
+  if (usageError) {
+    failWithUsage(usageError, USAGE, json);
+    return;
+  }
+
   try {
-    // `parseArgs` keeps --json out of the uuid slot (so `sources delete --json`
-    // still prompts rather than trying to delete a source named "--json") and
-    // rejects an unknown/mistyped flag. Which subcommands act on `json` is
-    // decided by JSON_SUBCOMMANDS below.
-    const { positionals, values } = parseArgs({
-      args,
-      allowPositionals: true,
-      options: {
-        json: { type: 'boolean' },
-        yes: { type: 'boolean' },
-      },
-    });
-    const [subcommand, uuid] = positionals;
-    const skipConfirm = Boolean(values.yes);
-    const handler = SOURCES_HANDLERS.get(subcommand);
-
-    // Validate before the config check so a bad subcommand fails on usage
-    // alone, without needing a configured account. The bad-subcommand case
-    // fails differently (it prints the subcommand), so it stays here; the rest
-    // share one usage-error shape and live in `usageErrorFor`.
-    if (!handler) {
-      failWithSubcommandUsage(subcommand, USAGE, json);
-      return;
-    }
-
-    // A prompt needs both streams to be a terminal: inquirer reads stdin and
-    // renders to stdout, so a redirect on either makes create/update/delete's
-    // prompts (and rotate-secret's picker) unanswerable.
-    const isInteractive = isInteractiveTerminal();
-    const usageError = usageErrorFor(
-      subcommand,
-      uuid,
-      json,
-      skipConfirm,
-      isInteractive,
-    );
-
-    if (usageError) {
-      failWithUsage(usageError, USAGE, json);
-      return;
-    }
-
     if (!(await checkConfig(json))) {
       return;
     }

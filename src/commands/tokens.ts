@@ -6,7 +6,11 @@ import { checkConfig } from '@/libs/config.js';
 import { getApiToken } from '@/libs/api.js';
 import { failWithMessage } from '@/libs/errors.js';
 import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
+import {
+  failWithSubcommandUsage,
+  failWithUsage,
+  parseOrFailWithUsage,
+} from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { CreateTokenInput, Token } from '@/types/tokens.types.js';
 
@@ -108,14 +112,19 @@ const serializeTokenForJson = (token: Token): Required<Token> => ({
 
 // `list` takes no flags beyond `--json` and no positionals. Parsed (rather
 // than ignoring `rest` outright) so a typo like `list --jsn` or a stray
-// `list foo` fails loud via parseArgs's strict mode instead of silently
-// running the plain-text path with exit 0 — the same guarantee `create` and
-// `revoke` already have for their own arguments.
+// `list foo` fails loud via `parseOrFailWithUsage`'s strict mode instead of
+// silently running the plain-text path with exit 0 — the same guarantee
+// `create` and `revoke` already have for their own arguments (issue #218).
+const parseListArgs = (rest: string[]) =>
+  parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+
 const listTokensCommand = async (
   rest: string[],
   json: boolean,
 ): Promise<void> => {
-  parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+  if (!parseOrFailWithUsage(() => parseListArgs(rest), USAGE, json)) {
+    return;
+  }
 
   const tokens = await fetchTokens();
 
@@ -157,14 +166,29 @@ const resolveExpiresInDays = (
   return WHOLE_NUMBER_PATTERN.test(raw.trim()) ? Number(raw) : null;
 };
 
-const createTokenCommand = async (rest: string[]): Promise<void> => {
-  const { values } = parseArgs({
+// Return type left to inference (not hand-duplicated) so an option added
+// here can't silently drift out of sync with what `parseArgs` actually
+// returns. A thrown parse error is a usage mistake (issue #218), reported by
+// `parseOrFailWithUsage` below rather than the runner's outer catch. `--json`
+// is already rejected for `create` by `usageErrorFor` before this runs, so
+// every usage error below defaults `json` to its non-JSON contract.
+const parseCreateArgs = (rest: string[]) =>
+  parseArgs({
     args: rest,
     options: {
       name: { type: 'string' },
       'expires-in-days': { type: 'string' },
     },
   });
+
+const createTokenCommand = async (rest: string[]): Promise<void> => {
+  const parsed = parseOrFailWithUsage(() => parseCreateArgs(rest), USAGE);
+
+  if (!parsed) {
+    return;
+  }
+
+  const { values } = parsed;
 
   if (!values.name) {
     failWithUsage('`tokens create` requires --name <name>.', USAGE);
@@ -315,23 +339,33 @@ const confirmTokenRevocation = async (id: string): Promise<boolean> => {
   return confirmRevocation(label, isConfigured);
 };
 
+// Return type left to inference, matching parseCreateArgs above. Same
+// parse-throw-is-a-usage-error rationale as parseCreateArgs (issue #218).
+const parseRevokeArgs = (rest: string[]) =>
+  parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { yes: { type: 'boolean' } },
+  });
+
 const revokeTokenCommand = async (
   rest: string[],
   skipConfirm: boolean,
 ): Promise<void> => {
   // Parsed (not a bare destructure) so an unrecognized flag like
-  // `--help` fails loud via parseArgs's strict mode instead of being sent
-  // as a literal token id, and a second positional is caught explicitly
-  // rather than silently dropped (a script revoking two ids would
+  // `--help` fails loud via `parseOrFailWithUsage`'s strict mode instead of
+  // being sent as a literal token id, and a second positional is caught
+  // explicitly rather than silently dropped (a script revoking two ids would
   // otherwise see only the first one actually revoked and still exit 0).
   // `--yes` is declared so it's consumed as a flag rather than mis-parsed as
   // the id; the runner already read it from argv into `skipConfirm`.
-  const { positionals } = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: { yes: { type: 'boolean' } },
-  });
-  const [id, ...extraPositionals] = positionals;
+  const parsed = parseOrFailWithUsage(() => parseRevokeArgs(rest), USAGE);
+
+  if (!parsed) {
+    return;
+  }
+
+  const [id, ...extraPositionals] = parsed.positionals;
 
   if (!id || extraPositionals.length > 0) {
     failWithUsage(
