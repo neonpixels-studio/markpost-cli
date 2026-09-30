@@ -340,24 +340,68 @@ describe('runTokensCommand', () => {
     // `list` takes no positionals and no flag besides `--json`; a typo'd
     // flag or a stray argument must fail loud instead of silently running
     // the plain-text path with exit 0 — the same guarantee `create` and
-    // `revoke` already have for their own arguments.
-    it("fails loudly on a typo'd flag instead of silently listing", async () => {
+    // `revoke` already have for their own arguments. It now routes through
+    // failWithUsage, so the non-JSON path prints the usage block, not
+    // bare/generic prose — mirroring get.ts/export.ts/records.ts/events.ts
+    // (issue #218, #208).
+    it("fails loudly with the usage block on a typo'd flag instead of silently listing", async () => {
       const { fetchTokens } = await import('@/libs/tokens.js');
       const { runTokensCommand } = await import('@/commands/tokens.js');
 
       await runTokensCommand(['list', '--jsn']);
 
       expect(fetchTokens).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost tokens'),
+      );
       expect(process.exitCode).toBe(1);
     });
 
-    it('fails loudly on a stray positional instead of silently listing', async () => {
+    it('fails loudly with the usage block on a stray positional instead of silently listing', async () => {
       const { fetchTokens } = await import('@/libs/tokens.js');
       const { runTokensCommand } = await import('@/commands/tokens.js');
 
       await runTokensCommand(['list', 'foo']);
 
       expect(fetchTokens).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost tokens'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A bad flag is a usage error, not a fetch failure — it must report the
+    // documented `usage` code, never `fetch_failed` (issue #218, mirroring
+    // #208's fix elsewhere). `list`'s own `parseArgs` throw used to
+    // propagate to the runner's outer catch, which miscoded it.
+    it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
+      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['list', '--bogus', '--json']);
+
+      expect(fetchTokens).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('bogus');
+      expect(process.exitCode).toBe(1);
+    });
+
+    // Likewise a stray positional (`list` takes none) must not be miscoded.
+    it('emits a usage-coded JSON error, not fetch_failed, for a stray positional', async () => {
+      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['list', 'foo', '--json']);
+
+      expect(fetchTokens).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('foo');
       expect(process.exitCode).toBe(1);
     });
 
@@ -452,6 +496,23 @@ describe('runTokensCommand', () => {
       expect(createToken).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining('requires --name'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // An unrecognized flag throws out of `create`'s own `parseArgs` call; it
+    // must surface the usage block (issue #218, mirroring #208's fix
+    // elsewhere) rather than the generic prose a propagated-to-the-runner's
+    // outer-catch throw would otherwise produce.
+    it('fails with the usage block on an unrecognized flag instead of generic prose', async () => {
+      const { createToken } = await import('@/libs/tokens.js');
+      const { runTokensCommand } = await import('@/commands/tokens.js');
+
+      await runTokensCommand(['create', '--name', 'CI token', '--bogus']);
+
+      expect(createToken).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost tokens'),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -927,13 +988,16 @@ describe('runTokensCommand', () => {
     // Parsed (not a bare positional destructure), so an unrecognized flag
     // is rejected by parseArgs's strict mode rather than being sent to the
     // API as a literal token id.
-    it('fails loudly instead of treating an unrecognized flag as a literal id', async () => {
+    it('fails loudly with the usage block instead of treating an unrecognized flag as a literal id', async () => {
       const { revokeToken } = await import('@/libs/tokens.js');
       const { runTokensCommand } = await import('@/commands/tokens.js');
 
       await runTokensCommand(['revoke', '--help']);
 
       expect(revokeToken).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost tokens'),
+      );
       expect(process.exitCode).toBe(1);
     });
 

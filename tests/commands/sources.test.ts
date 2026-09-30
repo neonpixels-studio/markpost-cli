@@ -409,7 +409,10 @@ describe('runSourcesCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
-    it('exits 1 on a mistyped flag instead of silently printing human text', async () => {
+    // A bad flag now routes through failWithUsage, so the non-JSON path
+    // prints the usage block, not bare/generic prose — mirroring
+    // get.ts/export.ts/records.ts/events.ts (issue #218, #208).
+    it('exits 1 with the usage block on a mistyped flag instead of silently printing human text', async () => {
       const { checkConfig } = await import('@/libs/config.js');
       const { fetchSources } = await import('@/libs/sources.js');
       const { runSourcesCommand } = await import('@/commands/sources.js');
@@ -418,6 +421,9 @@ describe('runSourcesCommand', () => {
 
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
       expect(process.exitCode).toBe(1);
     });
 
@@ -2117,6 +2123,27 @@ describe('runSourcesCommand', () => {
         expect(process.exitCode).toBeUndefined();
       });
     });
+
+    // The human-readable path for the same stray-positional rejection
+    // covered under --json in the "--json failure contract" describe below —
+    // it must print the usage block (not silently succeed) with exit 1.
+    it('exits 1 with the usage block on a stray positional past the uuid', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { testSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', 'extra']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(testSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('extra'),
+      );
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
   });
 
   // The unified --json failure contract: rejecting --json on a non-list
@@ -2151,6 +2178,127 @@ describe('runSourcesCommand', () => {
       );
       expect(parsed.error).toBe('fetch_failed');
       expect(parsed.message).toContain('boom');
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A bad flag is a usage error, not a fetch failure — it must report the
+    // documented `usage` code, never `fetch_failed` (issue #218, mirroring
+    // #208's fix elsewhere). The whole-command `parseArgs` call used to share
+    // the handler dispatch's outer catch, which miscoded it.
+    it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--bogus', '--json']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('bogus');
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A third positional (`uuid` is the only one any subcommand takes) is
+    // likewise a usage error, not silently discarded or miscoded as
+    // fetch_failed.
+    it('emits a usage-coded JSON error, not fetch_failed, for a stray positional', async () => {
+      const { testSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', 'extra', '--json']);
+
+      expect(testSource).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('extra');
+      expect(process.exitCode).toBe(1);
+    });
+
+    // `list` never reads its uuid slot (see SOURCES_HANDLERS) — a uuid-shaped
+    // argument must fail loudly, not be silently accepted and discarded.
+    it('emits a usage-coded JSON error for a uuid-shaped argument given to list', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', 'extra', '--json']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed).toEqual({
+        error: 'usage',
+        message: '`sources list` takes no arguments.',
+      });
+      expect(process.exitCode).toBe(1);
+    });
+
+    // The human-readable path for the same rejection — must print the usage
+    // block, not silently list everything with exit 0. `--json` would hit the
+    // separate `--json` rejection first, so this has to be the non-JSON case.
+    it('exits 1 with the usage block for a uuid-shaped argument given to list', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', 'extra']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        '`sources list` takes no arguments.',
+      );
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // `create` is the other subcommand in NO_UUID_SUBCOMMANDS — covered
+    // separately so deleting it from that set wouldn't leave every test
+    // green (create always prompts, so createSource must never be called).
+    it('exits 1 with the usage block for a uuid-shaped argument given to create', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { createSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['create', 'extra']);
+
+      expect(checkConfig).not.toHaveBeenCalled();
+      expect(createSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        '`sources create` takes no arguments.',
+      );
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Usage: markpost sources'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A thrown parse error's message can carry user-supplied text (an unknown
+    // flag name, a stray positional) — it must be sanitized before it reaches
+    // the terminal, same as every API-error path.
+    it('strips control characters from a hostile stray positional before printing', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { testSource } = await import('@/libs/sources.js');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', `evil${control}[2J`]);
+
+      expect(testSource).not.toHaveBeenCalled();
+      const printedControl = vi
+        .mocked(console.error)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('evil [2J'),
+      );
       expect(process.exitCode).toBe(1);
     });
   });

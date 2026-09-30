@@ -11,16 +11,23 @@ vi.mock('@/libs/records.js', async () => {
   // while keeping every other export undefined, so a command that starts
   // calling an unmocked function still fails loudly here instead of quietly
   // running the real implementation.
-  const { ERROR_STATUS } =
+  const { ERROR_STATUS, PENDING_STATUS } =
     await vi.importActual<typeof import('@/libs/records.js')>(
       '@/libs/records.js',
     );
 
-  return { ERROR_STATUS, fetchAllRecords: vi.fn(), deleteRecords: vi.fn() };
+  return {
+    ERROR_STATUS,
+    PENDING_STATUS,
+    fetchAllRecords: vi.fn(),
+    deleteRecords: vi.fn(),
+    updateRecord: vi.fn(),
+  };
 });
 vi.mock('chalk', () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
+    greenBright: vi.fn((value: unknown) => value),
     bold: vi.fn((value: unknown) => value),
     yellow: vi.fn((value: unknown) => value),
   },
@@ -803,6 +810,455 @@ describe('runRecordsCommand', () => {
         expect.stringContaining('the read failed partway through'),
       );
       expect(process.exitCode).toBe(1);
+    });
+  });
+
+  describe('update', () => {
+    const updatedRecord: Record = {
+      ...firstRecord,
+      title: 'Updated Title',
+      status: 'pending',
+      syncedAt: null,
+    };
+
+    it('errors with usage and never calls updateRecord when no uuid is given', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('No uuid given.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('errors with usage and never calls updateRecord when neither --title nor --content is given', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Nothing to update: pass --title and/or --content.',
+        ),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a present-but-empty --title instead of sending a blank update', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', '  ']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--title needs a non-empty value.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a present-but-empty --content instead of sending a blank update', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--content', '  ']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--content needs a non-empty value.'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --title passed more than once', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--title',
+        'One',
+        '--title',
+        'Two',
+      ]);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '--title was given more than once. Pass it only once.',
+        ),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --content passed more than once', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--content',
+        'One',
+        '--content',
+        'Two',
+      ]);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '--content was given more than once. Pass it only once.',
+        ),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects a stray extra positional argument', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        'extra',
+        '--title',
+        'New Title',
+      ]);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Unexpected argument "extra"'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects an unknown flag instead of silently ignoring it', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      // `--bogus` (not `--status`) so the assertion below can't be satisfied
+      // by the USAGE block's own list-options text, which mentions "status".
+      await runRecordsCommand(['update', 'abc-123', '--bogus', 'value']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('bogus'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    // A uuid of `.`/`..` would make the request URL a URL parser collapses to
+    // a DIFFERENT markpost endpoint (the bulk PATCH, or the API root) than the
+    // single-record one this command targets — reject it before ever calling
+    // updateRecord (see isPathUnsafeUuid).
+    it.each(['.', '..', 'abc/123'])(
+      'rejects a path-unsafe uuid %j instead of sending the request',
+      async (unsafeUuid) => {
+        const { updateRecord } = await import('@/libs/records.js');
+        const { runRecordsCommand } = await import('@/commands/records.js');
+
+        await runRecordsCommand(['update', unsafeUuid, '--title', 'X']);
+
+        expect(updateRecord).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining('is not a valid record uuid'),
+        );
+        expect(process.exitCode).toBe(1);
+      },
+    );
+
+    it('calls updateRecord with only the given attributes', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
+        title: 'Updated Title',
+        content: undefined,
+      });
+    });
+
+    it('calls updateRecord with only --content when --title is omitted', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--content', 'New content']);
+
+      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
+        title: undefined,
+        content: 'New content',
+      });
+    });
+
+    it('accepts the --flag=value form', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title=Updated Title']);
+
+      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
+        title: 'Updated Title',
+        content: undefined,
+      });
+    });
+
+    it('passes both --title and --content through together', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--title',
+        'Updated Title',
+        '--content',
+        'New content',
+      ]);
+
+      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
+        title: 'Updated Title',
+        content: 'New content',
+      });
+    });
+
+    it('prints a success line and the updated record (via printRecord)', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Updated "Updated Title"'),
+      );
+      // Only printRecord emits a "uuid:" line, so this fails if it's ever
+      // dropped from the success path (a weaker "Updated Title" assertion
+      // would stay green even without it, since the success line above
+      // already contains that text).
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining(`uuid:       ${updatedRecord.uuid}`),
+      );
+      expect(process.exitCode).not.toBe(1);
+    });
+
+    // Surfaces the resync-requeue behavior (markpost#306): a record that came
+    // back `pending` after the edit gets an explicit confirmation line so the
+    // user knows it will be written to disk on the next sync run.
+    it('confirms the resync requeue when the updated record is pending', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Record is pending — the next sync run will write it to disk.',
+        ),
+      );
+    });
+
+    // A record whose status stays `synced` (e.g. off-contract response) must
+    // not falsely claim it's pending.
+    it('does not print the pending note for a record that stays synced', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue({
+        ...firstRecord,
+        status: 'synced',
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('write it to disk'),
+      );
+    });
+
+    // The updated record's title is untrusted API output (same as every
+    // record field the `list`/`get` printers sanitize), so a control
+    // character in it must not reach the terminal live via the success line.
+    it('strips control characters from the updated record before printing the success line', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue({
+        ...updatedRecord,
+        title: `Evil${control}Title`,
+      });
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Evil']);
+
+      const printedControl = vi
+        .mocked(console.log)
+        .mock.calls.some(
+          ([arg]) => typeof arg === 'string' && arg.includes(control),
+        );
+      expect(printedControl).toBe(false);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Updated "Evil Title"'),
+      );
+    });
+
+    it('prints the updated record as JSON with --json', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--title',
+        'Updated Title',
+        '--json',
+      ]);
+
+      expect(console.log).toHaveBeenCalledTimes(1);
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      expect(JSON.parse(output)).toMatchObject({
+        uuid: updatedRecord.uuid,
+        title: 'Updated Title',
+        status: 'pending',
+      });
+    });
+
+    it('fails loud with a non-zero exit when updateRecord returns null', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(null);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to update record "abc-123".'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('surfaces a systemic auth failure with a classified message and non-zero exit', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(updateRecord).mockRejectedValue(
+        new ApiRequestError('Invalid or missing API token', 401),
+      );
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Authentication failed (HTTP 401)'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('checks config before calling updateRecord', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      const { updateRecord } = await import('@/libs/records.js');
+      vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(checkConfig).toHaveBeenCalledWith(false);
+      // Assert actual ordering (not just that both were called) — checkConfig
+      // gates the destructive call, so it must run first.
+      expect(
+        vi.mocked(checkConfig).mock.invocationCallOrder[0],
+      ).toBeLessThan(vi.mocked(updateRecord).mock.invocationCallOrder[0]);
+    });
+
+    it('never calls updateRecord when checkConfig resolves false', async () => {
+      const { checkConfig } = await import('@/libs/config.js');
+      vi.mocked(checkConfig).mockResolvedValueOnce(false);
+      const { updateRecord } = await import('@/libs/records.js');
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
+
+      expect(updateRecord).not.toHaveBeenCalled();
+    });
+
+    // The unified --json failure contract (see the `list` describe block's
+    // equivalent tests): a usage error must emit the `usage`-coded JSON object
+    // on stderr, never bare chalk prose, and never touch stdout.
+    describe('--json failure contract', () => {
+      it('emits a usage-coded JSON error when nothing to update is given', async () => {
+        const { updateRecord } = await import('@/libs/records.js');
+        const { runRecordsCommand } = await import('@/commands/records.js');
+
+        await runRecordsCommand(['update', 'abc-123', '--json']);
+
+        const parsed = JSON.parse(
+          vi.mocked(console.error).mock.calls[0][0] as string,
+        );
+        expect(parsed).toEqual({
+          error: 'usage',
+          message: 'Nothing to update: pass --title and/or --content.',
+        });
+        expect(updateRecord).not.toHaveBeenCalled();
+        expect(console.log).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('emits a fetch_failed JSON error when updateRecord returns null', async () => {
+        const { updateRecord } = await import('@/libs/records.js');
+        vi.mocked(updateRecord).mockResolvedValue(null);
+        const { runRecordsCommand } = await import('@/commands/records.js');
+
+        await runRecordsCommand([
+          'update',
+          'abc-123',
+          '--title',
+          'Updated Title',
+          '--json',
+        ]);
+
+        const parsed = JSON.parse(
+          vi.mocked(console.error).mock.calls[0][0] as string,
+        );
+        expect(parsed).toEqual({
+          error: 'fetch_failed',
+          message: 'Failed to update record "abc-123".',
+        });
+        expect(console.log).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('emits a fetch_failed JSON error for a systemic auth failure', async () => {
+        const { updateRecord } = await import('@/libs/records.js');
+        const { ApiRequestError } = await import('@/libs/api.js');
+        vi.mocked(updateRecord).mockRejectedValue(
+          new ApiRequestError('Invalid or missing API token', 401),
+        );
+        const { runRecordsCommand } = await import('@/commands/records.js');
+
+        await runRecordsCommand([
+          'update',
+          'abc-123',
+          '--title',
+          'Updated Title',
+          '--json',
+        ]);
+
+        const parsed = JSON.parse(
+          vi.mocked(console.error).mock.calls[0][0] as string,
+        );
+        expect(parsed.error).toBe('fetch_failed');
+        expect(parsed.message).toContain('Authentication failed (HTTP 401)');
+        expect(console.log).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      });
     });
   });
 
