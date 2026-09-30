@@ -76,18 +76,50 @@ export type CreatedSource = Source & {
   providerSecret?: string | null;
 };
 
+// Mirrors the field-mapping shape markpost's POST /api/sources and PATCH
+// /api/sources/[uuid] endpoints both accept (shared/utils/fieldMapping.ts's
+// FieldMappingConfig / FIELD_MAPPING_KEYS): every key is an optional dot path
+// into the raw ingest payload, validated server-side by
+// server/utils/fieldMappingValidation.ts's assertValidFieldMapping. Hand-
+// mirrored rather than vendored via `npm run sync:source-contract` — that
+// script's assertFileHasNoImports guard (scripts/sync-source-contract.mjs)
+// requires the upstream file to be import-free, and fieldMapping.ts imports
+// EMAIL_SOURCE_TYPE from its sourceTypes.ts sibling. Keep the key list in
+// lockstep by hand; a key added upstream without a matching prompt in
+// src/commands/sources.ts silently can't be configured from the CLI.
+export const FIELD_MAPPING_KEYS = [
+  'title',
+  'content',
+  'html',
+  'source',
+  'tags',
+  'created',
+] as const;
+
+export type FieldMappingKey = (typeof FIELD_MAPPING_KEYS)[number];
+
+export type FieldMappingConfig = Partial<Record<FieldMappingKey, string>>;
+
 export type CreateSourceInput = {
   type: SourceType;
   name: string;
   routeFolder: string;
   provider?: string;
+  fieldMapping?: FieldMappingConfig;
 };
 
 // Mirrors markpost's PATCH /api/sources/[uuid] payload, which only accepts
-// routeFolder and fieldMapping updates.
+// routeFolder and fieldMapping updates. Per server/api/sources/[uuid].patch.ts,
+// omitting the key entirely leaves whatever is stored untouched; `null`
+// explicitly clears a stored mapping. The CLI's own `sources update` prompt
+// (src/commands/sources.ts) never produces `null` today — an all-blank
+// answer is read as "leave untouched", not "clear" (see promptFieldMapping) —
+// so `null` here documents the wire contract accurately rather than a
+// reachable CLI path; a dedicated "clear the mapping" choice is a possible
+// follow-up.
 export type UpdateSourceInput = {
   routeFolder?: string;
-  fieldMapping?: unknown;
+  fieldMapping?: FieldMappingConfig | null;
 };
 
 // Mirrors markpost's POST /api/sources/[uuid]/rotate-secret payload. Only a

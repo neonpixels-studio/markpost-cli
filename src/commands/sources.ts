@@ -19,6 +19,9 @@ import {
 } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import {
+  FIELD_MAPPING_KEYS,
+  FieldMappingConfig,
+  FieldMappingKey,
   isManualSecretProvider,
   isRotatableProvider,
   MANUAL_SECRET_PROVIDERS,
@@ -29,6 +32,7 @@ import {
   SourceTestResult,
   SourceTestSignatureStatus,
   SourceType,
+  UpdateSourceInput,
 } from '@/types/sources.types.js';
 
 // Mirror the endpoint constants markpost's web app uses in
@@ -42,7 +46,7 @@ export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-
 
   list                  List all sources (pass --json for machine-readable output)
   create                Create a new source (prompts for details)
-  update [uuid]         Update a source's route folder; prompts to pick one if uuid is omitted
+  update [uuid]         Update a source's route folder and/or field mapping; prompts to pick one if uuid is omitted
   delete [uuid]         Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
   rotate-secret [uuid]  Rotate a provider source's signing secret; prompts to pick one if uuid is omitted
   test <uuid>           Preview signature verification and field mapping for a source against a sample payload, without a real delivery (pass --json for machine-readable output)`;
@@ -110,10 +114,11 @@ const SOURCES_HANDLERS = new Map<
 // otherwise hang, or (for delete) abort via the swallowed-Ctrl+C path below
 // yet still exit 0. `delete` is only guarded when `--yes` is absent (its
 // documented escape hatch); `create` and `update` have no such flag — `create`
-// always prompts, and `update` always ends by prompting for the route folder,
-// whether the target came from an explicit uuid or the interactive picker —
-// so both are guarded outright. `rotate-secret` only prompts when no uuid is
-// given (the picker), which is what's guarded here — its other prompt (a
+// always prompts, and `update` always prompts for the route folder (and, if
+// accepted, field mapping), whether the target came from an explicit uuid or
+// the interactive picker — so both are guarded outright. `rotate-secret`
+// only prompts when no uuid is given (the picker), which is what's guarded
+// here — its other prompt (a
 // manual-secret provider's password) is guarded separately inside
 // collectRotateInput, since the provider isn't known this early (see there).
 const interactiveGuardMessageFor = (
@@ -130,7 +135,7 @@ const interactiveGuardMessageFor = (
   }
 
   if (subcommand === UPDATE_SUBCOMMAND) {
-    return `\`sources ${UPDATE_SUBCOMMAND}\` needs an interactive terminal — it prompts for the route folder, and to pick a source when no uuid is given.`;
+    return `\`sources ${UPDATE_SUBCOMMAND}\` needs an interactive terminal — it prompts for the route folder and field mapping, and to pick a source when no uuid is given.`;
   }
 
   if (subcommand === ROTATE_SECRET_SUBCOMMAND && !uuid) {
@@ -393,6 +398,62 @@ const listSources = async (json: boolean): Promise<void> => {
   sources.forEach(printSource);
 };
 
+// One prompt per key markpost's field-mapping contract recognizes (see
+// FIELD_MAPPING_KEYS in src/types/sources.types.ts), in the same order
+// markpost's own FieldMappingModal.vue presents them. Answers are collected
+// first and filtered after the loop (rather than branching inside it) so a
+// blank answer is dropped without nesting an `if` inside the `for` — matching
+// the server's own normalization (server/utils/fieldMappingValidation.ts's
+// normalizeAndValidate), which likewise drops anything blank rather than
+// storing it.
+const collectFieldMapping = async (): Promise<FieldMappingConfig> => {
+  const answers: [FieldMappingKey, string][] = [];
+
+  for (const key of FIELD_MAPPING_KEYS) {
+    const value = (
+      await input({
+        message: `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — blank to skip`,
+      })
+    ).trim();
+
+    answers.push([key, value]);
+  }
+
+  return Object.fromEntries(
+    answers.filter(([, value]) => value.length > 0),
+  ) as FieldMappingConfig;
+};
+
+// Field mapping is optional and easy to configure later via `sources update`,
+// so it stays behind an explicit opt-in rather than always asking six more
+// questions up front. Returns undefined when declined *or* when every answer
+// came back blank — markpost's PATCH/POST handlers treat a supplied
+// fieldMapping as the complete replacement for whatever is stored (there is
+// no per-key merge; see server/api/sources/[uuid].patch.ts and
+// server/utils/fieldMappingValidation.ts), so an all-blank result must read
+// as "nothing to change" rather than as a deliberate clear-to-null — the
+// opt-in's whole point is to leave an untouched mapping alone when nothing
+// is actually typed. Omitting the attribute entirely lets `create` fall back
+// to markpost's own `attributes.fieldMapping ?? null` default, and lets
+// `update` leave whatever is already stored untouched (see
+// server/api/sources/[uuid].patch.ts's `"fieldMapping" in attributes` check).
+const promptFieldMapping = async (
+  confirmMessage: string,
+): Promise<FieldMappingConfig | undefined> => {
+  const configureFieldMapping = await confirm({
+    message: confirmMessage,
+    default: false,
+  });
+
+  if (!configureFieldMapping) {
+    return undefined;
+  }
+
+  const fieldMapping = await collectFieldMapping();
+
+  return Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined;
+};
+
 const createSourceCommand = async (): Promise<void> => {
   const type = await select({
     message: 'Source type',
@@ -406,12 +467,16 @@ const createSourceCommand = async (): Promise<void> => {
     message: 'Provider (optional)',
     default: '',
   });
+  const fieldMapping = await promptFieldMapping(
+    'Configure field mapping now? (maps ingest payload fields to title/content/etc — optional, can be set later with `sources update`)',
+  );
 
   const created = await createSource({
     type,
     name,
     routeFolder,
     provider: provider || undefined,
+    ...(fieldMapping !== undefined ? { fieldMapping } : {}),
   });
 
   if (!created) {
@@ -502,7 +567,16 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
   return null;
 };
 
-const promptAndApplyRouteFolder = async (target: Source): Promise<void> => {
+// Prompts for both updatable attributes and sends whichever actually
+// changed in one PATCH. `Source` (see src/types/sources.types.ts) doesn't
+// carry the source's current field mapping — markpost's list/get responses
+// do return one (server/utils/response.ts's sourceSerializer), but the CLI's
+// read-side type doesn't surface it yet — so the field-mapping prompt below
+// always starts blank rather than prefilling what's already stored, and a
+// supplied mapping fully replaces (never merges with) whatever is there
+// already (see promptFieldMapping). Declining the opt-in, or accepting it
+// and leaving every field blank, both leave the stored mapping untouched.
+const promptAndApplyUpdates = async (target: Source): Promise<void> => {
   const routeFolder = (
     await input({
       message: 'Route folder (e.g. 99-incoming/)',
@@ -515,12 +589,25 @@ const promptAndApplyRouteFolder = async (target: Source): Promise<void> => {
     return;
   }
 
-  if (routeFolder === target.routeFolder) {
-    console.log('Route folder unchanged.');
+  const routeFolderChanged = routeFolder !== target.routeFolder;
+  const fieldMapping = await promptFieldMapping(
+    "Update field mapping now? (maps ingest payload fields to title/content/etc — this replaces the entire stored mapping, since the current one isn't shown here; leave unconfigured, or leave every field blank, to keep whatever is already set)",
+  );
+
+  // Covers both "nothing typed differs" (route folder re-accepted as-is,
+  // field mapping declined) and "field mapping was offered but left blank" —
+  // either way there is nothing to send.
+  if (!routeFolderChanged && fieldMapping === undefined) {
+    console.log('Nothing to update: route folder and field mapping unchanged.');
     return;
   }
 
-  const source = await updateSource(target.uuid, { routeFolder });
+  const updateInput: UpdateSourceInput = {
+    ...(routeFolderChanged ? { routeFolder } : {}),
+    ...(fieldMapping !== undefined ? { fieldMapping } : {}),
+  };
+
+  const source = await updateSource(target.uuid, updateInput);
 
   if (!source) {
     console.error(chalk.redBright('Failed to update source.'));
@@ -542,7 +629,7 @@ const updateSourceCommand = async (uuid?: string): Promise<void> => {
     return;
   }
 
-  await promptAndApplyRouteFolder(target);
+  await promptAndApplyUpdates(target);
 };
 
 // Deleting a source is irreversible: it drops the ingest config and the
