@@ -23,7 +23,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   // flag — is rendered in whichever contract the caller asked for.
   const json = hasJsonFlag(args);
 
-  // Parse in its own try/catch, before the fetch path, so a bad flag reports
+  // Parse via parseOrFailWithUsage, before the fetch path, so a bad flag reports
   // the `usage` JSON code (and the usage block without --json) rather than the
   // fetch path's `fetch_failed`/generic prose — a usage error is not a fetch
   // failure (issue #208), mirroring records.ts/events.ts.

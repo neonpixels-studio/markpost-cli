@@ -55,8 +55,9 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
   }
 
   // Parse before checkConfig, which prompts for and persists config when
-  // unset: a bad flag must fail on usage alone. Its own catch so a usage
-  // throw reports the `usage` JSON code, not the fetch path's `fetch_failed`.
+  // unset: a bad flag must fail on usage alone. Parsed via
+  // parseOrFailWithUsage so a usage throw reports the `usage` JSON code, not
+  // the fetch path's `fetch_failed`.
   const parsed = parseOrFailWithUsage(() => parseListArgs(args), USAGE, json);
 
   if (!parsed) {
@@ -373,7 +374,7 @@ const runUpdateCommand = async (
   args: string[],
   json: boolean,
 ): Promise<void> => {
-  // Parse in its own try/catch, before the config check, so a bad flag or a
+  // Parse via parseOrFailWithUsage, before the config check, so a bad flag or a
   // missing uuid fails on usage alone — mirrors runRecordsCommand's list path.
   const updateArgs = parseOrFailWithUsage(
     () => parseUpdateArgs(args),

@@ -33,7 +33,7 @@ export const runExportCommand = async (args: string[]): Promise<void> => {
   // (mirroring get/records/events).
   const json = hasJsonFlag(args);
 
-  // Parse in its own try/catch, before the fetch path, so a bad flag or stray
+  // Parse via parseOrFailWithUsage, before the fetch path, so a bad flag or stray
   // argument reports the `usage` JSON code (and the usage block without --json)
   // rather than the fetch path's `fetch_failed`/generic prose — a usage error
   // is not a fetch failure (issue #208), mirroring records.ts/events.ts.

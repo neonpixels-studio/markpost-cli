@@ -30,8 +30,8 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
   }
 
   // markpost's GET /api/events takes no filters, so this only rejects a
-  // stray argument before checkConfig. Its own catch so a usage throw
-  // reports the `usage` JSON code, not the fetch path's `fetch_failed`.
+  // stray argument before checkConfig. Parsed via parseOrFailWithUsage so a
+  // usage throw reports the `usage` JSON code, not `fetch_failed`.
   if (!parseOrFailWithUsage(() => parseListArgs(args), USAGE, json)) {
     return;
   }
