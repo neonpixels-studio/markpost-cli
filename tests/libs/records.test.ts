@@ -936,7 +936,7 @@ describe('createRecord', () => {
     );
   });
 
-  it('returns null when the response contains errors', async () => {
+  it('re-throws the server detail when the response contains errors', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Error', detail: 'Bad request' }] } },
       false,
@@ -1120,7 +1120,7 @@ describe('fetchRecord', () => {
     expect(await fetchRecord('abc-123')).toEqual(mockRecord);
   });
 
-  it('returns null when the response contains errors', async () => {
+  it('re-throws the server detail when the response contains errors', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Not Found', detail: 'Record missing' }] } },
       false,
@@ -1227,12 +1227,12 @@ describe('updateRecord', () => {
 
   it('returns the updated record attributes on success', async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    expect(await updateRecord('abc-123', { title: 'Test Title' })).toEqual(
-      mockRecord,
-    );
+    expect(
+      await updateRecord('abc-123', { title: 'Test Title' }),
+    ).toEqual(mockRecord);
   });
 
-  it('returns null when the response contains errors', async () => {
+  it('re-throws the server detail when the response contains errors', async () => {
     mockFetch(
       {
         data: {
@@ -1712,9 +1712,7 @@ describe('deleteRecords', () => {
         .find((message) => message.includes('Aborted after two consecutive'));
       expect(loggedMessage).toBeDefined();
       expect(loggedMessage).not.toContain('never attempted');
-      expect(loggedMessage).toContain(
-        'none of the 200 requested uuid(s) were confirmed deleted',
-      );
+      expect(loggedMessage).toContain('none of the 200 requested uuid(s) were confirmed deleted');
     });
 
     // Two 4xx rejections with DIFFERENT messages look like two isolated
@@ -2221,9 +2219,9 @@ describe('markRecordsSynced', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(chunkSizes()).toEqual([100, 100, 50]);
     // No chunk may ever exceed the server cap.
-    expect(
-      chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE),
-    ).toBe(true);
+    expect(chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE)).toBe(
+      true,
+    );
     expect(result.outcomes).toHaveLength(250);
     expect(result.abortReason).toBe(null);
   });
@@ -2379,10 +2377,7 @@ describe('markRecordsSynced', () => {
   it('does not crash on a non-array data object, falling back to meta.updated', async () => {
     // A single resource object (the old per-uuid shape) must not throw a
     // TypeError through the catch; meta.updated confirms the whole chunk.
-    mockFetch({
-      data: { attributes: { uuid: 'uuid-0' } },
-      meta: { updated: 2 },
-    });
+    mockFetch({ data: { attributes: { uuid: 'uuid-0' } }, meta: { updated: 2 } });
     const result = await markRecordsSynced(items(2));
     expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED]);
   });
@@ -2513,9 +2508,7 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes
-        .slice(100, 200)
-        .every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
@@ -2530,9 +2523,7 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes
-        .slice(100, 200)
-        .every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 

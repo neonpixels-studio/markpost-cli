@@ -698,11 +698,12 @@ describe('runPushCommand', () => {
         'Failed to push "a.md": Request failed (HTTP 422): Invalid Attribute: Title is too long',
       ),
     );
+    expect(process.exitCode).toBe(1);
   });
 
-  // A per-file failure surfaces from createRecord as a null return (that's its
-  // real contract post-fix — it only throws for systemic failures), so the
-  // batch logs it and keeps going rather than aborting.
+  // A per-file failure with no server rejection (e.g. a network error)
+  // surfaces from createRecord as a null return, so the batch logs it and
+  // keeps going rather than aborting.
   it('does not abort on a per-file failure — it keeps pushing the rest', async () => {
     const { createRecord } = await import('@/libs/records.js');
     const { readMarkdown } = await import('@/libs/markdown.js');

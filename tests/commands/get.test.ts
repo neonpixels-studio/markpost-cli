@@ -288,6 +288,7 @@ describe('runGetCommand', () => {
 
     expect(fetchRecord).toHaveBeenCalledTimes(2);
     expect(console.log).toHaveBeenCalledWith('Test Title');
+    expect(process.exitCode).toBe(1);
   });
 
   it('strips terminal escapes from a server-provided rejection detail', async () => {
