@@ -1,7 +1,12 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { ERROR_STATUS, fetchRecord } from '@/libs/records.js';
-import { describeApiError } from '@/libs/api.js';
+import {
+  ApiRequestError,
+  describeApiError,
+  describeRequestRejection,
+  isSystemicApiFailure,
+} from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage, messageFromError } from '@/libs/errors.js';
 import {
@@ -60,7 +65,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 
     try {
       for (const uuid of uuids) {
-        results.push({ uuid, record: await fetchRecord(uuid) });
+        results.push(await fetchResult(uuid));
       }
     } finally {
       reportResultsSafely(results, json, requestedCount);
@@ -111,16 +116,36 @@ const parseGetArgs = (
   };
 };
 
-// One requested uuid's outcome: the record it resolved to, or `null` when
-// `fetchRecord` classified it as a genuine not-found (a systemic failure
-// throws instead and is handled by the caller's try/catch, not this shape).
+// One requested uuid's outcome: the record it resolved to, or `null` when it
+// couldn't be fetched. `failure` carries the server's status + error detail
+// when it rejected just this uuid (a 404 vs a 422), so each reads differently;
+// it is absent for a null with no server rejection (a network error, already
+// logged by `fetchRecord`). A systemic failure throws instead and is handled
+// by the caller's try/catch, not this shape.
 interface GetResult {
   uuid: string;
   record: Record | null;
+  failure?: string;
 }
 
-const reportMissing = (uuid: string, json: boolean): void => {
-  failWithMessage(`Failed to fetch record "${uuid}".`, json);
+// A per-record server rejection becomes that uuid's own failure so the rest of
+// the batch still fetches; a systemic one (auth/5xx) aborts the batch.
+const fetchResult = async (uuid: string): Promise<GetResult> => {
+  try {
+    return { uuid, record: await fetchRecord(uuid) };
+  } catch (error) {
+    if (!(error instanceof ApiRequestError) || isSystemicApiFailure(error)) {
+      throw error;
+    }
+
+    return { uuid, record: null, failure: describeRequestRejection(error) };
+  }
+};
+
+const reportMissing = ({ uuid, failure }: GetResult, json: boolean): void => {
+  const reason = failure ? `: ${sanitizeForTerminal(failure)}` : '.';
+
+  failWithMessage(`Failed to fetch record "${uuid}"${reason}`, json);
 };
 
 // Reporting runs from the fetch loop's `finally` so a mid-batch abort still
@@ -179,9 +204,11 @@ const reportResults = (
   reportTextResults(results);
 };
 
-const reportSingleJsonResult = ({ uuid, record }: GetResult): void => {
+const reportSingleJsonResult = (result: GetResult): void => {
+  const { record } = result;
+
   if (!record) {
-    reportMissing(uuid, true);
+    reportMissing(result, true);
     return;
   }
 
@@ -199,7 +226,7 @@ const reportJsonResults = (
 
   results
     .filter((result) => !result.record)
-    .forEach((result) => reportMissing(result.uuid, true));
+    .forEach((result) => reportMissing(result, true));
 
   const records = results
     .filter((result): result is GetResult & { record: Record } =>
@@ -224,7 +251,7 @@ const reportJsonResults = (
 // blank-line separator appears.
 const printTextResult = (printedFirst: boolean, result: GetResult): boolean => {
   if (!result.record) {
-    reportMissing(result.uuid, false);
+    reportMissing(result, false);
     return printedFirst;
   }
 

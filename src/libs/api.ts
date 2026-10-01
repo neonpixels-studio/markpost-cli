@@ -245,6 +245,18 @@ export const describeApiError = (error: unknown): string => {
   return messageFromError(error);
 };
 
+// Message for a request the server rejected, any status: the HTTP status plus
+// the server's own error detail, so a 404 and a 422 read differently. Other
+// thrown values (a network error) fall back to their raw message. Callers
+// sanitize the result before printing — the detail is server-derived.
+export const describeRequestRejection = (error: unknown): string => {
+  if (error instanceof ApiRequestError) {
+    return describeSystemicFailure(error);
+  }
+
+  return messageFromError(error);
+};
+
 export const formatErrorMessages = (errors: ApiError[]) => {
   if (errors.length === 1) {
     return `${errors?.[0]?.title}: ${errors?.[0]?.detail}`;

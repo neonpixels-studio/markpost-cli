@@ -7,7 +7,7 @@ import {
   RecordListFilters,
   updateRecord,
 } from '@/libs/records.js';
-import { describeApiError } from '@/libs/api.js';
+import { describeRequestRejection } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import {
   failWithMessage,
@@ -81,7 +81,7 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
     // #89): surface its classified, actionable message with a non-zero exit,
     // distinct from the generic "Failed to fetch records" a non-systemic
     // failure produces. Sanitize — the message can be server-derived.
-    failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
+    failWithMessage(sanitizeForTerminal(describeRequestRejection(error)), json);
   }
 };
 
@@ -400,6 +400,6 @@ const runUpdateCommand = async (
     // classified, actionable message with a non-zero exit rather than the
     // generic "Failed to update record" a null return produces. Sanitize —
     // the message can be server-derived.
-    failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
+    failWithMessage(sanitizeForTerminal(describeRequestRejection(error)), json);
   }
 };

@@ -8,6 +8,7 @@ import {
   assertApiSuccess,
   authedRequest,
   describeApiError,
+  describeRequestRejection,
   describeSystemicFailure,
   formatErrorMessages,
   getApiToken,
@@ -886,5 +887,35 @@ describe('rethrowIfTimeout', () => {
   it('returns without throwing for any other error', () => {
     expect(() => rethrowIfTimeout(new Error('server error'))).not.toThrow();
     expect(() => rethrowIfTimeout('boom')).not.toThrow();
+  });
+});
+
+describe('describeRequestRejection', () => {
+  it('includes the status and server detail for a non-systemic 404 and 422 so they differ', () => {
+    const notFound = describeRequestRejection(
+      new ApiRequestError('Not Found: No record was found', 404),
+    );
+    const invalid = describeRequestRejection(
+      new ApiRequestError('Invalid Attribute: Title is too long', 422),
+    );
+
+    expect(notFound).toBe(
+      'Request failed (HTTP 404): Not Found: No record was found',
+    );
+    expect(invalid).toBe(
+      'Request failed (HTTP 422): Invalid Attribute: Title is too long',
+    );
+  });
+
+  it('keeps the classified wording for a systemic failure', () => {
+    expect(
+      describeRequestRejection(new ApiRequestError('Bad token', 401)),
+    ).toBe('Authentication failed (HTTP 401): Bad token');
+  });
+
+  it('falls back to the raw message for a non-API error', () => {
+    expect(describeRequestRejection(new Error('Network error'))).toBe(
+      'Network error',
+    );
   });
 });

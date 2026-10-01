@@ -252,6 +252,59 @@ describe('runGetCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('reports a 404 and a 422 with distinct, server-detailed messages', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchRecord)
+      .mockRejectedValueOnce(
+        new ApiRequestError('Not Found: No record was found', 404),
+      )
+      .mockRejectedValueOnce(
+        new ApiRequestError('Invalid Attribute: uuid is malformed', 422),
+      );
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['missing-1', 'bad-2']);
+
+    const messages = vi
+      .mocked(console.error)
+      .mock.calls.map((call) => call[0] as string);
+    expect(messages).toEqual([
+      'Failed to fetch record "missing-1": Request failed (HTTP 404): Not Found: No record was found',
+      'Failed to fetch record "bad-2": Request failed (HTTP 422): Invalid Attribute: uuid is malformed',
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('keeps fetching later uuids after a per-record 4xx rejection', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchRecord)
+      .mockRejectedValueOnce(new ApiRequestError('Not Found: gone', 404))
+      .mockResolvedValueOnce(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['missing-1', 'abc-123']);
+
+    expect(fetchRecord).toHaveBeenCalledTimes(2);
+    expect(console.log).toHaveBeenCalledWith('Test Title');
+  });
+
+  it('strips terminal escapes from a server-provided rejection detail', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchRecord).mockRejectedValue(
+      new ApiRequestError('Not Found: \u001b[31mevil\u001b[0m', 404),
+    );
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123']);
+
+    const message = vi.mocked(console.error).mock.calls[0][0] as string;
+    expect(message).not.toContain('\u001b');
+    expect(message).toContain('HTTP 404');
+  });
+
   // A systemic auth failure (expired token) now re-throws from fetchRecord and
   // must surface its classified, actionable message with a non-zero exit —
   // distinct from the generic "Failed to fetch record" a genuine 404 produces
@@ -828,6 +881,37 @@ describe('runGetCommand', () => {
         message: 'Failed to fetch record "abc-123".',
       });
       expect(process.exitCode).toBe(1);
+    });
+
+    it('carries the server detail and status in the JSON message for a 404 vs a 422', async () => {
+      const { fetchRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      const { runGetCommand } = await import('@/commands/get.js');
+      const messages: string[] = [];
+
+      for (const [status, detail] of [
+        [404, 'Not Found: No record was found'],
+        [422, 'Invalid Attribute: uuid is malformed'],
+      ] as const) {
+        vi.mocked(console.error).mockClear();
+        vi.mocked(fetchRecord).mockRejectedValueOnce(
+          new ApiRequestError(detail, status),
+        );
+
+        await runGetCommand(['abc-123', '--json']);
+
+        const parsed = JSON.parse(
+          vi.mocked(console.error).mock.calls[0][0] as string,
+        );
+        expect(parsed.error).toBe('fetch_failed');
+        messages.push(parsed.message);
+      }
+
+      expect(messages[0]).toContain('HTTP 404');
+      expect(messages[0]).toContain('No record was found');
+      expect(messages[1]).toContain('HTTP 422');
+      expect(messages[1]).toContain('uuid is malformed');
+      expect(messages[0]).not.toBe(messages[1]);
     });
 
     it('emits a fetch_failed JSON error on stderr for a thrown systemic failure', async () => {

@@ -941,7 +941,9 @@ describe('createRecord', () => {
       { data: { errors: [{ title: 'Error', detail: 'Bad request' }] } },
       false,
     );
-    expect(await createRecord('Test Title', 'Test Content')).toBeNull();
+    await expect(
+      createRecord('Test Title', 'Test Content'),
+    ).rejects.toMatchObject({ message: 'Error: Bad request' });
   });
 
   it('returns null on network failure', async () => {
@@ -1009,9 +1011,10 @@ describe('createRecord', () => {
     );
   });
 
-  // A per-file 4xx (the payload's fault) must stay a null return so a bulk
-  // push skips just this file and keeps going.
-  it('returns null for a non-systemic 4xx failure', async () => {
+  // A per-file 4xx (the payload's fault) is re-thrown with the server's detail
+  // (not collapsed to null) so push can report why this file was rejected,
+  // while still treating it as non-systemic and pressing on with the batch.
+  it('re-throws a non-systemic 4xx with the server detail', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 422,
@@ -1020,7 +1023,14 @@ describe('createRecord', () => {
           data: { errors: [{ title: 'Unprocessable', detail: 'Bad' }] },
         }),
     });
-    expect(await createRecord('Test Title', 'Test Content')).toBeNull();
+
+    await expect(
+      createRecord('Test Title', 'Test Content'),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      isSystemic: false,
+      message: 'Unprocessable: Bad',
+    });
   });
 
   // Auth/5xx doom every other file in a batch, so createRecord surfaces them
@@ -1115,7 +1125,9 @@ describe('fetchRecord', () => {
       { data: { errors: [{ title: 'Not Found', detail: 'Record missing' }] } },
       false,
     );
-    expect(await fetchRecord('abc-123')).toBeNull();
+    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+      message: 'Not Found: Record missing',
+    });
   });
 
   it('returns null on network failure', async () => {
@@ -1139,9 +1151,9 @@ describe('fetchRecord', () => {
     });
   });
 
-  // A genuine 404 (markpost's notFoundError) is NOT systemic: it stays a null
-  // return so `get` reports "Failed to fetch record", not an auth error.
-  it('returns null for a non-systemic 404 (record not found)', async () => {
+  // A 404 and a 422 are both non-systemic per-record rejections, but each is
+  // re-thrown with its own status and server detail so they read differently.
+  it('re-throws a non-systemic 404 with its status and server detail', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -1151,7 +1163,28 @@ describe('fetchRecord', () => {
         }),
     });
 
-    expect(await fetchRecord('abc-123')).toBeNull();
+    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+      statusCode: 404,
+      isSystemic: false,
+      message: 'Not Found: No record was found',
+    });
+  });
+
+  it('re-throws a non-systemic 422 with its status and server detail', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: () =>
+        Promise.resolve({
+          errors: [{ title: 'Invalid Attribute', detail: 'uuid is malformed' }],
+        }),
+    });
+
+    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+      statusCode: 422,
+      isSystemic: false,
+      message: 'Invalid Attribute: uuid is malformed',
+    });
   });
 
   // Regression coverage for #29: see the equivalent note in the createRecord
@@ -1194,21 +1227,25 @@ describe('updateRecord', () => {
 
   it('returns the updated record attributes on success', async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    expect(
-      await updateRecord('abc-123', { title: 'Test Title' }),
-    ).toEqual(mockRecord);
+    expect(await updateRecord('abc-123', { title: 'Test Title' })).toEqual(
+      mockRecord,
+    );
   });
 
   it('returns null when the response contains errors', async () => {
     mockFetch(
       {
         data: {
-          errors: [{ title: 'Invalid Attribute', detail: 'Title cannot be empty' }],
+          errors: [
+            { title: 'Invalid Attribute', detail: 'Title cannot be empty' },
+          ],
         },
       },
       false,
     );
-    expect(await updateRecord('abc-123', { title: '' })).toBeNull();
+    await expect(updateRecord('abc-123', { title: '' })).rejects.toMatchObject({
+      message: 'Invalid Attribute: Title cannot be empty',
+    });
   });
 
   it('returns null on network failure', async () => {
@@ -1235,9 +1272,9 @@ describe('updateRecord', () => {
     });
   });
 
-  // A genuine 404 (record not found) is NOT systemic: it stays a null return
-  // so the command reports "Failed to update record", not an auth error.
-  it('returns null for a non-systemic 404 (record not found)', async () => {
+  // A 404 and a 422 are both non-systemic per-record rejections, but each is
+  // re-thrown with its own status and server detail so they read differently.
+  it('re-throws a non-systemic 404 with its status and server detail', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -1247,7 +1284,32 @@ describe('updateRecord', () => {
         }),
     });
 
-    expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+    await expect(
+      updateRecord('abc-123', { title: 'New Title' }),
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      isSystemic: false,
+      message: 'Not Found: No record was found',
+    });
+  });
+
+  it('re-throws a non-systemic 422 with its status and server detail', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: () =>
+        Promise.resolve({
+          errors: [{ title: 'Invalid Attribute', detail: 'Title is too long' }],
+        }),
+    });
+
+    await expect(
+      updateRecord('abc-123', { title: 'New Title' }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      isSystemic: false,
+      message: 'Invalid Attribute: Title is too long',
+    });
   });
 
   // The record's status/syncedAt after an edit reflect the server's resync
@@ -1650,7 +1712,9 @@ describe('deleteRecords', () => {
         .find((message) => message.includes('Aborted after two consecutive'));
       expect(loggedMessage).toBeDefined();
       expect(loggedMessage).not.toContain('never attempted');
-      expect(loggedMessage).toContain('none of the 200 requested uuid(s) were confirmed deleted');
+      expect(loggedMessage).toContain(
+        'none of the 200 requested uuid(s) were confirmed deleted',
+      );
     });
 
     // Two 4xx rejections with DIFFERENT messages look like two isolated
@@ -2157,9 +2221,9 @@ describe('markRecordsSynced', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(chunkSizes()).toEqual([100, 100, 50]);
     // No chunk may ever exceed the server cap.
-    expect(chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE)).toBe(
-      true,
-    );
+    expect(
+      chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE),
+    ).toBe(true);
     expect(result.outcomes).toHaveLength(250);
     expect(result.abortReason).toBe(null);
   });
@@ -2315,7 +2379,10 @@ describe('markRecordsSynced', () => {
   it('does not crash on a non-array data object, falling back to meta.updated', async () => {
     // A single resource object (the old per-uuid shape) must not throw a
     // TypeError through the catch; meta.updated confirms the whole chunk.
-    mockFetch({ data: { attributes: { uuid: 'uuid-0' } }, meta: { updated: 2 } });
+    mockFetch({
+      data: { attributes: { uuid: 'uuid-0' } },
+      meta: { updated: 2 },
+    });
     const result = await markRecordsSynced(items(2));
     expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED]);
   });
@@ -2446,7 +2513,9 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
@@ -2461,7 +2530,9 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 

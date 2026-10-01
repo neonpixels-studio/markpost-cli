@@ -1235,6 +1235,42 @@ describe('runRecordsCommand', () => {
         expect(process.exitCode).toBe(1);
       });
 
+      it('carries the server detail and status for a 404 vs a 422 rejection', async () => {
+        const { updateRecord } = await import('@/libs/records.js');
+        const { ApiRequestError } = await import('@/libs/api.js');
+        const { runRecordsCommand } = await import('@/commands/records.js');
+        const messages: string[] = [];
+
+        for (const [status, detail] of [
+          [404, 'Not Found: No record was found'],
+          [422, 'Invalid Attribute: Title is too long'],
+        ] as const) {
+          vi.mocked(console.error).mockClear();
+          vi.mocked(updateRecord).mockRejectedValueOnce(
+            new ApiRequestError(detail, status),
+          );
+
+          await runRecordsCommand([
+            'update',
+            'abc-123',
+            '--title',
+            'Updated Title',
+            '--json',
+          ]);
+
+          const parsed = JSON.parse(
+            vi.mocked(console.error).mock.calls[0][0] as string,
+          );
+          expect(parsed.error).toBe('fetch_failed');
+          messages.push(parsed.message);
+        }
+
+        expect(messages[0]).toContain('HTTP 404');
+        expect(messages[0]).toContain('No record was found');
+        expect(messages[1]).toContain('HTTP 422');
+        expect(messages[1]).toContain('Title is too long');
+      });
+
       it('emits a fetch_failed JSON error for a systemic auth failure', async () => {
         const { updateRecord } = await import('@/libs/records.js');
         const { ApiRequestError } = await import('@/libs/api.js');
