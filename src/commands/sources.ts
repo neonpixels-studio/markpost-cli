@@ -513,6 +513,11 @@ const listSources = async (json: boolean): Promise<void> => {
 // the server's own normalization (server/utils/fieldMappingValidation.ts's
 // normalizeAndValidate), which likewise drops anything blank rather than
 // storing it.
+// The stored value is untrusted API output that inquirer echoes into the
+// prompt line, so it gets the same sanitizing as every printed field.
+const sanitizedStoredValue = (storedValue: string | undefined) =>
+  storedValue === undefined ? undefined : sanitizeForTerminal(storedValue);
+
 const fieldMappingPromptMessage = (
   key: FieldMappingKey,
   storedValue: string | undefined,
@@ -533,7 +538,7 @@ const collectFieldMapping = async (
     const answer = (
       await input({
         message: fieldMappingPromptMessage(key, current?.[key]),
-        default: current?.[key],
+        default: sanitizedStoredValue(current?.[key]),
       })
     ).trim();
 
@@ -574,7 +579,7 @@ const isSameFieldMapping = (
 const promptFieldMapping = async (
   confirmMessage: string,
   current: FieldMappingConfig | null = null,
-): Promise<FieldMappingConfig | undefined> => {
+): Promise<FieldMappingConfig | null | undefined> => {
   const configureFieldMapping = await confirm({
     message: confirmMessage,
     default: false,
@@ -586,14 +591,13 @@ const promptFieldMapping = async (
 
   const fieldMapping = await collectFieldMapping(current);
 
-  if (
-    Object.keys(fieldMapping).length === 0 ||
-    isSameFieldMapping(fieldMapping, current)
-  ) {
+  if (isSameFieldMapping(fieldMapping, current)) {
     return undefined;
   }
 
-  return fieldMapping;
+  // Every stored key was removed with the clear sentinel: send an explicit
+  // `null` (markpost's "clear the mapping" value) rather than dropping it.
+  return Object.keys(fieldMapping).length === 0 ? null : fieldMapping;
 };
 
 const createSourceCommand = async (): Promise<void> => {
@@ -618,7 +622,7 @@ const createSourceCommand = async (): Promise<void> => {
     name,
     routeFolder,
     provider: provider || undefined,
-    ...(fieldMapping !== undefined ? { fieldMapping } : {}),
+    ...(fieldMapping ? { fieldMapping } : {}),
   });
 
   if (!created) {
@@ -714,8 +718,9 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
 // stored value (`Source.fieldMapping`), so accepting a default keeps that key;
 // a supplied mapping still fully replaces (never merges with) whatever is
 // there already (see promptFieldMapping). Declining the opt-in, accepting it
-// and leaving every field blank, or re-accepting every stored value all leave
-// the stored mapping untouched.
+// and leaving every field blank (nothing stored to begin with), or
+// re-accepting every stored value all leave the stored mapping untouched.
+// Removing every stored key with the clear sentinel sends `null`, clearing it.
 const promptAndApplyUpdates = async (target: Source): Promise<void> => {
   const routeFolder = (
     await input({

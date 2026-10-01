@@ -1237,6 +1237,54 @@ describe('runSourcesCommand', () => {
       );
     });
 
+    it('sends fieldMapping null when every stored key is removed with the clear sentinel', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(mappedSource.routeFolder)
+        .mockResolvedValueOnce('-')
+        .mockResolvedValueOnce('-')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      vi.mocked(updateSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: null,
+      });
+    });
+
+    it('sanitizes a hostile stored value passed as a prompt default and keeps the blank-to-skip hint for unset keys', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, fieldMapping: { title: `data.${control}[31m` } },
+      ]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(webhookSource.routeFolder)
+        .mockResolvedValue('');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      const configs = vi
+        .mocked(input)
+        .mock.calls.slice(1)
+        .map(([config]) => config as { default?: string; message: string });
+      expect(configs[0].default).not.toContain(control);
+      expect(configs[0].message).toContain('enter "-" to remove');
+      expect(configs[1].message).toContain('blank to skip');
+      expect(configs[1].message).not.toContain('enter "-"');
+    });
+
     // Pins the decline explicitly (rather than relying on `confirm()`'s
     // unmocked-falsy default, as the earlier uuid/picker tests do) alongside
     // a real route-folder change, so the payload is proven to carry
