@@ -8,10 +8,9 @@ import {
   updateRecord,
 } from '@/libs/records.js';
 import {
-  ApiRequestError,
   describeApiError,
   describeRequestRejection,
-  isSystemicApiFailure,
+  isPerRecordRejection,
 } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import {
@@ -346,7 +345,7 @@ const updateRecordAndReport = async (
     // A per-record rejection (a 404 for an unknown uuid, a 422 for an invalid
     // title/content) carries the server's own detail, so name the record and
     // report why; a systemic failure falls through to the caller's catch.
-    if (!(error instanceof ApiRequestError) || isSystemicApiFailure(error)) {
+    if (!isPerRecordRejection(error)) {
       throw error;
     }
 

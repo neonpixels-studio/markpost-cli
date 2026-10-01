@@ -1192,6 +1192,29 @@ describe('runRecordsCommand', () => {
     // The unified --json failure contract (see the `list` describe block's
     // equivalent tests): a usage error must emit the `usage`-coded JSON object
     // on stderr, never bare chalk prose, and never touch stdout.
+    it('reports a per-record 422 in text mode, naming the record and stripping escapes', async () => {
+      const { updateRecord } = await import('@/libs/records.js');
+      const { ApiRequestError } = await import('@/libs/api.js');
+      vi.mocked(updateRecord).mockRejectedValue(
+        new ApiRequestError('Invalid Attribute: \u001b[31mbad\u001b[0m', 422),
+      );
+      const { runRecordsCommand } = await import('@/commands/records.js');
+
+      await runRecordsCommand([
+        'update',
+        'abc-123',
+        '--title',
+        'Updated Title',
+      ]);
+
+      const message = vi.mocked(console.error).mock.calls[0][0] as string;
+      expect(message).toContain(
+        'Failed to update record "abc-123": Request failed (HTTP 422): Invalid Attribute:',
+      );
+      expect(message).not.toContain('\u001b');
+      expect(process.exitCode).toBe(1);
+    });
+
     describe('--json failure contract', () => {
       it('emits a usage-coded JSON error when nothing to update is given', async () => {
         const { updateRecord } = await import('@/libs/records.js');

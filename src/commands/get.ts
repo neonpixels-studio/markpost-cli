@@ -2,10 +2,9 @@ import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { ERROR_STATUS, fetchRecord } from '@/libs/records.js';
 import {
-  ApiRequestError,
   describeApiError,
   describeRequestRejection,
-  isSystemicApiFailure,
+  isPerRecordRejection,
 } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import { failWithMessage, messageFromError } from '@/libs/errors.js';
@@ -134,7 +133,7 @@ const fetchResult = async (uuid: string): Promise<GetResult> => {
   try {
     return { uuid, record: await fetchRecord(uuid) };
   } catch (error) {
-    if (!(error instanceof ApiRequestError) || isSystemicApiFailure(error)) {
+    if (!isPerRecordRejection(error)) {
       throw error;
     }
 

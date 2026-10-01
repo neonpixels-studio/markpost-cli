@@ -188,6 +188,15 @@ export const isSystemicApiFailure = (
 ): error is ApiRequestError =>
   error instanceof ApiRequestError && error.isSystemic;
 
+// Narrowing guard: true only for a non-systemic `ApiRequestError` - the server
+// rejected just this one request (a 404 for a missing record, a 422 for its own
+// value). A bulk caller reports it for that item and keeps going, whereas a
+// systemic failure aborts the batch.
+export const isPerRecordRejection = (
+  error: unknown,
+): error is ApiRequestError =>
+  error instanceof ApiRequestError && !error.isSystemic;
+
 // Narrowing guard: true only for a PERMANENT failure (a dead token / forbidden
 // account) that won't clear on a blind retry. Keeps the permanence rule inside
 // the API seam so callers deciding whether to stop an autoSync daemon (the
