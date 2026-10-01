@@ -3,12 +3,12 @@ import chalk from 'chalk';
 import { ERROR_STATUS, fetchRecord } from '@/libs/records.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, messageFromError } from '@/libs/errors.js';
+import { failWithMessage } from '@/libs/errors.js';
 import {
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
 } from '@/libs/terminal.js';
-import { failWithUsage } from '@/libs/usage.js';
+import { failWithUsage, parseOrFailWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
@@ -27,15 +27,13 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   // the `usage` JSON code (and the usage block without --json) rather than the
   // fetch path's `fetch_failed`/generic prose — a usage error is not a fetch
   // failure (issue #208), mirroring records.ts/events.ts.
-  let uuids: string[];
-  let requestedCount: number;
+  const parsed = parseOrFailWithUsage(() => parseGetArgs(args), USAGE, json);
 
-  try {
-    ({ uuids, requestedCount } = parseGetArgs(args));
-  } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+  if (!parsed) {
     return;
   }
+
+  const { uuids, requestedCount } = parsed;
 
   if (requestedCount === 0) {
     failWithUsage('No uuid given.', USAGE, json);
