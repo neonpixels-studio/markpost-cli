@@ -114,12 +114,10 @@ export type CreateSourceInput = {
 // Mirrors markpost's PATCH /api/sources/[uuid] payload, which only accepts
 // routeFolder and fieldMapping updates. Per server/api/sources/[uuid].patch.ts,
 // omitting the key entirely leaves whatever is stored untouched; `null`
-// explicitly clears a stored mapping. The CLI's own `sources update` prompt
-// (src/commands/sources.ts) never produces `null` today — an all-blank
-// answer is read as "leave untouched", not "clear" (see promptFieldMapping) —
-// so `null` here documents the wire contract accurately rather than a
-// reachable CLI path; a dedicated "clear the mapping" choice is a possible
-// follow-up.
+// explicitly clears a stored mapping. The CLI's `sources update` prompt sends
+// `null` when the user removes every stored key with its `-` sentinel (see
+// promptFieldMapping); an all-blank answer with nothing stored is read as
+// "leave untouched", not "clear".
 export type UpdateSourceInput = {
   routeFolder?: string;
   fieldMapping?: FieldMappingConfig | null;

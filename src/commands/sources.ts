@@ -427,9 +427,7 @@ const printFieldMapping = (
 
   console.log('  mapping:');
   configuredKeys.forEach((key) => {
-    console.log(
-      `    ${key}: ${sanitizeForTerminal(fieldMapping?.[key] as string)}`,
-    );
+    console.log(`    ${key}: ${sanitizeForTerminal(fieldMapping?.[key])}`);
   });
 };
 
@@ -518,6 +516,26 @@ const listSources = async (json: boolean): Promise<void> => {
 const sanitizedStoredValue = (storedValue: string | undefined) =>
   storedValue === undefined ? undefined : sanitizeForTerminal(storedValue);
 
+// Re-accepting the sanitized prefill must keep the raw stored value, not
+// overwrite it with the sanitized copy; the sentinel removes the key.
+const resolveFieldMappingAnswer = (
+  answer: string,
+  storedValue: string | undefined,
+): string => {
+  if (answer === CLEAR_FIELD_MAPPING_KEY_SENTINEL) {
+    return '';
+  }
+
+  if (
+    storedValue !== undefined &&
+    answer === sanitizedStoredValue(storedValue)
+  ) {
+    return storedValue;
+  }
+
+  return answer;
+};
+
 const fieldMappingPromptMessage = (
   key: FieldMappingKey,
   storedValue: string | undefined,
@@ -542,10 +560,7 @@ const collectFieldMapping = async (
       })
     ).trim();
 
-    answers.push([
-      key,
-      answer === CLEAR_FIELD_MAPPING_KEY_SENTINEL ? '' : answer,
-    ]);
+    answers.push([key, resolveFieldMappingAnswer(answer, current?.[key])]);
   }
 
   return Object.fromEntries(
@@ -741,7 +756,7 @@ const promptAndApplyUpdates = async (target: Source): Promise<void> => {
   );
 
   // Covers both "nothing typed differs" (route folder re-accepted as-is,
-  // field mapping declined) and "field mapping was offered but left blank" —
+  // field mapping declined) and "field mapping was offered but left blank or every stored value re-accepted" —
   // either way there is nothing to send.
   if (!routeFolderChanged && fieldMapping === undefined) {
     console.log('Nothing to update: route folder and field mapping unchanged.');

@@ -1285,6 +1285,25 @@ describe('runSourcesCommand', () => {
       expect(configs[1].message).not.toContain('enter "-"');
     });
 
+    it('does not send an update when a hostile stored value is re-accepted as its sanitized default', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      const hostileTitle = `data.${control}[31msubject`;
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, fieldMapping: { title: hostileTitle } },
+      ]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input).mockImplementation(
+        (async (config: { default?: string }) => config.default ?? '') as never,
+      );
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).not.toHaveBeenCalled();
+    });
+
     // Pins the decline explicitly (rather than relying on `confirm()`'s
     // unmocked-falsy default, as the earlier uuid/picker tests do) alongside
     // a real route-folder change, so the payload is proven to carry
