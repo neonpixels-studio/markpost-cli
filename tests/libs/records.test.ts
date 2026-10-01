@@ -1239,7 +1239,9 @@ describe('updateRecord', () => {
   it('does not log to stderr on a non-systemic failure when json is true', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
-    expect(await updateRecord('abc-123', { title: 'New Title' }, true)).toBeNull();
+    expect(
+      await updateRecord('abc-123', { title: 'New Title' }, true),
+    ).toBeNull();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 

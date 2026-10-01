@@ -828,6 +828,8 @@ describe('runGetCommand', () => {
         message: 'Failed to fetch record "abc-123".',
       });
       expect(process.exitCode).toBe(1);
+      expect(fetchRecord).toHaveBeenCalledWith('abc-123', true);
+      expect(console.error).toHaveBeenCalledTimes(1);
     });
 
     it('emits a fetch_failed JSON error on stderr for a thrown systemic failure', async () => {

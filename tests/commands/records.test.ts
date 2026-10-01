@@ -980,10 +980,11 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
-      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
-        title: 'Updated Title',
-        content: undefined,
-      }, false);
+      expect(updateRecord).toHaveBeenCalledWith(
+        'abc-123',
+        { title: 'Updated Title', content: undefined },
+        false,
+      );
     });
 
     it('calls updateRecord with only --content when --title is omitted', async () => {
@@ -993,10 +994,11 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['update', 'abc-123', '--content', 'New content']);
 
-      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
-        title: undefined,
-        content: 'New content',
-      }, false);
+      expect(updateRecord).toHaveBeenCalledWith(
+        'abc-123',
+        { title: undefined, content: 'New content' },
+        false,
+      );
     });
 
     it('accepts the --flag=value form', async () => {
@@ -1006,10 +1008,11 @@ describe('runRecordsCommand', () => {
 
       await runRecordsCommand(['update', 'abc-123', '--title=Updated Title']);
 
-      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
-        title: 'Updated Title',
-        content: undefined,
-      }, false);
+      expect(updateRecord).toHaveBeenCalledWith(
+        'abc-123',
+        { title: 'Updated Title', content: undefined },
+        false,
+      );
     });
 
     it('passes both --title and --content through together', async () => {
@@ -1026,10 +1029,11 @@ describe('runRecordsCommand', () => {
         'New content',
       ]);
 
-      expect(updateRecord).toHaveBeenCalledWith('abc-123', {
-        title: 'Updated Title',
-        content: 'New content',
-      }, false);
+      expect(updateRecord).toHaveBeenCalledWith(
+        'abc-123',
+        { title: 'Updated Title', content: 'New content' },
+        false,
+      );
     });
 
     it('prints a success line and the updated record (via printRecord)', async () => {
