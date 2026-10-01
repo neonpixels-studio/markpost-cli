@@ -333,7 +333,7 @@ const updateRecordAndReport = async (
   { uuid, title, content }: UpdateRecordArgs,
   json: boolean,
 ): Promise<void> => {
-  const updated = await updateRecord(uuid, { title, content });
+  const updated = await updateRecord(uuid, { title, content }, json);
 
   if (!updated) {
     failWithMessage(

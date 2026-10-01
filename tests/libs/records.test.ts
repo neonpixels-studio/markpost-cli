@@ -527,7 +527,7 @@ describe('fetchAllRecords', () => {
     );
   });
 
-  it('extracts the cursor when links.next percent-encodes the key, matching markpost\'s own link builder', async () => {
+  it("extracts the cursor when links.next percent-encodes the key, matching markpost's own link builder", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -1090,8 +1090,10 @@ describe('createRecord', () => {
 });
 
 describe('fetchRecord', () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   it('calls fetch with the correct UUID in the URL', async () => {
@@ -1121,6 +1123,22 @@ describe('fetchRecord', () => {
   it('returns null on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await fetchRecord('abc-123')).toBeNull();
+  });
+
+  // `json` (second arg) keeps this function's own prose line off stderr so
+  // --json emits only the command's single JSON error object.
+  it('does not log to stderr on a non-systemic failure when json is true', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    expect(await fetchRecord('abc-123', true)).toBeNull();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs to stderr on a non-systemic failure when json is false', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    expect(await fetchRecord('abc-123')).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
   });
 
   // A systemic auth (401) failure is not "record not found" — fetchRecord
@@ -1170,8 +1188,10 @@ describe('fetchRecord', () => {
 });
 
 describe('updateRecord', () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   it('PATCHes the correct UUID with the given attributes', async () => {
@@ -1194,16 +1214,18 @@ describe('updateRecord', () => {
 
   it('returns the updated record attributes on success', async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    expect(
-      await updateRecord('abc-123', { title: 'Test Title' }),
-    ).toEqual(mockRecord);
+    expect(await updateRecord('abc-123', { title: 'Test Title' })).toEqual(
+      mockRecord,
+    );
   });
 
   it('returns null when the response contains errors', async () => {
     mockFetch(
       {
         data: {
-          errors: [{ title: 'Invalid Attribute', detail: 'Title cannot be empty' }],
+          errors: [
+            { title: 'Invalid Attribute', detail: 'Title cannot be empty' },
+          ],
         },
       },
       false,
@@ -1214,6 +1236,22 @@ describe('updateRecord', () => {
   it('returns null on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+  });
+
+  it('does not log to stderr on a non-systemic failure when json is true', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    expect(
+      await updateRecord('abc-123', { title: 'New Title' }, true),
+    ).toBeNull();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs to stderr on a non-systemic failure when json is false', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
   });
 
   // A systemic auth (401) failure is not a per-record validation failure —
@@ -1650,7 +1688,9 @@ describe('deleteRecords', () => {
         .find((message) => message.includes('Aborted after two consecutive'));
       expect(loggedMessage).toBeDefined();
       expect(loggedMessage).not.toContain('never attempted');
-      expect(loggedMessage).toContain('none of the 200 requested uuid(s) were confirmed deleted');
+      expect(loggedMessage).toContain(
+        'none of the 200 requested uuid(s) were confirmed deleted',
+      );
     });
 
     // Two 4xx rejections with DIFFERENT messages look like two isolated
@@ -2157,9 +2197,9 @@ describe('markRecordsSynced', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(chunkSizes()).toEqual([100, 100, 50]);
     // No chunk may ever exceed the server cap.
-    expect(chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE)).toBe(
-      true,
-    );
+    expect(
+      chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE),
+    ).toBe(true);
     expect(result.outcomes).toHaveLength(250);
     expect(result.abortReason).toBe(null);
   });
@@ -2315,7 +2355,10 @@ describe('markRecordsSynced', () => {
   it('does not crash on a non-array data object, falling back to meta.updated', async () => {
     // A single resource object (the old per-uuid shape) must not throw a
     // TypeError through the catch; meta.updated confirms the whole chunk.
-    mockFetch({ data: { attributes: { uuid: 'uuid-0' } }, meta: { updated: 2 } });
+    mockFetch({
+      data: { attributes: { uuid: 'uuid-0' } },
+      meta: { updated: 2 },
+    });
     const result = await markRecordsSynced(items(2));
     expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED]);
   });
@@ -2446,7 +2489,9 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
@@ -2461,7 +2506,9 @@ describe('markRecordsSynced', () => {
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
