@@ -821,11 +821,11 @@ export const fetchRecord = async (
       throw error;
     }
 
+    rethrowIfTimeout(error);
+
     if (!json) {
       logApiFailure(`fetchRecord["${uuid}"]`, error);
     }
-
-    rethrowIfTimeout(error);
 
     return null;
   }
@@ -879,11 +879,11 @@ export const updateRecord = async (
       throw error;
     }
 
+    rethrowIfTimeout(error);
+
     if (!json) {
       logApiFailure(`updateRecord["${uuid}"]`, error);
     }
-
-    rethrowIfTimeout(error);
 
     return null;
   }
