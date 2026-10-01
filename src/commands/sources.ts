@@ -42,6 +42,10 @@ import {
 export const WEBHOOK_INGEST_BASE = 'https://ingest.markpost.io/v1/hooks';
 export const EMAIL_DOMAIN = 'in.markpost.io';
 
+// inquirer's `input` returns the prefilled default on an empty submit, so a
+// stored key can't be cleared with a blank answer; this sentinel removes it.
+const CLEAR_FIELD_MAPPING_KEY_SENTINEL = '-';
+
 export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret|test> [uuid]
 
   list                  List all sources (pass --json for machine-readable output)
@@ -409,14 +413,7 @@ const printProviderSecret = (
   console.log(chalk.bold(`  ${sanitizeForTerminal(providerSecret)}`));
 };
 
-// Every field here comes from the untrusted API response, so each is stripped
-// of control/ANSI escapes before printing (see terminal.ts): name, uuid, type,
-// endpoint (built from endpointSlug), routeFolder, recordCount, and lastHitAt.
-// recordCount is typed as a number but the type is only a compile-time claim
-// over parsed JSON — a hostile server could return a string carrying an escape,
-// so it goes through the sanitizer too (which coerces non-strings). The
-// 'never hit' fallback is a local literal, so only the untrusted lastHitAt
-// branch is sanitized.
+// Field-mapping values are untrusted API output too, so they are sanitized.
 const printFieldMapping = (
   fieldMapping: FieldMappingConfig | null | undefined,
 ): void => {
@@ -436,6 +433,14 @@ const printFieldMapping = (
   });
 };
 
+// Every field here comes from the untrusted API response, so each is stripped
+// of control/ANSI escapes before printing (see terminal.ts): name, uuid, type,
+// endpoint (built from endpointSlug), routeFolder, recordCount, and lastHitAt.
+// recordCount is typed as a number but the type is only a compile-time claim
+// over parsed JSON — a hostile server could return a string carrying an escape,
+// so it goes through the sanitizer too (which coerces non-strings). The
+// 'never hit' fallback is a local literal, so only the untrusted lastHitAt
+// branch is sanitized.
 const printSource = (source: Source): void => {
   console.log(chalk.bold(sanitizeForTerminal(source.name)));
   console.log(`  uuid:      ${sanitizeForTerminal(source.uuid)}`);
@@ -508,26 +513,50 @@ const listSources = async (json: boolean): Promise<void> => {
 // the server's own normalization (server/utils/fieldMappingValidation.ts's
 // normalizeAndValidate), which likewise drops anything blank rather than
 // storing it.
+const fieldMappingPromptMessage = (
+  key: FieldMappingKey,
+  storedValue: string | undefined,
+): string => {
+  const skipHint = storedValue
+    ? `enter "${CLEAR_FIELD_MAPPING_KEY_SENTINEL}" to remove`
+    : 'blank to skip';
+
+  return `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — ${skipHint}`;
+};
+
 const collectFieldMapping = async (
   current: FieldMappingConfig | null = null,
 ): Promise<FieldMappingConfig> => {
   const answers: [FieldMappingKey, string][] = [];
 
   for (const key of FIELD_MAPPING_KEYS) {
-    const value = (
+    const answer = (
       await input({
-        message: `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — blank to skip`,
+        message: fieldMappingPromptMessage(key, current?.[key]),
         default: current?.[key],
       })
     ).trim();
 
-    answers.push([key, value]);
+    answers.push([
+      key,
+      answer === CLEAR_FIELD_MAPPING_KEY_SENTINEL ? '' : answer,
+    ]);
   }
 
   return Object.fromEntries(
     answers.filter(([, value]) => value.length > 0),
   ) as FieldMappingConfig;
 };
+
+// Re-accepting every prefilled default yields the stored mapping verbatim;
+// that is "nothing to change", not a PATCH worth sending.
+const isSameFieldMapping = (
+  next: FieldMappingConfig,
+  current: FieldMappingConfig | null,
+): boolean =>
+  FIELD_MAPPING_KEYS.every(
+    (key) => (next[key] ?? '') === (current?.[key] ?? ''),
+  );
 
 // Field mapping is optional and easy to configure later via `sources update`,
 // so it stays behind an explicit opt-in rather than always asking six more
@@ -542,16 +571,6 @@ const collectFieldMapping = async (
 // to markpost's own `attributes.fieldMapping ?? null` default, and lets
 // `update` leave whatever is already stored untouched (see
 // server/api/sources/[uuid].patch.ts's `"fieldMapping" in attributes` check).
-// Re-accepting every prefilled default yields the stored mapping verbatim;
-// that is "nothing to change", not a PATCH worth sending.
-const isSameFieldMapping = (
-  next: FieldMappingConfig,
-  current: FieldMappingConfig | null,
-): boolean =>
-  FIELD_MAPPING_KEYS.every(
-    (key) => (next[key] ?? '') === (current?.[key] ?? ''),
-  );
-
 const promptFieldMapping = async (
   confirmMessage: string,
   current: FieldMappingConfig | null = null,

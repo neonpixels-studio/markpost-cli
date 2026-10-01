@@ -390,6 +390,25 @@ describe('runSourcesCommand', () => {
       expect(console.log).toHaveBeenCalledWith('    content: data.body');
     });
 
+    it('sanitizes hostile field-mapping values before printing', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        {
+          ...webhookSource,
+          fieldMapping: { title: `data.${control}[31msubject` },
+        },
+      ]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      expect(loggedText()).not.toContain(control);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('title: data.'),
+      );
+    });
+
     it('omits the mapping section from the pretty output when none is stored', async () => {
       const { fetchSources } = await import('@/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
@@ -1188,6 +1207,34 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['update', 'abc-123']);
 
       expect(updateSource).not.toHaveBeenCalled();
+    });
+
+    it('removes a stored field-mapping key when the clear sentinel is entered', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(mappedSource.routeFolder)
+        .mockResolvedValueOnce('data.subject')
+        .mockResolvedValueOnce('-') // clear fieldMapping.content
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      vi.mocked(updateSource).mockResolvedValue(mappedSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: { title: 'data.subject' },
+      });
+      expect(input).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('enter "-" to remove'),
+        }),
+      );
     });
 
     // Pins the decline explicitly (rather than relying on `confirm()`'s
