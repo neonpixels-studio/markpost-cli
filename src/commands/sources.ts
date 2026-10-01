@@ -503,14 +503,6 @@ const listSources = async (json: boolean): Promise<void> => {
   sources.forEach(printSource);
 };
 
-// One prompt per key markpost's field-mapping contract recognizes (see
-// FIELD_MAPPING_KEYS in src/types/sources.types.ts), in the same order
-// markpost's own FieldMappingModal.vue presents them. Answers are collected
-// first and filtered after the loop (rather than branching inside it) so a
-// blank answer is dropped without nesting an `if` inside the `for` — matching
-// the server's own normalization (server/utils/fieldMappingValidation.ts's
-// normalizeAndValidate), which likewise drops anything blank rather than
-// storing it.
 // The stored value is untrusted API output that inquirer echoes into the
 // prompt line, so it gets the same sanitizing as every printed field.
 const sanitizedStoredValue = (storedValue: string | undefined) =>
@@ -518,6 +510,9 @@ const sanitizedStoredValue = (storedValue: string | undefined) =>
 
 // Re-accepting the sanitized prefill must keep the raw stored value, not
 // overwrite it with the sanitized copy; the sentinel removes the key.
+// Known limit: deliberately typing the sanitized form of a hostile stored value
+// is indistinguishable from re-accepting the default; clear the key with the
+// sentinel first to replace it.
 const resolveFieldMappingAnswer = (
   answer: string,
   storedValue: string | undefined,
@@ -547,6 +542,14 @@ const fieldMappingPromptMessage = (
   return `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — ${skipHint}`;
 };
 
+// One prompt per key markpost's field-mapping contract recognizes (see
+// FIELD_MAPPING_KEYS in src/types/sources.types.ts), in the same order
+// markpost's own FieldMappingModal.vue presents them. Answers are collected
+// first and filtered after the loop (rather than branching inside it) so a
+// blank answer is dropped without nesting an `if` inside the `for` — matching
+// the server's own normalization (server/utils/fieldMappingValidation.ts's
+// normalizeAndValidate), which likewise drops anything blank rather than
+// storing it.
 const collectFieldMapping = async (
   current: FieldMappingConfig | null = null,
 ): Promise<FieldMappingConfig> => {
@@ -580,12 +583,14 @@ const isSameFieldMapping = (
 
 // Field mapping is optional and easy to configure later via `sources update`,
 // so it stays behind an explicit opt-in rather than always asking six more
-// questions up front. Returns undefined when declined *or* when every answer
-// came back blank — markpost's PATCH/POST handlers treat a supplied
+// questions up front. Returns undefined (do not send) when declined, when every
+// answer came back blank, or when the answers equal the stored mapping; null
+// (clear) when every stored key was removed with the sentinel; otherwise the
+// replacement mapping. markpost's PATCH/POST handlers treat a supplied
 // fieldMapping as the complete replacement for whatever is stored (there is
 // no per-key merge; see server/api/sources/[uuid].patch.ts and
-// server/utils/fieldMappingValidation.ts), so an all-blank result must read
-// as "nothing to change" rather than as a deliberate clear-to-null — the
+// server/utils/fieldMappingValidation.ts), so an all-blank result with nothing stored must
+// read as "nothing to change" rather than as a deliberate clear-to-null — the
 // opt-in's whole point is to leave an untouched mapping alone when nothing
 // is actually typed. Omitting the attribute entirely lets `create` fall back
 // to markpost's own `attributes.fieldMapping ?? null` default, and lets
