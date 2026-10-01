@@ -263,6 +263,7 @@ export const describeApiError = (error: unknown): string => {
 // server-derived.
 export const describeRequestRejection = (error: unknown): string => {
   if (error instanceof ApiRequestError) {
+    // `failureKind` falls back to "Request failed" for a non-systemic status.
     return describeSystemicFailure(error);
   }
 

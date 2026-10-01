@@ -1189,9 +1189,6 @@ describe('runRecordsCommand', () => {
       expect(updateRecord).not.toHaveBeenCalled();
     });
 
-    // The unified --json failure contract (see the `list` describe block's
-    // equivalent tests): a usage error must emit the `usage`-coded JSON object
-    // on stderr, never bare chalk prose, and never touch stdout.
     it('reports a per-record 422 in text mode, naming the record and stripping escapes', async () => {
       const { updateRecord } = await import('@/libs/records.js');
       const { ApiRequestError } = await import('@/libs/api.js');
@@ -1215,6 +1212,9 @@ describe('runRecordsCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    // The unified --json failure contract (see the `list` describe block's
+    // equivalent tests): a usage error must emit the `usage`-coded JSON object
+    // on stderr, never bare chalk prose, and never touch stdout.
     describe('--json failure contract', () => {
       it('emits a usage-coded JSON error when nothing to update is given', async () => {
         const { updateRecord } = await import('@/libs/records.js');
