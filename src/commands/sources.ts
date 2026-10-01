@@ -417,6 +417,25 @@ const printProviderSecret = (
 // so it goes through the sanitizer too (which coerces non-strings). The
 // 'never hit' fallback is a local literal, so only the untrusted lastHitAt
 // branch is sanitized.
+const printFieldMapping = (
+  fieldMapping: FieldMappingConfig | null | undefined,
+): void => {
+  const configuredKeys = FIELD_MAPPING_KEYS.filter((key) =>
+    Boolean(fieldMapping?.[key]),
+  );
+
+  if (configuredKeys.length === 0) {
+    return;
+  }
+
+  console.log('  mapping:');
+  configuredKeys.forEach((key) => {
+    console.log(
+      `    ${key}: ${sanitizeForTerminal(fieldMapping?.[key] as string)}`,
+    );
+  });
+};
+
 const printSource = (source: Source): void => {
   console.log(chalk.bold(sanitizeForTerminal(source.name)));
   console.log(`  uuid:      ${sanitizeForTerminal(source.uuid)}`);
@@ -427,6 +446,7 @@ const printSource = (source: Source): void => {
     )}`,
   );
   console.log(`  folder:    ${sanitizeForTerminal(source.routeFolder)}`);
+  printFieldMapping(source.fieldMapping);
   console.log(`  records:   ${sanitizeForTerminal(source.recordCount)}`);
   console.log(
     `  last hit:  ${source.lastHitAt ? sanitizeForTerminal(source.lastHitAt) : 'never hit'}`,
@@ -457,6 +477,7 @@ const serializeSourceForJson = (
   endpointSlug: source.endpointSlug,
   endpoint: buildEndpointUrl(source.type, source.endpointSlug),
   routeFolder: source.routeFolder,
+  fieldMapping: source.fieldMapping ?? null,
   lastHitAt: source.lastHitAt,
   recordCount: source.recordCount,
 });
@@ -487,13 +508,16 @@ const listSources = async (json: boolean): Promise<void> => {
 // the server's own normalization (server/utils/fieldMappingValidation.ts's
 // normalizeAndValidate), which likewise drops anything blank rather than
 // storing it.
-const collectFieldMapping = async (): Promise<FieldMappingConfig> => {
+const collectFieldMapping = async (
+  current: FieldMappingConfig | null = null,
+): Promise<FieldMappingConfig> => {
   const answers: [FieldMappingKey, string][] = [];
 
   for (const key of FIELD_MAPPING_KEYS) {
     const value = (
       await input({
         message: `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — blank to skip`,
+        default: current?.[key],
       })
     ).trim();
 
@@ -518,8 +542,19 @@ const collectFieldMapping = async (): Promise<FieldMappingConfig> => {
 // to markpost's own `attributes.fieldMapping ?? null` default, and lets
 // `update` leave whatever is already stored untouched (see
 // server/api/sources/[uuid].patch.ts's `"fieldMapping" in attributes` check).
+// Re-accepting every prefilled default yields the stored mapping verbatim;
+// that is "nothing to change", not a PATCH worth sending.
+const isSameFieldMapping = (
+  next: FieldMappingConfig,
+  current: FieldMappingConfig | null,
+): boolean =>
+  FIELD_MAPPING_KEYS.every(
+    (key) => (next[key] ?? '') === (current?.[key] ?? ''),
+  );
+
 const promptFieldMapping = async (
   confirmMessage: string,
+  current: FieldMappingConfig | null = null,
 ): Promise<FieldMappingConfig | undefined> => {
   const configureFieldMapping = await confirm({
     message: confirmMessage,
@@ -530,9 +565,16 @@ const promptFieldMapping = async (
     return undefined;
   }
 
-  const fieldMapping = await collectFieldMapping();
+  const fieldMapping = await collectFieldMapping(current);
 
-  return Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined;
+  if (
+    Object.keys(fieldMapping).length === 0 ||
+    isSameFieldMapping(fieldMapping, current)
+  ) {
+    return undefined;
+  }
+
+  return fieldMapping;
 };
 
 const createSourceCommand = async (): Promise<void> => {
@@ -649,14 +691,12 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
 };
 
 // Prompts for both updatable attributes and sends whichever actually
-// changed in one PATCH. `Source` (see src/types/sources.types.ts) doesn't
-// carry the source's current field mapping — markpost's list/get responses
-// do return one (server/utils/response.ts's sourceSerializer), but the CLI's
-// read-side type doesn't surface it yet — so the field-mapping prompt below
-// always starts blank rather than prefilling what's already stored, and a
-// supplied mapping fully replaces (never merges with) whatever is there
-// already (see promptFieldMapping). Declining the opt-in, or accepting it
-// and leaving every field blank, both leave the stored mapping untouched.
+// changed in one PATCH. The field-mapping prompt prefills each key with the
+// stored value (`Source.fieldMapping`), so accepting a default keeps that key;
+// a supplied mapping still fully replaces (never merges with) whatever is
+// there already (see promptFieldMapping). Declining the opt-in, accepting it
+// and leaving every field blank, or re-accepting every stored value all leave
+// the stored mapping untouched.
 const promptAndApplyUpdates = async (target: Source): Promise<void> => {
   const routeFolder = (
     await input({
@@ -672,7 +712,8 @@ const promptAndApplyUpdates = async (target: Source): Promise<void> => {
 
   const routeFolderChanged = routeFolder !== target.routeFolder;
   const fieldMapping = await promptFieldMapping(
-    "Update field mapping now? (maps ingest payload fields to title/content/etc — this replaces the entire stored mapping, since the current one isn't shown here; leave unconfigured, or leave every field blank, to keep whatever is already set)",
+    'Update field mapping now? (maps ingest payload fields to title/content/etc — each field is prefilled with the stored value and the result replaces the entire stored mapping; decline to keep it as is)',
+    target.fieldMapping,
   );
 
   // Covers both "nothing typed differs" (route folder re-accepted as-is,

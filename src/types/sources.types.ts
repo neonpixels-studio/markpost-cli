@@ -60,6 +60,9 @@ export type Source = {
   provider: string | null;
   endpointSlug: string;
   routeFolder: string;
+  // The stored mapping, or null when none is configured. markpost's
+  // sourceSerializer always returns it (server/utils/response.ts).
+  fieldMapping: FieldMappingConfig | null;
   lastHitAt: string | null;
   recordCount: number;
 };
