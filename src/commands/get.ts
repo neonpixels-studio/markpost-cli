@@ -60,7 +60,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 
     try {
       for (const uuid of uuids) {
-        results.push({ uuid, record: await fetchRecord(uuid) });
+        results.push({ uuid, record: await fetchRecord(uuid, json) });
       }
     } finally {
       reportResultsSafely(results, json, requestedCount);

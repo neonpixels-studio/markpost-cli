@@ -82,7 +82,7 @@ describe('runGetCommand', () => {
     await runGetCommand(['abc-123']);
 
     expect(checkConfig).toHaveBeenCalledWith(false);
-    expect(fetchRecord).toHaveBeenCalledWith('abc-123');
+    expect(fetchRecord).toHaveBeenCalledWith('abc-123', false);
     expect(console.log).toHaveBeenCalledWith('Test Title');
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('uuid:       abc-123'),
@@ -385,7 +385,7 @@ describe('runGetCommand', () => {
 
     await runGetCommand(['--json', 'abc-123']);
 
-    expect(fetchRecord).toHaveBeenCalledWith('abc-123');
+    expect(fetchRecord).toHaveBeenCalledWith('abc-123', true);
     const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
     expect(JSON.parse(output).uuid).toBe('abc-123');
   });
@@ -505,8 +505,8 @@ describe('runGetCommand', () => {
       await runGetCommand(['abc-123', 'def-456']);
 
       expect(fetchRecord).toHaveBeenCalledTimes(2);
-      expect(fetchRecord).toHaveBeenNthCalledWith(1, 'abc-123');
-      expect(fetchRecord).toHaveBeenNthCalledWith(2, 'def-456');
+      expect(fetchRecord).toHaveBeenNthCalledWith(1, 'abc-123', false);
+      expect(fetchRecord).toHaveBeenNthCalledWith(2, 'def-456', false);
       expect(console.log).toHaveBeenCalledWith('Test Title');
       expect(console.log).toHaveBeenCalledWith('Second Title');
     });
@@ -645,7 +645,7 @@ describe('runGetCommand', () => {
       await runGetCommand(['', 'abc-123']);
 
       expect(fetchRecord).toHaveBeenCalledTimes(1);
-      expect(fetchRecord).toHaveBeenCalledWith('abc-123');
+      expect(fetchRecord).toHaveBeenCalledWith('abc-123', false);
     });
 
     it('reports no uuid given when every positional is blank', async () => {
@@ -828,6 +828,8 @@ describe('runGetCommand', () => {
         message: 'Failed to fetch record "abc-123".',
       });
       expect(process.exitCode).toBe(1);
+      expect(fetchRecord).toHaveBeenCalledWith('abc-123', true);
+      expect(console.error).toHaveBeenCalledTimes(1);
     });
 
     it('emits a fetch_failed JSON error on stderr for a thrown systemic failure', async () => {
