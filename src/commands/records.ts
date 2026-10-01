@@ -7,7 +7,12 @@ import {
   RecordListFilters,
   updateRecord,
 } from '@/libs/records.js';
-import { describeRequestRejection } from '@/libs/api.js';
+import {
+  ApiRequestError,
+  describeApiError,
+  describeRequestRejection,
+  isSystemicApiFailure,
+} from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import {
   failWithMessage,
@@ -81,7 +86,7 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
     // #89): surface its classified, actionable message with a non-zero exit,
     // distinct from the generic "Failed to fetch records" a non-systemic
     // failure produces. Sanitize — the message can be server-derived.
-    failWithMessage(sanitizeForTerminal(describeRequestRejection(error)), json);
+    failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
   }
 };
 
@@ -333,7 +338,26 @@ const updateRecordAndReport = async (
   { uuid, title, content }: UpdateRecordArgs,
   json: boolean,
 ): Promise<void> => {
-  const updated = await updateRecord(uuid, { title, content });
+  let updated: Record | null;
+
+  try {
+    updated = await updateRecord(uuid, { title, content });
+  } catch (error) {
+    // A per-record rejection (a 404 for an unknown uuid, a 422 for an invalid
+    // title/content) carries the server's own detail, so name the record and
+    // report why; a systemic failure falls through to the caller's catch.
+    if (!(error instanceof ApiRequestError) || isSystemicApiFailure(error)) {
+      throw error;
+    }
+
+    failWithMessage(
+      sanitizeForTerminal(
+        `Failed to update record "${uuid}": ${describeRequestRejection(error)}`,
+      ),
+      json,
+    );
+    return;
+  }
 
   if (!updated) {
     failWithMessage(
@@ -400,6 +424,6 @@ const runUpdateCommand = async (
     // classified, actionable message with a non-zero exit rather than the
     // generic "Failed to update record" a null return produces. Sanitize —
     // the message can be server-derived.
-    failWithMessage(sanitizeForTerminal(describeRequestRejection(error)), json);
+    failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
   }
 };

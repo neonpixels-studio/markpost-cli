@@ -245,10 +245,13 @@ export const describeApiError = (error: unknown): string => {
   return messageFromError(error);
 };
 
-// Message for a request the server rejected, any status: the HTTP status plus
-// the server's own error detail, so a 404 and a 422 read differently. Other
-// thrown values (a network error) fall back to their raw message. Callers
-// sanitize the result before printing — the detail is server-derived.
+// Unlike `describeApiError` (which only classifies a systemic failure and
+// leaves a per-record 4xx as its bare message), this labels ANY rejected
+// request with its status, for callers that report a per-record 4xx: the HTTP
+// status plus the server's own error detail, so a 404 and a 422 read
+// differently. Other thrown values (a network error) fall back to their raw
+// message. Callers sanitize the result before printing; the detail is
+// server-derived.
 export const describeRequestRejection = (error: unknown): string => {
   if (error instanceof ApiRequestError) {
     return describeSystemicFailure(error);

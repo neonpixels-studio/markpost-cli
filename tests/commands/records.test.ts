@@ -1265,6 +1265,7 @@ describe('runRecordsCommand', () => {
           messages.push(parsed.message);
         }
 
+        expect(messages[0]).toContain('Failed to update record "abc-123"');
         expect(messages[0]).toContain('HTTP 404');
         expect(messages[0]).toContain('No record was found');
         expect(messages[1]).toContain('HTTP 422');

@@ -291,6 +291,43 @@ describe('runGetCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('reports an earlier per-record 422 and then aborts on a systemic 401', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    vi.mocked(fetchRecord)
+      .mockRejectedValueOnce(
+        new ApiRequestError('Invalid Attribute: uuid is malformed', 422),
+      )
+      .mockRejectedValueOnce(new ApiRequestError('Bad token', 401))
+      .mockResolvedValue(mockRecord);
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['bad-1', 'abc-123', 'never-fetched']);
+
+    expect(fetchRecord).toHaveBeenCalledTimes(2);
+    const messages = vi
+      .mocked(console.error)
+      .mock.calls.map((call) => call[0] as string);
+    expect(messages).toContain(
+      'Failed to fetch record "bad-1": Request failed (HTTP 422): Invalid Attribute: uuid is malformed',
+    );
+    expect(messages).toContain('Authentication failed (HTTP 401): Bad token');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('aborts the batch on a non-API error without a per-uuid failure line', async () => {
+    const { fetchRecord } = await import('@/libs/records.js');
+    vi.mocked(fetchRecord).mockRejectedValue(new Error('Request timed out'));
+    const { runGetCommand } = await import('@/commands/get.js');
+
+    await runGetCommand(['abc-123', 'def-456']);
+
+    expect(fetchRecord).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith('Request timed out');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('strips terminal escapes from a server-provided rejection detail', async () => {
     const { fetchRecord } = await import('@/libs/records.js');
     const { ApiRequestError } = await import('@/libs/api.js');
