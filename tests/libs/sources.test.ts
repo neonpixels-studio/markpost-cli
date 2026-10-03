@@ -56,6 +56,7 @@ const mockSource: Source = {
   provider: null,
   endpointSlug: 'wh_abc12345',
   routeFolder: '99-incoming/',
+  fieldMapping: null,
   lastHitAt: null,
   recordCount: 0,
 };
