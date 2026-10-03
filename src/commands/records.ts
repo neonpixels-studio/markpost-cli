@@ -13,13 +13,9 @@ import {
   isPerRecordRejection,
 } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import {
-  failWithMessage,
-  messageFromError,
-  warnPartialRead,
-} from '@/libs/errors.js';
+import { failWithMessage, warnPartialRead } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
+import { failWithSubcommandUsage, parseOrFailWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
@@ -63,16 +59,16 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
   }
 
   // Parse before checkConfig, which prompts for and persists config when
-  // unset: a bad flag must fail on usage alone. Its own catch so a usage
-  // throw reports the `usage` JSON code, not the fetch path's `fetch_failed`.
-  let filters: RecordListFilters;
+  // unset: a bad flag must fail on usage alone. Parsed via
+  // parseOrFailWithUsage so a usage throw reports the `usage` JSON code, not
+  // the fetch path's `fetch_failed`.
+  const parsed = parseOrFailWithUsage(() => parseListArgs(args), USAGE, json);
 
-  try {
-    ({ filters } = parseListArgs(args));
-  } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+  if (!parsed) {
     return;
   }
+
+  const { filters } = parsed;
 
   try {
     if (!(await checkConfig(json))) {
@@ -401,14 +397,15 @@ const runUpdateCommand = async (
   args: string[],
   json: boolean,
 ): Promise<void> => {
-  // Parse in its own try/catch, before the config check, so a bad flag or a
+  // Parse via parseOrFailWithUsage, before the config check, so a bad flag or a
   // missing uuid fails on usage alone — mirrors runRecordsCommand's list path.
-  let updateArgs: UpdateRecordArgs;
+  const updateArgs = parseOrFailWithUsage(
+    () => parseUpdateArgs(args),
+    USAGE,
+    json,
+  );
 
-  try {
-    updateArgs = parseUpdateArgs(args);
-  } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+  if (!updateArgs) {
     return;
   }
 
