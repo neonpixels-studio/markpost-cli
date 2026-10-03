@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { createRecord } from '@/libs/records.js';
 import {
   ApiRequestError,
+  describeRequestRejection,
   describeSystemicFailure,
   isSystemicApiFailure,
   rethrowIfTimeout,
@@ -134,7 +135,7 @@ const pushFile = async (filePath: string): Promise<PushResult> => {
     console.error(
       chalk.redBright(
         sanitizeForTerminal(
-          `Failed to push "${filePath}": ${toMessage(error)}`,
+          `Failed to push "${filePath}": ${describeRequestRejection(error)}`,
         ),
       ),
     );

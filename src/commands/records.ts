@@ -7,7 +7,11 @@ import {
   RecordListFilters,
   updateRecord,
 } from '@/libs/records.js';
-import { describeApiError } from '@/libs/api.js';
+import {
+  describeApiError,
+  describeRequestRejection,
+  isPerRecordRejection,
+} from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
 import {
   failWithMessage,
@@ -333,7 +337,26 @@ const updateRecordAndReport = async (
   { uuid, title, content }: UpdateRecordArgs,
   json: boolean,
 ): Promise<void> => {
-  const updated = await updateRecord(uuid, { title, content });
+  let updated: Record | null;
+
+  try {
+    updated = await updateRecord(uuid, { title, content });
+  } catch (error) {
+    // A per-record rejection (a 404 for an unknown uuid, a 422 for an invalid
+    // title/content) carries the server's own detail, so name the record and
+    // report why; a systemic failure falls through to the caller's catch.
+    if (!isPerRecordRejection(error)) {
+      throw error;
+    }
+
+    failWithMessage(
+      sanitizeForTerminal(
+        `Failed to update record "${uuid}": ${describeRequestRejection(error)}`,
+      ),
+      json,
+    );
+    return;
+  }
 
   if (!updated) {
     failWithMessage(
