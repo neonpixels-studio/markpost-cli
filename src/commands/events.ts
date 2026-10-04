@@ -3,13 +3,9 @@ import chalk from 'chalk';
 import { fetchAllEvents } from '@/libs/events.js';
 import { describeApiError } from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import {
-  failWithMessage,
-  messageFromError,
-  warnPartialRead,
-} from '@/libs/errors.js';
+import { failWithMessage, warnPartialRead } from '@/libs/errors.js';
 import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
+import { failWithSubcommandUsage, parseOrFailWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Event, EVENT_KINDS, EventKind } from '@/types/events.types.js';
 
@@ -34,12 +30,9 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
   }
 
   // markpost's GET /api/events takes no filters, so this only rejects a
-  // stray argument before checkConfig. Its own catch so a usage throw
-  // reports the `usage` JSON code, not the fetch path's `fetch_failed`.
-  try {
-    parseListArgs(args);
-  } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+  // stray argument before checkConfig. Parsed via parseOrFailWithUsage so a
+  // usage throw reports the `usage` JSON code, not `fetch_failed`.
+  if (!parseOrFailWithUsage(() => parseListArgs(args), USAGE, json)) {
     return;
   }
 
@@ -62,7 +55,7 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
 // bad invocation (`events list --bogus`, `events list webhook`) fails loud
 // here rather than silently ignored. positionals[0] is the `list` subcommand
 // itself; anything past it is a stray argument.
-const parseListArgs = (args: string[]): void => {
+const parseListArgs = (args: string[]): { positionals: string[] } => {
   const { positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -76,6 +69,8 @@ const parseListArgs = (args: string[]): void => {
       `Unexpected argument "${positionals[1]}". \`events list\` takes no arguments.`,
     );
   }
+
+  return { positionals };
 };
 
 // One color function per markpost event kind, keyed off the local

@@ -419,10 +419,12 @@ export const createRecord = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    // Auth (401/403) and 5xx failures doom every other record in a bulk push,
-    // so surface them to the caller to fail-fast rather than logging and
-    // returning null (which the caller can't distinguish from a per-file 4xx).
-    if (isSystemicApiFailure(error)) {
+    // Any server rejection is re-thrown with its status and error detail so
+    // the caller can report it: a systemic one (auth/5xx) dooms every other
+    // record in a bulk push so the caller aborts on it, while a per-file 4xx
+    // (a 422 on this record's own value) is reported for just that file —
+    // returning null would collapse both into one generic failure.
+    if (error instanceof ApiRequestError) {
       throw error;
     }
 
@@ -813,11 +815,11 @@ export const fetchRecord = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    // A systemic auth/5xx failure is not "record not found" — re-throw it
-    // (mirroring createRecord) so `get` reports the real cause with a non-zero
-    // exit, instead of the generic "Failed to fetch record" a null return
-    // produces. A genuine 404 stays non-systemic and still returns null.
-    if (isSystemicApiFailure(error)) {
+    // Any server rejection is re-thrown (mirroring createRecord) so `get`
+    // reports the real cause — a systemic auth/5xx aborts the batch, while a
+    // per-record 404/422 carries the server's own error detail so the two
+    // read differently instead of both collapsing to a generic null.
+    if (error instanceof ApiRequestError) {
       throw error;
     }
 
@@ -870,12 +872,12 @@ export const updateRecord = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    // Mirrors fetchRecord: a systemic auth/5xx failure is re-thrown so the
-    // command reports the real, classified cause rather than the generic
-    // "Failed to update record" a null return produces. A per-record 4xx
-    // (e.g. a 404 for a uuid that doesn't exist, or a 422 for an invalid
-    // title/content) stays non-systemic and returns null.
-    if (isSystemicApiFailure(error)) {
+    // Mirrors fetchRecord: any server rejection is re-thrown so the command
+    // reports the real cause, including the server's detail for a per-record
+    // 4xx (a 404 for a uuid that doesn't exist, a 422 for an invalid
+    // title/content), rather than the generic "Failed to update record" a
+    // null return produces.
+    if (error instanceof ApiRequestError) {
       throw error;
     }
 

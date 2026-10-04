@@ -1,14 +1,18 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { ERROR_STATUS, fetchRecord } from '@/libs/records.js';
-import { describeApiError } from '@/libs/api.js';
+import {
+  describeApiError,
+  describeRequestRejection,
+  isPerRecordRejection,
+} from '@/libs/api.js';
 import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, messageFromError } from '@/libs/errors.js';
+import { failWithMessage } from '@/libs/errors.js';
 import {
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
 } from '@/libs/terminal.js';
-import { failWithUsage } from '@/libs/usage.js';
+import { failWithUsage, parseOrFailWithUsage } from '@/libs/usage.js';
 import { hasJsonFlag, printJson } from '@/libs/output.js';
 import { Record } from '@/types/records.types.js';
 
@@ -23,19 +27,17 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   // flag — is rendered in whichever contract the caller asked for.
   const json = hasJsonFlag(args);
 
-  // Parse in its own try/catch, before the fetch path, so a bad flag reports
+  // Parse via parseOrFailWithUsage, before the fetch path, so a bad flag reports
   // the `usage` JSON code (and the usage block without --json) rather than the
   // fetch path's `fetch_failed`/generic prose — a usage error is not a fetch
   // failure (issue #208), mirroring records.ts/events.ts.
-  let uuids: string[];
-  let requestedCount: number;
+  const parsed = parseOrFailWithUsage(() => parseGetArgs(args), USAGE, json);
 
-  try {
-    ({ uuids, requestedCount } = parseGetArgs(args));
-  } catch (error) {
-    failWithUsage(sanitizeForTerminal(messageFromError(error)), USAGE, json);
+  if (!parsed) {
     return;
   }
+
+  const { uuids, requestedCount } = parsed;
 
   if (requestedCount === 0) {
     failWithUsage('No uuid given.', USAGE, json);
@@ -60,7 +62,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 
     try {
       for (const uuid of uuids) {
-        results.push({ uuid, record: await fetchRecord(uuid, json) });
+        results.push(await fetchResult(uuid, json));
       }
     } finally {
       reportResultsSafely(results, json, requestedCount);
@@ -111,16 +113,36 @@ const parseGetArgs = (
   };
 };
 
-// One requested uuid's outcome: the record it resolved to, or `null` when
-// `fetchRecord` classified it as a genuine not-found (a systemic failure
-// throws instead and is handled by the caller's try/catch, not this shape).
+// One requested uuid's outcome: the record it resolved to, or `null` when it
+// couldn't be fetched. `failure` carries the server's status + error detail
+// when it rejected just this uuid (a 404 vs a 422), so each reads differently;
+// it is absent for a null with no server rejection (a network error, already
+// logged by `fetchRecord`). A systemic failure throws instead and is handled
+// by the caller's try/catch, not this shape.
 interface GetResult {
   uuid: string;
   record: Record | null;
+  failure?: string;
 }
 
-const reportMissing = (uuid: string, json: boolean): void => {
-  failWithMessage(`Failed to fetch record "${uuid}".`, json);
+// A per-record server rejection becomes that uuid's own failure so the rest of
+// the batch still fetches; a systemic one (auth/5xx) aborts the batch.
+const fetchResult = async (uuid: string, json: boolean): Promise<GetResult> => {
+  try {
+    return { uuid, record: await fetchRecord(uuid, json) };
+  } catch (error) {
+    if (!isPerRecordRejection(error)) {
+      throw error;
+    }
+
+    return { uuid, record: null, failure: describeRequestRejection(error) };
+  }
+};
+
+const reportMissing = ({ uuid, failure }: GetResult, json: boolean): void => {
+  const reason = failure ? `: ${sanitizeForTerminal(failure)}` : '.';
+
+  failWithMessage(`Failed to fetch record "${uuid}"${reason}`, json);
 };
 
 // Reporting runs from the fetch loop's `finally` so a mid-batch abort still
@@ -179,9 +201,11 @@ const reportResults = (
   reportTextResults(results);
 };
 
-const reportSingleJsonResult = ({ uuid, record }: GetResult): void => {
+const reportSingleJsonResult = (result: GetResult): void => {
+  const { record } = result;
+
   if (!record) {
-    reportMissing(uuid, true);
+    reportMissing(result, true);
     return;
   }
 
@@ -199,7 +223,7 @@ const reportJsonResults = (
 
   results
     .filter((result) => !result.record)
-    .forEach((result) => reportMissing(result.uuid, true));
+    .forEach((result) => reportMissing(result, true));
 
   const records = results
     .filter((result): result is GetResult & { record: Record } =>
@@ -224,7 +248,7 @@ const reportJsonResults = (
 // blank-line separator appears.
 const printTextResult = (printedFirst: boolean, result: GetResult): boolean => {
   if (!result.record) {
-    reportMissing(result.uuid, false);
+    reportMissing(result, false);
     return printedFirst;
   }
 

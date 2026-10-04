@@ -188,6 +188,15 @@ export const isSystemicApiFailure = (
 ): error is ApiRequestError =>
   error instanceof ApiRequestError && error.isSystemic;
 
+// Narrowing guard: true only for a non-systemic `ApiRequestError` - the server
+// rejected just this one request (a 404 for a missing record, a 422 for its own
+// value). A bulk caller reports it for that item and keeps going, whereas a
+// systemic failure aborts the batch.
+export const isPerRecordRejection = (
+  error: unknown,
+): error is ApiRequestError =>
+  error instanceof ApiRequestError && !error.isSystemic;
+
 // Narrowing guard: true only for a PERMANENT failure (a dead token / forbidden
 // account) that won't clear on a blind retry. Keeps the permanence rule inside
 // the API seam so callers deciding whether to stop an autoSync daemon (the
@@ -239,6 +248,22 @@ export const describeSystemicFailure = (error: ApiRequestError): string => {
 // before printing — a server-derived message can carry a terminal escape.
 export const describeApiError = (error: unknown): string => {
   if (isSystemicApiFailure(error)) {
+    return describeSystemicFailure(error);
+  }
+
+  return messageFromError(error);
+};
+
+// Unlike `describeApiError` (which only classifies a systemic failure and
+// leaves a per-record 4xx as its bare message), this labels ANY rejected
+// request with its status, for callers that report a per-record 4xx: the HTTP
+// status plus the server's own error detail, so a 404 and a 422 read
+// differently. Other thrown values (a network error) fall back to their raw
+// message. Callers sanitize the result before printing; the detail is
+// server-derived.
+export const describeRequestRejection = (error: unknown): string => {
+  if (error instanceof ApiRequestError) {
+    // `failureKind` falls back to "Request failed" for a non-systemic status.
     return describeSystemicFailure(error);
   }
 

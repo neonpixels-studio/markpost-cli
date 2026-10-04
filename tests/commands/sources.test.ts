@@ -47,6 +47,7 @@ const webhookSource: Source = {
   provider: null,
   endpointSlug: 'wh_abc12345',
   routeFolder: '99-incoming/',
+  fieldMapping: null,
   lastHitAt: null,
   recordCount: 3,
 };
@@ -59,8 +60,14 @@ const emailSource: Source = {
   provider: null,
   endpointSlug: 'clip-ab12',
   routeFolder: '98-incoming/',
+  fieldMapping: null,
   lastHitAt: '2024-02-01T00:00:00Z',
   recordCount: 1,
+};
+
+const mappedSource: Source = {
+  ...webhookSource,
+  fieldMapping: { title: 'data.subject', content: 'data.body' },
 };
 
 // A secret-backed provider (github/zapier/shortcuts): markpost's create
@@ -75,6 +82,7 @@ const githubSource: CreatedSource = {
   providerSecret: 'whsec_one_time_plaintext',
   endpointSlug: 'gh_789xyz',
   routeFolder: '97-incoming/',
+  fieldMapping: null,
   lastHitAt: null,
   recordCount: 0,
 };
@@ -89,6 +97,7 @@ const stripeSource: Source = {
   provider: 'stripe',
   endpointSlug: 'st_123abc',
   routeFolder: '96-incoming/',
+  fieldMapping: null,
   lastHitAt: null,
   recordCount: 0,
 };
@@ -351,6 +360,63 @@ describe('runSourcesCommand', () => {
         uuid: 'def-456',
         endpoint: 'clip-ab12@in.markpost.io',
       });
+    });
+
+    it('includes the stored fieldMapping in --json output, null when unset', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource, emailSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      const parsed = JSON.parse(output);
+      expect(parsed[0].fieldMapping).toEqual({
+        title: 'data.subject',
+        content: 'data.body',
+      });
+      expect(parsed[1].fieldMapping).toBeNull();
+    });
+
+    it('prints the configured field mapping keys in the pretty output', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      expect(console.log).toHaveBeenCalledWith('  mapping:');
+      expect(console.log).toHaveBeenCalledWith('    title: data.subject');
+      expect(console.log).toHaveBeenCalledWith('    content: data.body');
+    });
+
+    it('sanitizes hostile field-mapping values before printing', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        {
+          ...webhookSource,
+          fieldMapping: { title: `data.${control}[31msubject` },
+        },
+      ]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      expect(loggedText()).not.toContain(control);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('title: data.'),
+      );
+    });
+
+    it('omits the mapping section from the pretty output when none is stored', async () => {
+      const { fetchSources } = await import('@/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      expect(console.log).not.toHaveBeenCalledWith('  mapping:');
     });
 
     it('prints an empty JSON array (not "No sources found.") for --json with no sources', async () => {
@@ -1086,6 +1152,156 @@ describe('runSourcesCommand', () => {
         routeFolder: '00-fixed/',
         fieldMapping: { title: 'data.subject', content: 'data.body' },
       });
+    });
+
+    it('prefills each field-mapping prompt with the stored value', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(mappedSource.routeFolder)
+        .mockResolvedValueOnce('data.headline') // fieldMapping.title changed
+        .mockResolvedValueOnce('data.body') // fieldMapping.content kept
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      vi.mocked(updateSource).mockResolvedValue(mappedSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      const defaults = vi
+        .mocked(input)
+        .mock.calls.slice(1)
+        .map(([config]) => (config as { default?: string }).default);
+      expect(defaults).toEqual([
+        'data.subject',
+        'data.body',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ]);
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: { title: 'data.headline', content: 'data.body' },
+      });
+    });
+
+    it('does not send an update when every prefilled field-mapping value is re-accepted', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(mappedSource.routeFolder)
+        .mockResolvedValueOnce('data.subject')
+        .mockResolvedValueOnce('data.body')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).not.toHaveBeenCalled();
+    });
+
+    it('removes a stored field-mapping key when the clear sentinel is entered', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(mappedSource.routeFolder)
+        .mockResolvedValueOnce('data.subject')
+        .mockResolvedValueOnce('-') // clear fieldMapping.content
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      vi.mocked(updateSource).mockResolvedValue(mappedSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: { title: 'data.subject' },
+      });
+      expect(input).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('enter "-" to remove'),
+        }),
+      );
+    });
+
+    it('sends fieldMapping null when every stored key is removed with the clear sentinel', async () => {
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(mappedSource.routeFolder)
+        .mockResolvedValueOnce('-')
+        .mockResolvedValueOnce('-')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('');
+      vi.mocked(updateSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: null,
+      });
+    });
+
+    it('sanitizes a hostile stored value passed as a prompt default and keeps the blank-to-skip hint for unset keys', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, fieldMapping: { title: `data.${control}[31m` } },
+      ]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input)
+        .mockResolvedValueOnce(webhookSource.routeFolder)
+        .mockResolvedValue('');
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      const configs = vi
+        .mocked(input)
+        .mock.calls.slice(1)
+        .map(([config]) => config as { default?: string; message: string });
+      expect(configs[0].default).not.toContain(control);
+      expect(configs[0].message).toContain('enter "-" to remove');
+      expect(configs[1].message).toContain('blank to skip');
+      expect(configs[1].message).not.toContain('enter "-"');
+    });
+
+    it('does not send an update when a hostile stored value is re-accepted as its sanitized default', async () => {
+      const control = String.fromCharCode(0x1b);
+      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      const hostileTitle = `data.${control}[31msubject`;
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, fieldMapping: { title: hostileTitle } },
+      ]);
+      vi.mocked(confirm).mockResolvedValue(true);
+      vi.mocked(input).mockImplementation(
+        (async (config: { default?: string }) => config.default ?? '') as never,
+      );
+      const { runSourcesCommand } = await import('@/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123']);
+
+      expect(updateSource).not.toHaveBeenCalled();
     });
 
     // Pins the decline explicitly (rather than relying on `confirm()`'s

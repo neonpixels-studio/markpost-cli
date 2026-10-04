@@ -42,6 +42,10 @@ import {
 export const WEBHOOK_INGEST_BASE = 'https://ingest.markpost.io/v1/hooks';
 export const EMAIL_DOMAIN = 'in.markpost.io';
 
+// inquirer's `input` returns the prefilled default on an empty submit, so a
+// stored key can't be cleared with a blank answer; this sentinel removes it.
+const CLEAR_FIELD_MAPPING_KEY_SENTINEL = '-';
+
 export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret|test> [uuid]
 
   list                  List all sources (pass --json for machine-readable output)
@@ -409,6 +413,24 @@ const printProviderSecret = (
   console.log(chalk.bold(`  ${sanitizeForTerminal(providerSecret)}`));
 };
 
+// Field-mapping values are untrusted API output too, so they are sanitized.
+const printFieldMapping = (
+  fieldMapping: FieldMappingConfig | null | undefined,
+): void => {
+  const configuredKeys = FIELD_MAPPING_KEYS.filter((key) =>
+    Boolean(fieldMapping?.[key]),
+  );
+
+  if (configuredKeys.length === 0) {
+    return;
+  }
+
+  console.log('  mapping:');
+  configuredKeys.forEach((key) => {
+    console.log(`    ${key}: ${sanitizeForTerminal(fieldMapping?.[key])}`);
+  });
+};
+
 // Every field here comes from the untrusted API response, so each is stripped
 // of control/ANSI escapes before printing (see terminal.ts): name, uuid, type,
 // endpoint (built from endpointSlug), routeFolder, recordCount, and lastHitAt.
@@ -427,6 +449,7 @@ const printSource = (source: Source): void => {
     )}`,
   );
   console.log(`  folder:    ${sanitizeForTerminal(source.routeFolder)}`);
+  printFieldMapping(source.fieldMapping);
   console.log(`  records:   ${sanitizeForTerminal(source.recordCount)}`);
   console.log(
     `  last hit:  ${source.lastHitAt ? sanitizeForTerminal(source.lastHitAt) : 'never hit'}`,
@@ -457,6 +480,7 @@ const serializeSourceForJson = (
   endpointSlug: source.endpointSlug,
   endpoint: buildEndpointUrl(source.type, source.endpointSlug),
   routeFolder: source.routeFolder,
+  fieldMapping: source.fieldMapping ?? null,
   lastHitAt: source.lastHitAt,
   recordCount: source.recordCount,
 });
@@ -479,6 +503,45 @@ const listSources = async (json: boolean): Promise<void> => {
   sources.forEach(printSource);
 };
 
+// The stored value is untrusted API output that inquirer echoes into the
+// prompt line, so it gets the same sanitizing as every printed field.
+const sanitizedStoredValue = (storedValue: string | undefined) =>
+  storedValue === undefined ? undefined : sanitizeForTerminal(storedValue);
+
+// Re-accepting the sanitized prefill must keep the raw stored value, not
+// overwrite it with the sanitized copy; the sentinel removes the key.
+// Known limit: deliberately typing the sanitized form of a hostile stored value
+// is indistinguishable from re-accepting the default; clear the key with the
+// sentinel first to replace it.
+const resolveFieldMappingAnswer = (
+  answer: string,
+  storedValue: string | undefined,
+): string => {
+  if (answer === CLEAR_FIELD_MAPPING_KEY_SENTINEL) {
+    return '';
+  }
+
+  if (
+    storedValue !== undefined &&
+    answer === sanitizedStoredValue(storedValue)
+  ) {
+    return storedValue;
+  }
+
+  return answer;
+};
+
+const fieldMappingPromptMessage = (
+  key: FieldMappingKey,
+  storedValue: string | undefined,
+): string => {
+  const skipHint = storedValue
+    ? `enter "${CLEAR_FIELD_MAPPING_KEY_SENTINEL}" to remove`
+    : 'blank to skip';
+
+  return `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — ${skipHint}`;
+};
+
 // One prompt per key markpost's field-mapping contract recognizes (see
 // FIELD_MAPPING_KEYS in src/types/sources.types.ts), in the same order
 // markpost's own FieldMappingModal.vue presents them. Answers are collected
@@ -487,17 +550,20 @@ const listSources = async (json: boolean): Promise<void> => {
 // the server's own normalization (server/utils/fieldMappingValidation.ts's
 // normalizeAndValidate), which likewise drops anything blank rather than
 // storing it.
-const collectFieldMapping = async (): Promise<FieldMappingConfig> => {
+const collectFieldMapping = async (
+  current: FieldMappingConfig | null = null,
+): Promise<FieldMappingConfig> => {
   const answers: [FieldMappingKey, string][] = [];
 
   for (const key of FIELD_MAPPING_KEYS) {
-    const value = (
+    const answer = (
       await input({
-        message: `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — blank to skip`,
+        message: fieldMappingPromptMessage(key, current?.[key]),
+        default: sanitizedStoredValue(current?.[key]),
       })
     ).trim();
 
-    answers.push([key, value]);
+    answers.push([key, resolveFieldMappingAnswer(answer, current?.[key])]);
   }
 
   return Object.fromEntries(
@@ -505,14 +571,26 @@ const collectFieldMapping = async (): Promise<FieldMappingConfig> => {
   ) as FieldMappingConfig;
 };
 
+// Re-accepting every prefilled default yields the stored mapping verbatim;
+// that is "nothing to change", not a PATCH worth sending.
+const isSameFieldMapping = (
+  next: FieldMappingConfig,
+  current: FieldMappingConfig | null,
+): boolean =>
+  FIELD_MAPPING_KEYS.every(
+    (key) => (next[key] ?? '') === (current?.[key] ?? ''),
+  );
+
 // Field mapping is optional and easy to configure later via `sources update`,
 // so it stays behind an explicit opt-in rather than always asking six more
-// questions up front. Returns undefined when declined *or* when every answer
-// came back blank — markpost's PATCH/POST handlers treat a supplied
+// questions up front. Returns undefined (do not send) when declined, when every
+// answer came back blank, or when the answers equal the stored mapping; null
+// (clear) when every stored key was removed with the sentinel; otherwise the
+// replacement mapping. markpost's PATCH/POST handlers treat a supplied
 // fieldMapping as the complete replacement for whatever is stored (there is
 // no per-key merge; see server/api/sources/[uuid].patch.ts and
-// server/utils/fieldMappingValidation.ts), so an all-blank result must read
-// as "nothing to change" rather than as a deliberate clear-to-null — the
+// server/utils/fieldMappingValidation.ts), so an all-blank result with nothing stored must
+// read as "nothing to change" rather than as a deliberate clear-to-null — the
 // opt-in's whole point is to leave an untouched mapping alone when nothing
 // is actually typed. Omitting the attribute entirely lets `create` fall back
 // to markpost's own `attributes.fieldMapping ?? null` default, and lets
@@ -520,7 +598,8 @@ const collectFieldMapping = async (): Promise<FieldMappingConfig> => {
 // server/api/sources/[uuid].patch.ts's `"fieldMapping" in attributes` check).
 const promptFieldMapping = async (
   confirmMessage: string,
-): Promise<FieldMappingConfig | undefined> => {
+  current: FieldMappingConfig | null = null,
+): Promise<FieldMappingConfig | null | undefined> => {
   const configureFieldMapping = await confirm({
     message: confirmMessage,
     default: false,
@@ -530,9 +609,15 @@ const promptFieldMapping = async (
     return undefined;
   }
 
-  const fieldMapping = await collectFieldMapping();
+  const fieldMapping = await collectFieldMapping(current);
 
-  return Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined;
+  if (isSameFieldMapping(fieldMapping, current)) {
+    return undefined;
+  }
+
+  // Every stored key was removed with the clear sentinel: send an explicit
+  // `null` (markpost's "clear the mapping" value) rather than dropping it.
+  return Object.keys(fieldMapping).length === 0 ? null : fieldMapping;
 };
 
 const createSourceCommand = async (): Promise<void> => {
@@ -557,7 +642,7 @@ const createSourceCommand = async (): Promise<void> => {
     name,
     routeFolder,
     provider: provider || undefined,
-    ...(fieldMapping !== undefined ? { fieldMapping } : {}),
+    ...(fieldMapping ? { fieldMapping } : {}),
   });
 
   if (!created) {
@@ -649,14 +734,13 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
 };
 
 // Prompts for both updatable attributes and sends whichever actually
-// changed in one PATCH. `Source` (see src/types/sources.types.ts) doesn't
-// carry the source's current field mapping — markpost's list/get responses
-// do return one (server/utils/response.ts's sourceSerializer), but the CLI's
-// read-side type doesn't surface it yet — so the field-mapping prompt below
-// always starts blank rather than prefilling what's already stored, and a
-// supplied mapping fully replaces (never merges with) whatever is there
-// already (see promptFieldMapping). Declining the opt-in, or accepting it
-// and leaving every field blank, both leave the stored mapping untouched.
+// changed in one PATCH. The field-mapping prompt prefills each key with the
+// stored value (`Source.fieldMapping`), so accepting a default keeps that key;
+// a supplied mapping still fully replaces (never merges with) whatever is
+// there already (see promptFieldMapping). Declining the opt-in, accepting it
+// and leaving every field blank (nothing stored to begin with), or
+// re-accepting every stored value all leave the stored mapping untouched.
+// Removing every stored key with the clear sentinel sends `null`, clearing it.
 const promptAndApplyUpdates = async (target: Source): Promise<void> => {
   const routeFolder = (
     await input({
@@ -672,11 +756,12 @@ const promptAndApplyUpdates = async (target: Source): Promise<void> => {
 
   const routeFolderChanged = routeFolder !== target.routeFolder;
   const fieldMapping = await promptFieldMapping(
-    "Update field mapping now? (maps ingest payload fields to title/content/etc — this replaces the entire stored mapping, since the current one isn't shown here; leave unconfigured, or leave every field blank, to keep whatever is already set)",
+    'Update field mapping now? (maps ingest payload fields to title/content/etc — each field is prefilled with the stored value and the result replaces the entire stored mapping; decline to keep it as is)',
+    target.fieldMapping,
   );
 
   // Covers both "nothing typed differs" (route folder re-accepted as-is,
-  // field mapping declined) and "field mapping was offered but left blank" —
+  // field mapping declined) and "field mapping was offered but left blank or every stored value re-accepted" —
   // either way there is nothing to send.
   if (!routeFolderChanged && fieldMapping === undefined) {
     console.log('Nothing to update: route folder and field mapping unchanged.');

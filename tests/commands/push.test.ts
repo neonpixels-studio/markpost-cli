@@ -670,9 +670,40 @@ describe('runPushCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  // A per-file failure surfaces from createRecord as a null return (that's its
-  // real contract post-fix — it only throws for systemic failures), so the
-  // batch logs it and keeps going rather than aborting.
+  it('reports a per-file 422 with the server detail and keeps pushing the rest', async () => {
+    const { createRecord } = await import('@/libs/records.js');
+    const { ApiRequestError } = await import('@/libs/api.js');
+    const { readMarkdown } = await import('@/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: ['a.md', 'b.md'],
+      missing: [],
+      skipped: [],
+    });
+    vi.mocked(readMarkdown)
+      .mockReturnValueOnce({ title: 'A', content: 'Content A', tags: [] })
+      .mockReturnValueOnce({ title: 'B', content: 'Content B', tags: [] });
+    vi.mocked(createRecord)
+      .mockRejectedValueOnce(
+        new ApiRequestError('Invalid Attribute: Title is too long', 422),
+      )
+      .mockResolvedValueOnce(recordFor('B', 'uuid-b'));
+    const { runPushCommand } = await import('@/commands/push.js');
+
+    await runPushCommand(['a.md', 'b.md']);
+
+    expect(createRecord).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Failed to push "a.md": Request failed (HTTP 422): Invalid Attribute: Title is too long',
+      ),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  // A per-file failure with no server rejection (e.g. a network error)
+  // surfaces from createRecord as a null return, so the batch logs it and
+  // keeps going rather than aborting.
   it('does not abort on a per-file failure — it keeps pushing the rest', async () => {
     const { createRecord } = await import('@/libs/records.js');
     const { readMarkdown } = await import('@/libs/markdown.js');

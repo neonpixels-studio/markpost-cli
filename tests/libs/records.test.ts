@@ -936,12 +936,14 @@ describe('createRecord', () => {
     );
   });
 
-  it('returns null when the response contains errors', async () => {
+  it('re-throws the server detail when the response contains errors', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Error', detail: 'Bad request' }] } },
       false,
     );
-    expect(await createRecord('Test Title', 'Test Content')).toBeNull();
+    await expect(
+      createRecord('Test Title', 'Test Content'),
+    ).rejects.toMatchObject({ message: 'Error: Bad request' });
   });
 
   it('returns null on network failure', async () => {
@@ -1009,9 +1011,10 @@ describe('createRecord', () => {
     );
   });
 
-  // A per-file 4xx (the payload's fault) must stay a null return so a bulk
-  // push skips just this file and keeps going.
-  it('returns null for a non-systemic 4xx failure', async () => {
+  // A per-file 4xx (the payload's fault) is re-thrown with the server's detail
+  // (not collapsed to null) so push can report why this file was rejected,
+  // while still treating it as non-systemic and pressing on with the batch.
+  it('re-throws a non-systemic 4xx with the server detail', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 422,
@@ -1020,7 +1023,14 @@ describe('createRecord', () => {
           data: { errors: [{ title: 'Unprocessable', detail: 'Bad' }] },
         }),
     });
-    expect(await createRecord('Test Title', 'Test Content')).toBeNull();
+
+    await expect(
+      createRecord('Test Title', 'Test Content'),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      isSystemic: false,
+      message: 'Unprocessable: Bad',
+    });
   });
 
   // Auth/5xx doom every other file in a batch, so createRecord surfaces them
@@ -1112,12 +1122,14 @@ describe('fetchRecord', () => {
     expect(await fetchRecord('abc-123')).toEqual(mockRecord);
   });
 
-  it('returns null when the response contains errors', async () => {
+  it('re-throws the server detail when the response contains errors', async () => {
     mockFetch(
       { data: { errors: [{ title: 'Not Found', detail: 'Record missing' }] } },
       false,
     );
-    expect(await fetchRecord('abc-123')).toBeNull();
+    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+      message: 'Not Found: Record missing',
+    });
   });
 
   it('returns null on network failure', async () => {
@@ -1157,9 +1169,9 @@ describe('fetchRecord', () => {
     });
   });
 
-  // A genuine 404 (markpost's notFoundError) is NOT systemic: it stays a null
-  // return so `get` reports "Failed to fetch record", not an auth error.
-  it('returns null for a non-systemic 404 (record not found)', async () => {
+  // A 404 and a 422 are both non-systemic per-record rejections, but each is
+  // re-thrown with its own status and server detail so they read differently.
+  it('re-throws a non-systemic 404 with its status and server detail', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -1169,7 +1181,28 @@ describe('fetchRecord', () => {
         }),
     });
 
-    expect(await fetchRecord('abc-123')).toBeNull();
+    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+      statusCode: 404,
+      isSystemic: false,
+      message: 'Not Found: No record was found',
+    });
+  });
+
+  it('re-throws a non-systemic 422 with its status and server detail', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: () =>
+        Promise.resolve({
+          errors: [{ title: 'Invalid Attribute', detail: 'uuid is malformed' }],
+        }),
+    });
+
+    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+      statusCode: 422,
+      isSystemic: false,
+      message: 'Invalid Attribute: uuid is malformed',
+    });
   });
 
   // Regression coverage for #29: see the equivalent note in the createRecord
@@ -1219,16 +1252,20 @@ describe('updateRecord', () => {
     ).toEqual(mockRecord);
   });
 
-  it('returns null when the response contains errors', async () => {
+  it('re-throws the server detail when the response contains errors', async () => {
     mockFetch(
       {
         data: {
-          errors: [{ title: 'Invalid Attribute', detail: 'Title cannot be empty' }],
+          errors: [
+            { title: 'Invalid Attribute', detail: 'Title cannot be empty' },
+          ],
         },
       },
       false,
     );
-    expect(await updateRecord('abc-123', { title: '' })).toBeNull();
+    await expect(updateRecord('abc-123', { title: '' })).rejects.toMatchObject({
+      message: 'Invalid Attribute: Title cannot be empty',
+    });
   });
 
   it('returns null on network failure', async () => {
@@ -1273,9 +1310,9 @@ describe('updateRecord', () => {
     });
   });
 
-  // A genuine 404 (record not found) is NOT systemic: it stays a null return
-  // so the command reports "Failed to update record", not an auth error.
-  it('returns null for a non-systemic 404 (record not found)', async () => {
+  // A 404 and a 422 are both non-systemic per-record rejections, but each is
+  // re-thrown with its own status and server detail so they read differently.
+  it('re-throws a non-systemic 404 with its status and server detail', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -1285,7 +1322,32 @@ describe('updateRecord', () => {
         }),
     });
 
-    expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+    await expect(
+      updateRecord('abc-123', { title: 'New Title' }),
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      isSystemic: false,
+      message: 'Not Found: No record was found',
+    });
+  });
+
+  it('re-throws a non-systemic 422 with its status and server detail', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: () =>
+        Promise.resolve({
+          errors: [{ title: 'Invalid Attribute', detail: 'Title is too long' }],
+        }),
+    });
+
+    await expect(
+      updateRecord('abc-123', { title: 'New Title' }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      isSystemic: false,
+      message: 'Invalid Attribute: Title is too long',
+    });
   });
 
   // The record's status/syncedAt after an edit reflect the server's resync
