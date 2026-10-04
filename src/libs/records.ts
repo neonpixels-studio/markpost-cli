@@ -6,6 +6,7 @@ import {
   isPermanentApiFailure,
   isSystemicApiFailure,
   logApiFailure,
+  rethrowIfTimeout,
   unwrapResourceAttributes,
   unwrapResourceCollection,
 } from '#src/libs/api.js';
@@ -799,7 +800,14 @@ export const markRecordsSynced = async (
   return { outcomes, abortReason: null };
 };
 
-export const fetchRecord = async (uuid: string): Promise<Record | null> => {
+// `json` suppresses the plain-text `logApiFailure` diagnostic for a
+// non-systemic failure so `--json` stderr carries only the command's single
+// `{ error, message }` object (mirrors `fetchPaginatedRecords`). A timeout
+// still throws either way.
+export const fetchRecord = async (
+  uuid: string,
+  json = false,
+): Promise<Record | null> => {
   try {
     const body = (await authedRequest(
       `/api/records/${encodeURIComponent(uuid)}`,
@@ -815,7 +823,11 @@ export const fetchRecord = async (uuid: string): Promise<Record | null> => {
       throw error;
     }
 
-    logApiFailure(`fetchRecord["${uuid}"]`, error);
+    rethrowIfTimeout(error);
+
+    if (!json) {
+      logApiFailure(`fetchRecord["${uuid}"]`, error);
+    }
 
     return null;
   }
@@ -839,6 +851,7 @@ export type UpdateRecordAttributes = {
 export const updateRecord = async (
   uuid: string,
   attributes: UpdateRecordAttributes,
+  json = false,
 ): Promise<Record | null> => {
   try {
     const body = (await authedRequest(
@@ -868,7 +881,11 @@ export const updateRecord = async (
       throw error;
     }
 
-    logApiFailure(`updateRecord["${uuid}"]`, error);
+    rethrowIfTimeout(error);
+
+    if (!json) {
+      logApiFailure(`updateRecord["${uuid}"]`, error);
+    }
 
     return null;
   }

@@ -62,7 +62,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
 
     try {
       for (const uuid of uuids) {
-        results.push(await fetchResult(uuid));
+        results.push(await fetchResult(uuid, json));
       }
     } finally {
       reportResultsSafely(results, json, requestedCount);
@@ -127,9 +127,9 @@ interface GetResult {
 
 // A per-record server rejection becomes that uuid's own failure so the rest of
 // the batch still fetches; a systemic one (auth/5xx) aborts the batch.
-const fetchResult = async (uuid: string): Promise<GetResult> => {
+const fetchResult = async (uuid: string, json: boolean): Promise<GetResult> => {
   try {
-    return { uuid, record: await fetchRecord(uuid) };
+    return { uuid, record: await fetchRecord(uuid, json) };
   } catch (error) {
     if (!isPerRecordRejection(error)) {
       throw error;

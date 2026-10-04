@@ -339,7 +339,7 @@ const updateRecordAndReport = async (
   let updated: Record | null;
 
   try {
-    updated = await updateRecord(uuid, { title, content });
+    updated = await updateRecord(uuid, { title, content }, json);
   } catch (error) {
     // A per-record rejection (a 404 for an unknown uuid, a 422 for an invalid
     // title/content) carries the server's own detail, so name the record and

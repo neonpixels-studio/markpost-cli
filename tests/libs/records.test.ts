@@ -1100,8 +1100,10 @@ describe('createRecord', () => {
 });
 
 describe('fetchRecord', () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   it('calls fetch with the correct UUID in the URL', async () => {
@@ -1133,6 +1135,22 @@ describe('fetchRecord', () => {
   it('returns null on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await fetchRecord('abc-123')).toBeNull();
+  });
+
+  it('does not log to stderr on a non-systemic failure when json is true', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    expect(await fetchRecord('abc-123', true)).toBeNull();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs its own diagnostic on a non-systemic failure when json is false', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    expect(await fetchRecord('abc-123')).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('fetchRecord["abc-123"]'),
+    );
   });
 
   // A systemic auth (401) failure is not "record not found" — fetchRecord
@@ -1203,8 +1221,10 @@ describe('fetchRecord', () => {
 });
 
 describe('updateRecord', () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   it('PATCHes the correct UUID with the given attributes', async () => {
@@ -1251,6 +1271,24 @@ describe('updateRecord', () => {
   it('returns null on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+  });
+
+  it('does not log to stderr on a non-systemic failure when json is true', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    expect(
+      await updateRecord('abc-123', { title: 'New Title' }, true),
+    ).toBeNull();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs its own diagnostic on a non-systemic failure when json is false', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('updateRecord["abc-123"]'),
+    );
   });
 
   // A systemic auth (401) failure is not a per-record validation failure —
@@ -2035,6 +2073,16 @@ describe('records API timeout propagation', () => {
       .mockRejectedValueOnce(new DOMException('timed out', 'TimeoutError'));
 
     await expect(fetchAllRecords()).rejects.toBeInstanceOf(ApiTimeoutError);
+  });
+
+  it('fetchRecord and updateRecord still reject on a timeout when json is true', async () => {
+    mockFetchTimeout();
+    await expect(fetchRecord('abc-123', true)).rejects.toBeInstanceOf(
+      ApiTimeoutError,
+    );
+    await expect(
+      updateRecord('abc-123', { title: 'T' }, true),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
   it('createRecord rejects with ApiTimeoutError instead of returning null', async () => {
