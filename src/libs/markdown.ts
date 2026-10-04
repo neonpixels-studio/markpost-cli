@@ -18,18 +18,18 @@ import {
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import slugify from '@sindresorhus/slugify';
-import { config } from '@/libs/config.js';
-import { expandHomeDirectory } from '@/libs/paths.js';
+import { config } from '#src/libs/config.js';
+import { expandHomeDirectory } from '#src/libs/paths.js';
 import {
   buildRecordDocument,
   extractFrontmatterTagsWithDiagnostics,
   stripFrontmatterDocument,
-} from '@/libs/frontmatter.js';
-import { Record } from '@/types/records.types.js';
+} from '#src/libs/frontmatter.js';
+import { Record } from '#src/types/records.types.js';
 import {
   ConflictStrategy,
   DEFAULT_CONFLICT_STRATEGY,
-} from '@/types/settings.types.js';
+} from '#src/types/settings.types.js';
 
 const MARKDOWN_EXTENSION = '.md';
 const FIRST_COLLISION_SUFFIX = 2;

@@ -11,15 +11,7 @@
     "declaration": true,
     "types": [
       "node"
-    ],
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@t/*": [
-        "./src/types/*"
-      ]
-    }
+    ]
   },
   "include": [
     "src/**/*"

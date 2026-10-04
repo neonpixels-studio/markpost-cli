@@ -2,7 +2,7 @@ import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveMarkdownInputs } from '@/libs/files.js';
+import { resolveMarkdownInputs } from '#src/libs/files.js';
 
 // resolveMarkdownInputs discriminates a permission failure (EACCES/EPERM)
 // from every other stat failure by reading `error.code`. EPERM is hard to

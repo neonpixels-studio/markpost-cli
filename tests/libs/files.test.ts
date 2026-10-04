@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // this guard doesn't attempt to also cover Windows.
 const skipPermissionTests = process.getuid?.() === 0;
 
-import { resolveMarkdownInputs } from '@/libs/files.js';
+import { resolveMarkdownInputs } from '#src/libs/files.js';
 
 let workspace: string;
 

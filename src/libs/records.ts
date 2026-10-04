@@ -9,19 +9,19 @@ import {
   rethrowIfTimeout,
   unwrapResourceAttributes,
   unwrapResourceCollection,
-} from '@/libs/api.js';
-import { logErrorMessage } from '@/libs/errors.js';
+} from '#src/libs/api.js';
+import { logErrorMessage } from '#src/libs/errors.js';
 import {
   ApiDeleteMeta,
   ApiDeleteResponse,
   ApiPaginationLinks,
-} from '@/types/api.types.js';
+} from '#src/types/api.types.js';
 import {
   Record,
   PaginatedRecordsMeta,
   RecordApiResponse,
   RecordListApiResponse,
-} from '@/types/records.types.js';
+} from '#src/types/records.types.js';
 
 // markpost's record lifecycle statuses (server/db/schema.ts RECORD_STATUSES).
 // The sync only ever wants records not yet written to disk, so it fetches

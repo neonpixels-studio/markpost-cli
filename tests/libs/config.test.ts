@@ -6,7 +6,7 @@ import {
   getConfigValue,
   isConfigKey,
   setConfigValue,
-} from '@/libs/config.js';
+} from '#src/libs/config.js';
 
 const { mockGet, mockSet, CONFIG_FILE_PATH } = vi.hoisted(() => ({
   mockGet: vi.fn(),

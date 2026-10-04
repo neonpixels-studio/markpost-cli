@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { RecordExportRow } from '@/types/records.types.js';
+import { RecordExportRow } from '#src/types/records.types.js';
 
-vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
-vi.mock('@/libs/export.js', () => ({
+vi.mock('#src/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('#src/libs/export.js', () => ({
   fetchRecordExport: vi.fn(),
   writeExportFile: vi.fn(),
 }));
@@ -53,7 +53,7 @@ describe('runExportCommand', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
     process.exitCode = undefined;
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValue(true);
   });
 
@@ -62,15 +62,15 @@ describe('runExportCommand', () => {
   });
 
   it('always checks config before fetching', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchRecordExport } = await import('@/libs/export.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
     vi.mocked(fetchRecordExport).mockResolvedValue({
       ok: true,
       rows: [],
       truncated: false,
       skippedCount: 0,
     });
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand([]);
 
@@ -78,10 +78,10 @@ describe('runExportCommand', () => {
   });
 
   it('never fetches when checkConfig resolves false', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
-    const { fetchRecordExport } = await import('@/libs/export.js');
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand([]);
 
@@ -89,14 +89,14 @@ describe('runExportCommand', () => {
   });
 
   it('prints "No records to export." when the account is empty', async () => {
-    const { fetchRecordExport } = await import('@/libs/export.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
     vi.mocked(fetchRecordExport).mockResolvedValue({
       ok: true,
       rows: [],
       truncated: false,
       skippedCount: 0,
     });
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand([]);
 
@@ -104,14 +104,14 @@ describe('runExportCommand', () => {
   });
 
   it('prints a summary of each exported row by default', async () => {
-    const { fetchRecordExport } = await import('@/libs/export.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
     vi.mocked(fetchRecordExport).mockResolvedValue({
       ok: true,
       rows: [firstRow, secondRow],
       truncated: false,
       skippedCount: 0,
     });
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand([]);
 
@@ -130,14 +130,14 @@ describe('runExportCommand', () => {
   });
 
   it('omits optional fields for a row without them', async () => {
-    const { fetchRecordExport } = await import('@/libs/export.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
     vi.mocked(fetchRecordExport).mockResolvedValue({
       ok: true,
       rows: [secondRow],
       truncated: false,
       skippedCount: 0,
     });
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand([]);
 
@@ -152,14 +152,14 @@ describe('runExportCommand', () => {
   it('strips control characters from untrusted export fields before printing', async () => {
     const control = String.fromCharCode(0x1b);
     const evilRow: RecordExportRow = { ...firstRow, title: `A${control}B` };
-    const { fetchRecordExport } = await import('@/libs/export.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
     vi.mocked(fetchRecordExport).mockResolvedValue({
       ok: true,
       rows: [evilRow],
       truncated: false,
       skippedCount: 0,
     });
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand([]);
 
@@ -178,14 +178,14 @@ describe('runExportCommand', () => {
   // convention) so a script can detect an incomplete backup via `$?` alone.
   describe('incomplete export reporting', () => {
     it('calls fetchRecordExport with json:false when --json is not given', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
         truncated: false,
         skippedCount: 0,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand([]);
 
@@ -193,14 +193,14 @@ describe('runExportCommand', () => {
     });
 
     it('warns and exits non-zero when the export was truncated', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
         truncated: true,
         skippedCount: 0,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand([]);
 
@@ -211,14 +211,14 @@ describe('runExportCommand', () => {
     });
 
     it('warns and exits non-zero when the server returned malformed rows', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
         truncated: false,
         skippedCount: 3,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand([]);
 
@@ -229,14 +229,14 @@ describe('runExportCommand', () => {
     });
 
     it('combines both reasons into a single warning when truncated and skipped rows both apply', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
         truncated: true,
         skippedCount: 2,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand([]);
 
@@ -248,14 +248,14 @@ describe('runExportCommand', () => {
     });
 
     it('does not warn or exit non-zero for a complete export', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
         truncated: false,
         skippedCount: 0,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand([]);
 
@@ -270,14 +270,14 @@ describe('runExportCommand', () => {
     // libs/export.test.ts) — mirroring the equivalent assertion in
     // records.test.ts for `fetchAllRecords` (issue #194).
     it('threads --json through to fetchRecordExport', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [],
         truncated: false,
         skippedCount: 0,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--json']);
 
@@ -285,14 +285,14 @@ describe('runExportCommand', () => {
     });
 
     it('prints the rows as a parseable JSON array', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow, secondRow],
         truncated: false,
         skippedCount: 0,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--json']);
 
@@ -303,14 +303,14 @@ describe('runExportCommand', () => {
     });
 
     it('prints an empty JSON array (not "No records to export.") when there are none', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [],
         truncated: false,
         skippedCount: 0,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--json']);
 
@@ -325,14 +325,14 @@ describe('runExportCommand', () => {
     // plain-text chalk line, which would choke a script parsing stderr as
     // JSON.
     it('emits a single partial_read JSON error object on stderr for a truncated export under --json', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
         truncated: true,
         skippedCount: 0,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--json']);
 
@@ -350,14 +350,14 @@ describe('runExportCommand', () => {
     });
 
     it('emits a single partial_read JSON error object on stderr for skipped malformed rows under --json', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
         truncated: false,
         skippedCount: 3,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--json']);
 
@@ -377,14 +377,14 @@ describe('runExportCommand', () => {
     // README "JSON failure contract") so a script doing a single
     // `JSON.parse(stderr)` never sees two concatenated objects.
     it('combines both reasons into a single partial_read JSON error object when truncated and skipped rows both apply under --json', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
         truncated: true,
         skippedCount: 2,
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--json']);
 
@@ -401,8 +401,8 @@ describe('runExportCommand', () => {
 
     it('rejects combining --out and --json', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
-      const { runExportCommand } = await import('@/commands/export.js');
+        await import('#src/libs/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out', '/tmp/backup.json', '--json']);
 
@@ -432,8 +432,8 @@ describe('runExportCommand', () => {
     // This must be rejected outright rather than reaching the write path.
     it('rejects --out=--json instead of writing a file literally named "--json"', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
-      const { runExportCommand } = await import('@/commands/export.js');
+        await import('#src/libs/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out=--json']);
 
@@ -449,7 +449,7 @@ describe('runExportCommand', () => {
   describe('--out', () => {
     it('writes the export to the given path and reports where it landed', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
+        await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
@@ -457,7 +457,7 @@ describe('runExportCommand', () => {
         skippedCount: 0,
       });
       vi.mocked(writeExportFile).mockReturnValue('/resolved/backup.json');
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out', '/tmp/backup.json']);
 
@@ -477,7 +477,7 @@ describe('runExportCommand', () => {
 
     it('threads --force through to writeExportFile', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
+        await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
@@ -485,7 +485,7 @@ describe('runExportCommand', () => {
         skippedCount: 0,
       });
       vi.mocked(writeExportFile).mockReturnValue('/resolved/backup.json');
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out', '/tmp/backup.json', '--force']);
 
@@ -498,8 +498,8 @@ describe('runExportCommand', () => {
 
     it('rejects --force without --out', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
-      const { runExportCommand } = await import('@/commands/export.js');
+        await import('#src/libs/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--force']);
 
@@ -516,9 +516,9 @@ describe('runExportCommand', () => {
     // truncating the user's previous backup on every auth failure.
     it('never calls writeExportFile when the fetch fails', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
+        await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({ ok: false });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out', '/tmp/backup.json']);
 
@@ -527,7 +527,7 @@ describe('runExportCommand', () => {
 
     it('notes the skipped count in the write summary', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
+        await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
@@ -535,7 +535,7 @@ describe('runExportCommand', () => {
         skippedCount: 2,
       });
       vi.mocked(writeExportFile).mockReturnValue('/resolved/backup.json');
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out', '/tmp/backup.json']);
 
@@ -547,8 +547,8 @@ describe('runExportCommand', () => {
 
     it('rejects a present-but-empty --out value', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
-      const { runExportCommand } = await import('@/commands/export.js');
+        await import('#src/libs/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out=']);
 
@@ -562,7 +562,7 @@ describe('runExportCommand', () => {
 
     it('still warns about truncation and exits non-zero when writing to a file', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
+        await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow],
@@ -570,7 +570,7 @@ describe('runExportCommand', () => {
         skippedCount: 0,
       });
       vi.mocked(writeExportFile).mockReturnValue('/resolved/backup.json');
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out', '/tmp/backup.json']);
 
@@ -586,7 +586,7 @@ describe('runExportCommand', () => {
     // rather than a generic message that reads as "nothing was retrieved".
     it('reports a write failure without claiming the fetch itself failed', async () => {
       const { fetchRecordExport, writeExportFile } =
-        await import('@/libs/export.js');
+        await import('#src/libs/export.js');
       vi.mocked(fetchRecordExport).mockResolvedValue({
         ok: true,
         rows: [firstRow, secondRow],
@@ -596,7 +596,7 @@ describe('runExportCommand', () => {
       vi.mocked(writeExportFile).mockImplementation(() => {
         throw new Error('EACCES: permission denied');
       });
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--out', '/root/backup.json']);
 
@@ -611,8 +611,8 @@ describe('runExportCommand', () => {
   });
 
   it('rejects a stray positional argument', async () => {
-    const { fetchRecordExport } = await import('@/libs/export.js');
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand(['bogus']);
 
@@ -632,9 +632,9 @@ describe('runExportCommand', () => {
   // A bad flag now routes through failWithUsage, so the non-JSON path prints
   // the usage block, not bare prose — mirroring records.ts/events.ts (#208).
   it('surfaces an error and the usage block, and never fetches, on an unknown flag', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchRecordExport } = await import('@/libs/export.js');
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand(['--bogus', 'value']);
 
@@ -652,9 +652,9 @@ describe('runExportCommand', () => {
   // A failed fetch (`ok: false`) must not print "No records to export." — it
   // has to surface loudly and exit non-zero, distinct from an empty account.
   it('fails loud and exits non-zero when the fetch fails', async () => {
-    const { fetchRecordExport } = await import('@/libs/export.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
     vi.mocked(fetchRecordExport).mockResolvedValue({ ok: false });
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand([]);
 
@@ -668,12 +668,12 @@ describe('runExportCommand', () => {
   // A systemic auth failure (expired token) re-throws from fetchRecordExport
   // and must surface its classified, actionable message with a non-zero exit.
   it('surfaces a systemic auth failure with a classified message and non-zero exit', async () => {
-    const { fetchRecordExport } = await import('@/libs/export.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { fetchRecordExport } = await import('#src/libs/export.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(fetchRecordExport).mockRejectedValue(
       new ApiRequestError('Invalid or missing API token', 401),
     );
-    const { runExportCommand } = await import('@/commands/export.js');
+    const { runExportCommand } = await import('#src/commands/export.js');
 
     await runExportCommand([]);
 
@@ -689,8 +689,8 @@ describe('runExportCommand', () => {
     // documented `usage` code, never `fetch_failed` (issue #208). Arg parsing
     // used to share the fetch's single outer catch, which miscoded it.
     it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--bogus', '--json']);
 
@@ -712,8 +712,8 @@ describe('runExportCommand', () => {
 
     // A stray positional is likewise a usage error, not fetch_failed.
     it('emits a usage-coded JSON error, not fetch_failed, for a stray positional', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['bogus', '--json']);
 
@@ -729,12 +729,12 @@ describe('runExportCommand', () => {
     });
 
     it('emits a fetch_failed JSON error on stderr for a thrown fetch failure', async () => {
-      const { fetchRecordExport } = await import('@/libs/export.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { fetchRecordExport } = await import('#src/libs/export.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(fetchRecordExport).mockRejectedValue(
         new ApiRequestError('Invalid or missing API token', 401),
       );
-      const { runExportCommand } = await import('@/commands/export.js');
+      const { runExportCommand } = await import('#src/commands/export.js');
 
       await runExportCommand(['--json']);
 

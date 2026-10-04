@@ -9,54 +9,66 @@ import {
   MarkSyncedItem,
   MarkAbortReason,
   PENDING_STATUS,
-} from '@/libs/records.js';
+} from '#src/libs/records.js';
 import {
   describeApiError,
   isPermanentApiFailure,
   isSystemicApiFailure,
-} from '@/libs/api.js';
+} from '#src/libs/api.js';
 import {
   buildWritePreview,
   ensureOutputDirectory,
   writeMarkdown,
   WritePreview,
   WrittenRecordState,
-} from '@/libs/markdown.js';
-import { fetchSettings, SettingsReadResult } from '@/libs/settings.js';
-import { ApiDeleteMeta } from '@/types/api.types.js';
-import { runPushCommand, USAGE as PUSH_USAGE } from '@/commands/push.js';
-import { runGetCommand, USAGE as GET_USAGE } from '@/commands/get.js';
+} from '#src/libs/markdown.js';
+import { fetchSettings, SettingsReadResult } from '#src/libs/settings.js';
+import { ApiDeleteMeta } from '#src/types/api.types.js';
+import { runPushCommand, USAGE as PUSH_USAGE } from '#src/commands/push.js';
+import { runGetCommand, USAGE as GET_USAGE } from '#src/commands/get.js';
 import {
   runSourcesCommand,
   USAGE as SOURCES_USAGE,
-} from '@/commands/sources.js';
-import { runTokensCommand, USAGE as TOKENS_USAGE } from '@/commands/tokens.js';
+} from '#src/commands/sources.js';
+import {
+  runTokensCommand,
+  USAGE as TOKENS_USAGE,
+} from '#src/commands/tokens.js';
 import {
   runRecordsCommand,
   USAGE as RECORDS_USAGE,
-} from '@/commands/records.js';
-import { runEventsCommand, USAGE as EVENTS_USAGE } from '@/commands/events.js';
-import { runExportCommand, USAGE as EXPORT_USAGE } from '@/commands/export.js';
-import { runConfigCommand, USAGE as CONFIG_USAGE } from '@/commands/config.js';
+} from '#src/commands/records.js';
+import {
+  runEventsCommand,
+  USAGE as EVENTS_USAGE,
+} from '#src/commands/events.js';
+import {
+  runExportCommand,
+  USAGE as EXPORT_USAGE,
+} from '#src/commands/export.js';
+import {
+  runConfigCommand,
+  USAGE as CONFIG_USAGE,
+} from '#src/commands/config.js';
 import {
   runSettingsCommand,
   USAGE as SETTINGS_USAGE,
-} from '@/commands/settings.js';
+} from '#src/commands/settings.js';
 import packageJson from '../package.json' with { type: 'json' };
 import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
-import { checkConfig } from '@/libs/config.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { runSyncWithAutoSchedule } from '@/libs/scheduler.js';
-import { Record } from '@/types/records.types.js';
+import { checkConfig } from '#src/libs/config.js';
+import { sanitizeForTerminal } from '#src/libs/terminal.js';
+import { runSyncWithAutoSchedule } from '#src/libs/scheduler.js';
+import { Record } from '#src/types/records.types.js';
 import {
   ConflictStrategy,
   normalizeAutoDelete,
   normalizeAutoSync,
   normalizeConflictStrategy,
   normalizeFrontmatterEnabled,
-} from '@/types/settings.types.js';
+} from '#src/types/settings.types.js';
 
 type Spinner = ReturnType<typeof yoctoSpinner>;
 

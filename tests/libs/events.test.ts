@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchAllEvents, fetchPaginatedEvents } from '@/libs/events.js';
-import { Event } from '@/types/events.types.js';
+import { fetchAllEvents, fetchPaginatedEvents } from '#src/libs/events.js';
+import { Event } from '#src/types/events.types.js';
 
-// @/libs/api.js imports @/libs/config.js, which constructs a real
+// #src/libs/api.js imports #src/libs/config.js, which constructs a real
 // `conf`-backed store as soon as it's loaded — mock it so loading api.js
 // doesn't pull in that side effect (mirrors tests/libs/records.test.ts).
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   config: { get: vi.fn() },
 }));
 

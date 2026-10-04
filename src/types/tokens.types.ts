@@ -1,4 +1,4 @@
-import type { ApiResourceObject, ApiResponse } from '@/types/api.types.js';
+import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 
 // Mirrors markpost's API token contract by hand (markpost is the source of
 // truth): the resource shape from `tokenSerializer`

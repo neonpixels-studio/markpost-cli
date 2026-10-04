@@ -5,7 +5,7 @@ import {
   defaultSchedule,
   runSyncWithAutoSchedule,
   type ScheduleFn,
-} from '@/libs/scheduler.js';
+} from '#src/libs/scheduler.js';
 
 describe('runSyncWithAutoSchedule', () => {
   it('schedules another run at the auto-sync interval when the sync reports autoSync on', async () => {

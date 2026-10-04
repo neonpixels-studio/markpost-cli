@@ -7,8 +7,8 @@ import {
   extractFrontmatterTagsWithDiagnostics,
   serializeFrontmatter,
   stripFrontmatterDocument,
-} from '@/libs/frontmatter.js';
-import { Frontmatter, Record } from '@/types/records.types.js';
+} from '#src/libs/frontmatter.js';
+import { Frontmatter, Record } from '#src/types/records.types.js';
 
 const frontmatter: Frontmatter = {
   title: 'Production deploy succeeded',

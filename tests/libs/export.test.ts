@@ -15,20 +15,20 @@ import {
   ExportFileExistsError,
   fetchRecordExport,
   writeExportFile,
-} from '@/libs/export.js';
-import { ApiRequestError, ApiTimeoutError } from '@/libs/api.js';
-import { logErrorMessage } from '@/libs/errors.js';
-import { RecordExportRow } from '@/types/records.types.js';
+} from '#src/libs/export.js';
+import { ApiRequestError, ApiTimeoutError } from '#src/libs/api.js';
+import { logErrorMessage } from '#src/libs/errors.js';
+import { RecordExportRow } from '#src/types/records.types.js';
 
-// @/libs/api.js imports @/libs/config.js, which constructs a real
+// #src/libs/api.js imports #src/libs/config.js, which constructs a real
 // `conf`-backed store as soon as it's loaded. Mock it so loading api.js
 // doesn't pull in that side effect (see tests/libs/settings.test.ts).
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   config: { get: vi.fn() },
 }));
 
-vi.mock('@/libs/errors.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/libs/errors.js')>()),
+vi.mock('#src/libs/errors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#src/libs/errors.js')>()),
   logErrorMessage: vi.fn(),
 }));
 

@@ -1,4 +1,4 @@
-import type { ApiResourceObject, ApiResponse } from '@/types/api.types.js';
+import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 
 // markpost's event kinds (server/db/schema.ts EVENT_KINDS): a webhook/email
 // source that silently stops ingesting shows up here as a `warn`/`err` entry

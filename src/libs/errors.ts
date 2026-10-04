@@ -3,7 +3,7 @@ import {
   JSON_ERROR_FETCH_FAILED,
   JSON_ERROR_PARTIAL_READ,
   printJsonError,
-} from '@/libs/output.js';
+} from '#src/libs/output.js';
 
 export const logErrorMessage = (title: string, message: string) => {
   return console.error(chalk.redBright(`${title}\n${message}`));

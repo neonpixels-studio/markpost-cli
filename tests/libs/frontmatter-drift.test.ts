@@ -16,8 +16,8 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleMarkdownDocument as cliAssembleMarkdownDocument,
   serializeFrontmatter as cliSerializeFrontmatter,
-} from '@/libs/frontmatter.js';
-import { Frontmatter } from '@/types/records.types.js';
+} from '#src/libs/frontmatter.js';
+import { Frontmatter } from '#src/types/records.types.js';
 
 import {
   assembleMarkdownDocument as markpostAssembleMarkdownDocument,

@@ -19,7 +19,7 @@ describe('failWithUsage', () => {
   });
 
   it('writes the message and usage to stderr and exits 1', async () => {
-    const { failWithUsage } = await import('@/libs/usage.js');
+    const { failWithUsage } = await import('#src/libs/usage.js');
 
     failWithUsage('No subcommand given.', 'Usage: markpost records <list>');
 
@@ -31,7 +31,7 @@ describe('failWithUsage', () => {
   });
 
   it('never writes to stdout', async () => {
-    const { failWithUsage } = await import('@/libs/usage.js');
+    const { failWithUsage } = await import('#src/libs/usage.js');
 
     failWithUsage('No uuid given.', 'Usage: markpost get <uuid>');
 
@@ -51,7 +51,7 @@ describe('failWithSubcommandUsage', () => {
   });
 
   it('names the unknown token when a subcommand was given', async () => {
-    const { failWithSubcommandUsage } = await import('@/libs/usage.js');
+    const { failWithSubcommandUsage } = await import('#src/libs/usage.js');
 
     failWithSubcommandUsage('bogus', 'Usage: markpost records <list>');
 
@@ -60,7 +60,7 @@ describe('failWithSubcommandUsage', () => {
   });
 
   it('reports a missing subcommand when none was given', async () => {
-    const { failWithSubcommandUsage } = await import('@/libs/usage.js');
+    const { failWithSubcommandUsage } = await import('#src/libs/usage.js');
 
     failWithSubcommandUsage(undefined, 'Usage: markpost records <list>');
 
@@ -69,7 +69,7 @@ describe('failWithSubcommandUsage', () => {
   });
 
   it("treats an empty-string subcommand as missing, matching push's empty-arg handling", async () => {
-    const { failWithSubcommandUsage } = await import('@/libs/usage.js');
+    const { failWithSubcommandUsage } = await import('#src/libs/usage.js');
 
     failWithSubcommandUsage('', 'Usage: markpost records <list>');
 
@@ -90,7 +90,7 @@ describe('parseOrFailWithUsage', () => {
   });
 
   it('returns the parsed value and leaves the exit code untouched on success', async () => {
-    const { parseOrFailWithUsage } = await import('@/libs/usage.js');
+    const { parseOrFailWithUsage } = await import('#src/libs/usage.js');
 
     const result = parseOrFailWithUsage(
       () => ({ ok: true }),
@@ -103,7 +103,7 @@ describe('parseOrFailWithUsage', () => {
   });
 
   it('returns null and reports the usage block when the parse thunk throws', async () => {
-    const { parseOrFailWithUsage } = await import('@/libs/usage.js');
+    const { parseOrFailWithUsage } = await import('#src/libs/usage.js');
 
     const result = parseOrFailWithUsage(() => {
       throw new Error('Unknown option --bogus');
@@ -122,7 +122,7 @@ describe('parseOrFailWithUsage', () => {
   // other untrusted-text path before reaching the terminal.
   it('sanitizes control characters out of the thrown message', async () => {
     const control = String.fromCharCode(0x1b);
-    const { parseOrFailWithUsage } = await import('@/libs/usage.js');
+    const { parseOrFailWithUsage } = await import('#src/libs/usage.js');
 
     parseOrFailWithUsage(() => {
       throw new Error(`Unexpected argument "evil${control}[2J"`);
@@ -140,7 +140,7 @@ describe('parseOrFailWithUsage', () => {
   });
 
   it('reports a usage-coded JSON error on stderr in --json mode', async () => {
-    const { parseOrFailWithUsage } = await import('@/libs/usage.js');
+    const { parseOrFailWithUsage } = await import('#src/libs/usage.js');
 
     const result = parseOrFailWithUsage(
       () => {

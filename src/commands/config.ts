@@ -6,7 +6,7 @@ import {
   getConfigValue,
   isConfigKey,
   setConfigValue,
-} from '@/libs/config.js';
+} from '#src/libs/config.js';
 
 export const USAGE = `Usage: markpost config <get|set|path> [key] [value]
 

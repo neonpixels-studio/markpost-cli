@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Event } from '@/types/events.types.js';
+import { Event } from '#src/types/events.types.js';
 
-vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
-vi.mock('@/libs/events.js', () => ({ fetchAllEvents: vi.fn() }));
+vi.mock('#src/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('#src/libs/events.js', () => ({ fetchAllEvents: vi.fn() }));
 vi.mock('chalk', () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
@@ -43,7 +43,7 @@ describe('runEventsCommand', () => {
     process.exitCode = undefined;
     // resetAllMocks strips the default implementation, so re-pin checkConfig
     // to a passing resolve; failure-path tests override it.
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValue(true);
   });
 
@@ -52,14 +52,14 @@ describe('runEventsCommand', () => {
   });
 
   it('always checks config before dispatching', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchAllEvents } = await import('@/libs/events.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchAllEvents } = await import('#src/libs/events.js');
     vi.mocked(fetchAllEvents).mockResolvedValue({
       ok: true,
       events: [],
       partial: false,
     });
-    const { runEventsCommand } = await import('@/commands/events.js');
+    const { runEventsCommand } = await import('#src/commands/events.js');
 
     await runEventsCommand(['list']);
 
@@ -72,10 +72,10 @@ describe('runEventsCommand', () => {
   });
 
   it('never dispatches to list when checkConfig resolves false', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
-    const { fetchAllEvents } = await import('@/libs/events.js');
-    const { runEventsCommand } = await import('@/commands/events.js');
+    const { fetchAllEvents } = await import('#src/libs/events.js');
+    const { runEventsCommand } = await import('#src/commands/events.js');
 
     await runEventsCommand(['list']);
 
@@ -83,8 +83,8 @@ describe('runEventsCommand', () => {
   });
 
   it('errors to stderr and exits 1 when no subcommand is given', async () => {
-    const { fetchAllEvents } = await import('@/libs/events.js');
-    const { runEventsCommand } = await import('@/commands/events.js');
+    const { fetchAllEvents } = await import('#src/libs/events.js');
+    const { runEventsCommand } = await import('#src/commands/events.js');
 
     await runEventsCommand([]);
 
@@ -99,7 +99,7 @@ describe('runEventsCommand', () => {
   });
 
   it('errors to stderr and exits 1 for an unrecognized subcommand', async () => {
-    const { runEventsCommand } = await import('@/commands/events.js');
+    const { runEventsCommand } = await import('#src/commands/events.js');
 
     await runEventsCommand(['bogus']);
 
@@ -111,13 +111,13 @@ describe('runEventsCommand', () => {
 
   describe('list', () => {
     it('prints "No events found." when the log is empty', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -125,13 +125,13 @@ describe('runEventsCommand', () => {
     });
 
     it('prints each fetched event, including source and record when present', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent, errEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -151,13 +151,13 @@ describe('runEventsCommand', () => {
 
     it('colors each kind through its dedicated chalk function', async () => {
       const chalk = (await import('chalk')).default;
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent, errEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -176,13 +176,13 @@ describe('runEventsCommand', () => {
         recordUuid: null,
         sourceId: null,
       };
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [offContractEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -207,13 +207,13 @@ describe('runEventsCommand', () => {
         recordUuid: null,
         sourceId: null,
       } as unknown as Event;
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [malformedEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       // runEventsCommand catches everything, so `resolves.not.toThrow()`
       // alone would pass even if the crash were silently swallowed. Assert
@@ -229,13 +229,13 @@ describe('runEventsCommand', () => {
 
     // recordUuid is null on errEvent — its "record:" line must not print.
     it('omits the record line for an event with no recordUuid', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [errEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -258,13 +258,13 @@ describe('runEventsCommand', () => {
         recordUuid: null,
         sourceId: null,
       };
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [evilEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -291,13 +291,13 @@ describe('runEventsCommand', () => {
         recordUuid: `rec${control}1`,
         sourceId: `src${control}1`,
       };
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [evilEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -316,14 +316,14 @@ describe('runEventsCommand', () => {
     });
 
     it('prints the events as a parseable JSON array with --json', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent, errEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--json']);
 
@@ -337,13 +337,13 @@ describe('runEventsCommand', () => {
     });
 
     it('prints an empty JSON array (not "No events found.") for --json with no events', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [],
         partial: false,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--json']);
 
@@ -355,13 +355,13 @@ describe('runEventsCommand', () => {
     // A partial read must keep stdout valid JSON (jq-safe): the warning goes
     // to stderr only, and the command still exits non-zero.
     it('writes clean JSON to stdout on a partial read, warning only on stderr', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent],
         partial: true,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--json']);
 
@@ -378,13 +378,13 @@ describe('runEventsCommand', () => {
     // plain-text chalk line, which would choke a script parsing stderr as
     // JSON.
     it('emits a single JSON error object on stderr on a partial read under --json', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent],
         partial: true,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--json']);
 
@@ -409,9 +409,9 @@ describe('runEventsCommand', () => {
     });
 
     it('surfaces an error and never fetches when given an unknown flag', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllEvents } = await import('@/libs/events.js');
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--bogus']);
 
@@ -427,7 +427,7 @@ describe('runEventsCommand', () => {
     // failWithMessage and now goes through failWithUsage, so the usage block
     // must print alongside the message.
     it('prints the usage block, not bare prose, for an unknown flag without --json', async () => {
-      const { runEventsCommand, USAGE } = await import('@/commands/events.js');
+      const { runEventsCommand, USAGE } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--bogus']);
 
@@ -436,8 +436,8 @@ describe('runEventsCommand', () => {
     });
 
     it('rejects a stray positional argument instead of listing everything', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', 'webhook']);
 
@@ -451,9 +451,9 @@ describe('runEventsCommand', () => {
     // A failed fetch (`ok: false`) must not print "No events found." — it has
     // to surface loudly and exit non-zero, distinct from an empty log.
     it('fails loud and exits non-zero when the fetch fails', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({ ok: false });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -468,13 +468,13 @@ describe('runEventsCommand', () => {
     // warn, and exit non-zero — never silently present a truncated log as
     // the full one.
     it('warns and exits non-zero on a partial read, still printing what it got', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent],
         partial: true,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -490,13 +490,13 @@ describe('runEventsCommand', () => {
     // A partial read that returned zero events must not claim "No events
     // found." — the read failed before any page came back, not an empty log.
     it('does not print "No events found." on a partial read with no events', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [],
         partial: true,
       });
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -511,12 +511,12 @@ describe('runEventsCommand', () => {
     // and must surface its classified, actionable message with a non-zero
     // exit — never masquerade as "No events found."
     it('surfaces a systemic auth failure with a classified message and non-zero exit', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(fetchAllEvents).mockRejectedValue(
         new ApiRequestError('Invalid or missing API token', 401),
       );
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list']);
 
@@ -530,7 +530,7 @@ describe('runEventsCommand', () => {
 
   describe('--json failure contract', () => {
     it('emits a usage-coded JSON error for an unknown subcommand', async () => {
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['bogus', '--json']);
 
@@ -545,12 +545,12 @@ describe('runEventsCommand', () => {
     });
 
     it('emits a fetch_failed JSON error on stderr for a thrown fetch failure', async () => {
-      const { fetchAllEvents } = await import('@/libs/events.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(fetchAllEvents).mockRejectedValue(
         new ApiRequestError('Invalid or missing API token', 401),
       );
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--json']);
 
@@ -566,9 +566,9 @@ describe('runEventsCommand', () => {
     // code, not `fetch_failed` — argument parsing used to share the fetch's
     // try/catch, miscoding it (issue #184).
     it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag on list', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllEvents } = await import('@/libs/events.js');
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--bogus', '--json']);
 
@@ -583,9 +583,9 @@ describe('runEventsCommand', () => {
     });
 
     it('emits a usage-coded JSON error, not fetch_failed, for a stray positional on list', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllEvents } = await import('@/libs/events.js');
-      const { runEventsCommand } = await import('@/commands/events.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { runEventsCommand } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', 'webhook', '--json']);
 

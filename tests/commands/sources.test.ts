@@ -4,7 +4,7 @@ import {
   CreatedSource,
   Source,
   SourceTestResult,
-} from '@/types/sources.types.js';
+} from '#src/types/sources.types.js';
 // Aliased (not `confirm`) so it never shadows the many per-test
 // `const { ..., confirm } = await import('@inquirer/prompts')` destructures
 // throughout this file — both names refer to the same mocked singleton (see
@@ -13,10 +13,10 @@ import {
 // local one.
 import { confirm as confirmPrompt } from '@inquirer/prompts';
 
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/sources.js', () => ({
+vi.mock('#src/libs/sources.js', () => ({
   fetchSources: vi.fn(),
   createSource: vi.fn(),
   updateSource: vi.fn(),
@@ -113,14 +113,14 @@ const loggedText = (): string =>
 
 describe('buildEndpointUrl', () => {
   it('builds a webhook ingest URL for non-email source types', async () => {
-    const { buildEndpointUrl } = await import('@/commands/sources.js');
+    const { buildEndpointUrl } = await import('#src/commands/sources.js');
     expect(buildEndpointUrl('webhook', 'wh_abc12345')).toBe(
       'https://ingest.markpost.io/v1/hooks/wh_abc12345',
     );
   });
 
   it('builds an email-in address for email source types', async () => {
-    const { buildEndpointUrl } = await import('@/commands/sources.js');
+    const { buildEndpointUrl } = await import('#src/commands/sources.js');
     expect(buildEndpointUrl('email', 'clip-ab12')).toBe(
       'clip-ab12@in.markpost.io',
     );
@@ -161,10 +161,10 @@ describe('runSourcesCommand', () => {
   });
 
   it('always checks config before dispatching', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchSources } = await import('@/libs/sources.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchSources } = await import('#src/libs/sources.js');
     vi.mocked(fetchSources).mockResolvedValue([]);
-    const { runSourcesCommand } = await import('@/commands/sources.js');
+    const { runSourcesCommand } = await import('#src/commands/sources.js');
 
     await runSourcesCommand(['list']);
 
@@ -172,8 +172,8 @@ describe('runSourcesCommand', () => {
   });
 
   it('errors to stderr and exits 1 when no subcommand is given', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runSourcesCommand } = await import('@/commands/sources.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runSourcesCommand } = await import('#src/commands/sources.js');
 
     await runSourcesCommand([]);
 
@@ -189,8 +189,8 @@ describe('runSourcesCommand', () => {
   });
 
   it('errors to stderr and exits 1 for an unknown subcommand', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runSourcesCommand } = await import('@/commands/sources.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runSourcesCommand } = await import('#src/commands/sources.js');
 
     await runSourcesCommand(['bogus']);
 
@@ -209,9 +209,9 @@ describe('runSourcesCommand', () => {
   // re-throws) must exit non-zero like every other command, not print red
   // text and exit 0.
   it('exits non-zero when a sources call throws', async () => {
-    const { fetchSources } = await import('@/libs/sources.js');
+    const { fetchSources } = await import('#src/libs/sources.js');
     vi.mocked(fetchSources).mockRejectedValue(new Error('boom'));
-    const { runSourcesCommand } = await import('@/commands/sources.js');
+    const { runSourcesCommand } = await import('#src/commands/sources.js');
 
     await runSourcesCommand(['list']);
 
@@ -223,12 +223,12 @@ describe('runSourcesCommand', () => {
   // nothing, so the swallow branch can't silently convert a real failure that
   // happens to share the name into a clean exit without a test noticing.
   it('exits zero and stays quiet when a prompt is aborted with Ctrl+C', async () => {
-    const { fetchSources } = await import('@/libs/sources.js');
+    const { fetchSources } = await import('#src/libs/sources.js');
     const exitPromptError = Object.assign(new Error('User force closed'), {
       name: 'ExitPromptError',
     });
     vi.mocked(fetchSources).mockRejectedValue(exitPromptError);
-    const { runSourcesCommand } = await import('@/commands/sources.js');
+    const { runSourcesCommand } = await import('#src/commands/sources.js');
 
     await runSourcesCommand(['list']);
 
@@ -238,9 +238,9 @@ describe('runSourcesCommand', () => {
 
   describe('list', () => {
     it('prints "No sources found." when there are none', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -248,9 +248,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('prints each source, including its computed endpoint URL', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource, emailSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -267,9 +267,9 @@ describe('runSourcesCommand', () => {
     // The one-time secret must only ever surface from `create`; a source
     // object that somehow still carries one must not leak it on list.
     it('never prints a providerSecret carried on a listed source', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -285,9 +285,9 @@ describe('runSourcesCommand', () => {
         endpointSlug: `wh_${control}slug`,
         routeFolder: `99${control}incoming/`,
       };
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([evilSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -317,9 +317,9 @@ describe('runSourcesCommand', () => {
         ...webhookSource,
         recordCount: `3${control}[2J` as unknown as number,
       };
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([evilSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -335,10 +335,10 @@ describe('runSourcesCommand', () => {
     });
 
     it('prints the sources as a parseable JSON array with computed endpoints when --json is passed', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource, emailSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--json']);
 
@@ -363,9 +363,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('includes the stored fieldMapping in --json output, null when unset', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource, emailSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--json']);
 
@@ -379,9 +379,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('prints the configured field mapping keys in the pretty output', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -392,14 +392,14 @@ describe('runSourcesCommand', () => {
 
     it('sanitizes hostile field-mapping values before printing', async () => {
       const control = String.fromCharCode(0x1b);
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([
         {
           ...webhookSource,
           fieldMapping: { title: `data.${control}[31msubject` },
         },
       ]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -410,9 +410,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('omits the mapping section from the pretty output when none is stored', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -420,9 +420,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('prints an empty JSON array (not "No sources found.") for --json with no sources', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--json']);
 
@@ -435,9 +435,9 @@ describe('runSourcesCommand', () => {
     // the object, so a one-time providerSecret riding on a malformed list
     // response can never surface — same invariant the pretty path holds.
     it('never leaks a providerSecret carried on a listed source in --json mode', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--json']);
 
@@ -448,9 +448,9 @@ describe('runSourcesCommand', () => {
     // subcommands that don't render JSON, so `sources delete --json` neither
     // fires a DELETE for a source named "--json" nor silently ignores the flag.
     it('rejects --json on delete rather than treating it as a uuid or ignoring it', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', '--json']);
 
@@ -468,9 +468,9 @@ describe('runSourcesCommand', () => {
     // A script doing `sources create --json | jq` must fail loudly, not exit 0
     // with human text — losing the one-time signing secret it meant to capture.
     it('rejects --json on create before prompting or calling the API', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { createSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { createSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create', '--json']);
 
@@ -480,9 +480,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('rejects --json on update before prompting or calling the API', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', '--json']);
 
@@ -496,9 +496,9 @@ describe('runSourcesCommand', () => {
     // prints the usage block, not bare/generic prose — mirroring
     // get.ts/export.ts/records.ts/events.ts (issue #218, #208).
     it('exits 1 with the usage block on a mistyped flag instead of silently printing human text', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchSources } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--jsonn']);
 
@@ -511,11 +511,11 @@ describe('runSourcesCommand', () => {
     });
 
     it('renders "never hit" for an empty lastHitAt', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, lastHitAt: '' },
       ]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list']);
 
@@ -530,9 +530,9 @@ describe('runSourcesCommand', () => {
     it('still lists on a non-TTY (neither stdin nor stdout is a terminal)', async () => {
       process.stdin.isTTY = false;
       process.stdout.isTTY = false;
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--json']);
 
@@ -544,14 +544,14 @@ describe('runSourcesCommand', () => {
   describe('create', () => {
     it('prompts for source details and creates the source', async () => {
       const { input, select } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('webhook');
       vi.mocked(input)
         .mockResolvedValueOnce('Webhook Source')
         .mockResolvedValueOnce('99-incoming/')
         .mockResolvedValueOnce('');
       vi.mocked(createSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -568,14 +568,14 @@ describe('runSourcesCommand', () => {
 
     it('surfaces the one-time providerSecret once when the create response carries one', async () => {
       const { input, select } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('github');
       vi.mocked(input)
         .mockResolvedValueOnce('GitHub Source')
         .mockResolvedValueOnce('97-incoming/')
         .mockResolvedValueOnce('github');
       vi.mocked(createSource).mockResolvedValue(githubSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -594,7 +594,7 @@ describe('runSourcesCommand', () => {
       // "copy it now" warning.
       const control = String.fromCharCode(0x1b);
       const { input, select } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('github');
       vi.mocked(input)
         .mockResolvedValueOnce('GitHub Source')
@@ -604,7 +604,7 @@ describe('runSourcesCommand', () => {
         ...githubSource,
         providerSecret: `whsec_${control}[2J`,
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -621,7 +621,7 @@ describe('runSourcesCommand', () => {
 
     it('prints nothing extra when the create response has providerSecret: null', async () => {
       const { input, select } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('webhook');
       vi.mocked(input)
         .mockResolvedValueOnce('Webhook Source')
@@ -631,7 +631,7 @@ describe('runSourcesCommand', () => {
         ...webhookSource,
         providerSecret: null,
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -644,14 +644,14 @@ describe('runSourcesCommand', () => {
     // `null`; the `!providerSecret` guard must handle both.
     it('prints nothing extra when the create response omits providerSecret', async () => {
       const { input, select } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('webhook');
       vi.mocked(input)
         .mockResolvedValueOnce('Webhook Source')
         .mockResolvedValueOnce('99-incoming/')
         .mockResolvedValueOnce('');
       vi.mocked(createSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -662,14 +662,14 @@ describe('runSourcesCommand', () => {
 
     it('reports an error when creation fails', async () => {
       const { input, select } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('webhook');
       vi.mocked(input)
         .mockResolvedValueOnce('Webhook Source')
         .mockResolvedValueOnce('99-incoming/')
         .mockResolvedValueOnce('');
       vi.mocked(createSource).mockResolvedValue(null);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -685,8 +685,8 @@ describe('runSourcesCommand', () => {
     it('fails loudly on a non-TTY stdin create instead of hanging on the first prompt', async () => {
       process.stdin.isTTY = false;
       const { select } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -703,8 +703,8 @@ describe('runSourcesCommand', () => {
     it('fails loudly on a redirected-stdout create instead of hanging on the first prompt', async () => {
       process.stdout.isTTY = false;
       const { select } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -723,7 +723,7 @@ describe('runSourcesCommand', () => {
     // contract expects (FieldMappingConfig).
     it('prompts for and sends field mapping when the opt-in is accepted', async () => {
       const { input, select, confirm } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('webhook');
       vi.mocked(confirm).mockResolvedValue(true);
       vi.mocked(input)
@@ -737,7 +737,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('') // fieldMapping.tags
         .mockResolvedValueOnce(''); // fieldMapping.created
       vi.mocked(createSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -760,7 +760,7 @@ describe('runSourcesCommand', () => {
     // this one pins the behavior explicitly rather than relying on that.)
     it('omits fieldMapping from the create call when the opt-in is declined', async () => {
       const { input, select, confirm } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('webhook');
       vi.mocked(confirm).mockResolvedValue(false);
       vi.mocked(input)
@@ -768,7 +768,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('99-incoming/')
         .mockResolvedValueOnce('');
       vi.mocked(createSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -789,7 +789,7 @@ describe('runSourcesCommand', () => {
     // consistent.
     it('omits fieldMapping from the create call when every field is left blank', async () => {
       const { input, select, confirm } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('webhook');
       vi.mocked(confirm).mockResolvedValue(true);
       vi.mocked(input)
@@ -803,7 +803,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('') // fieldMapping.tags
         .mockResolvedValueOnce(''); // fieldMapping.created
       vi.mocked(createSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -822,7 +822,7 @@ describe('runSourcesCommand', () => {
     // test in this file.
     it('trims a field-mapping answer and drops a whitespace-only one', async () => {
       const { input, select, confirm } = await import('@inquirer/prompts');
-      const { createSource } = await import('@/libs/sources.js');
+      const { createSource } = await import('#src/libs/sources.js');
       vi.mocked(select).mockResolvedValue('webhook');
       vi.mocked(confirm).mockResolvedValue(true);
       vi.mocked(input)
@@ -836,7 +836,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('') // fieldMapping.tags
         .mockResolvedValueOnce(''); // fieldMapping.created
       vi.mocked(createSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create']);
 
@@ -852,7 +852,7 @@ describe('runSourcesCommand', () => {
 
   describe('update', () => {
     it('updates directly by uuid when one is provided', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, select } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce('00-fixed/');
@@ -860,7 +860,7 @@ describe('runSourcesCommand', () => {
         ...webhookSource,
         routeFolder: '00-fixed/',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -877,7 +877,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('prompts to pick a source when no uuid is given', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, select } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(select).mockResolvedValue('abc-123');
@@ -886,7 +886,7 @@ describe('runSourcesCommand', () => {
         ...webhookSource,
         routeFolder: '00-fixed/',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update']);
 
@@ -899,7 +899,7 @@ describe('runSourcesCommand', () => {
       // The select label is composed from the untrusted source name, so a name
       // carrying an escape must be stripped before it reaches the picker.
       const control = String.fromCharCode(0x1b);
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, select } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, name: `Evil${control}Source` },
@@ -907,7 +907,7 @@ describe('runSourcesCommand', () => {
       vi.mocked(select).mockResolvedValue('abc-123');
       vi.mocked(input).mockResolvedValueOnce('00-fixed/');
       vi.mocked(updateSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update']);
 
@@ -919,9 +919,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports not-found when the uuid does not match any source', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'unknown-uuid']);
 
@@ -932,11 +932,11 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports an error and does not call updateSource when the route folder is cleared', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce('   ');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -950,11 +950,11 @@ describe('runSourcesCommand', () => {
     });
 
     it('does not call updateSource when the prefilled value is accepted unchanged', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce(webhookSource.routeFolder);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -965,9 +965,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('does nothing when there are no sources to update and no uuid is given', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update']);
 
@@ -979,7 +979,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('never prints a providerSecret carried on an updated source', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(input).mockResolvedValueOnce('00-fixed/');
@@ -987,7 +987,7 @@ describe('runSourcesCommand', () => {
         ...githubSource,
         routeFolder: '00-fixed/',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'ghi-789']);
 
@@ -995,12 +995,12 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports an error when the update fails', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce('00-fixed/');
       vi.mocked(updateSource).mockResolvedValue(null);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1012,9 +1012,9 @@ describe('runSourcesCommand', () => {
     // loud instead of hanging — same guard shape as delete's non-TTY cases.
     it('fails loudly on a non-TTY stdin update with no uuid instead of opening the picker', async () => {
       process.stdin.isTTY = false;
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update']);
 
@@ -1031,9 +1031,9 @@ describe('runSourcesCommand', () => {
     // `update` piped to a file must be rejected the same way.
     it('fails loudly on a redirected-stdout update with no uuid instead of opening the picker', async () => {
       process.stdout.isTTY = false;
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update']);
 
@@ -1051,9 +1051,9 @@ describe('runSourcesCommand', () => {
     // direct-uuid path instead of the picker.
     it('fails loudly on a non-TTY update with an explicit uuid instead of hanging on the route-folder prompt', async () => {
       process.stdin.isTTY = false;
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1072,7 +1072,7 @@ describe('runSourcesCommand', () => {
     // folder left unchanged must still send an update, carrying only the
     // fieldMapping key.
     it('sends fieldMapping alone when only the field-mapping opt-in is accepted', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1085,7 +1085,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('') // fieldMapping.tags
         .mockResolvedValueOnce(''); // fieldMapping.created
       vi.mocked(updateSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1102,7 +1102,7 @@ describe('runSourcesCommand', () => {
     // Field mapping must be reachable from the picker path too, not just the
     // explicit-uuid path exercised above.
     it('sends fieldMapping when the opt-in is accepted via the interactive picker', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, select, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(select).mockResolvedValue('abc-123');
@@ -1116,7 +1116,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('')
         .mockResolvedValueOnce('');
       vi.mocked(updateSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update']);
 
@@ -1128,7 +1128,7 @@ describe('runSourcesCommand', () => {
     // Both an actual route-folder change and an accepted field-mapping
     // opt-in must land in the same PATCH call.
     it('sends both routeFolder and fieldMapping when both are changed', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1144,7 +1144,7 @@ describe('runSourcesCommand', () => {
         ...webhookSource,
         routeFolder: '00-fixed/',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1155,7 +1155,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('prefills each field-mapping prompt with the stored value', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1168,7 +1168,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('')
         .mockResolvedValueOnce('');
       vi.mocked(updateSource).mockResolvedValue(mappedSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1190,7 +1190,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('does not send an update when every prefilled field-mapping value is re-accepted', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1202,7 +1202,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('')
         .mockResolvedValueOnce('')
         .mockResolvedValueOnce('');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1210,7 +1210,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('removes a stored field-mapping key when the clear sentinel is entered', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1223,7 +1223,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('')
         .mockResolvedValueOnce('');
       vi.mocked(updateSource).mockResolvedValue(mappedSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1238,7 +1238,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('sends fieldMapping null when every stored key is removed with the clear sentinel', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1251,7 +1251,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('')
         .mockResolvedValueOnce('');
       vi.mocked(updateSource).mockResolvedValue(webhookSource);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1262,7 +1262,7 @@ describe('runSourcesCommand', () => {
 
     it('sanitizes a hostile stored value passed as a prompt default and keeps the blank-to-skip hint for unset keys', async () => {
       const control = String.fromCharCode(0x1b);
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, fieldMapping: { title: `data.${control}[31m` } },
@@ -1271,7 +1271,7 @@ describe('runSourcesCommand', () => {
       vi.mocked(input)
         .mockResolvedValueOnce(webhookSource.routeFolder)
         .mockResolvedValue('');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1287,7 +1287,7 @@ describe('runSourcesCommand', () => {
 
     it('does not send an update when a hostile stored value is re-accepted as its sanitized default', async () => {
       const control = String.fromCharCode(0x1b);
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       const hostileTitle = `data.${control}[31msubject`;
       vi.mocked(fetchSources).mockResolvedValue([
@@ -1297,7 +1297,7 @@ describe('runSourcesCommand', () => {
       vi.mocked(input).mockImplementation(
         (async (config: { default?: string }) => config.default ?? '') as never,
       );
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1309,7 +1309,7 @@ describe('runSourcesCommand', () => {
     // a real route-folder change, so the payload is proven to carry
     // routeFolder alone with no fieldMapping key.
     it('sends routeFolder alone when the field-mapping opt-in is explicitly declined', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(false);
@@ -1318,7 +1318,7 @@ describe('runSourcesCommand', () => {
         ...webhookSource,
         routeFolder: '00-fixed/',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1333,7 +1333,7 @@ describe('runSourcesCommand', () => {
     // so sending `{}` here would clear it. A real route-folder change still
     // goes through; only fieldMapping is omitted.
     it('omits fieldMapping (does not send an empty object) when every field is left blank', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1349,7 +1349,7 @@ describe('runSourcesCommand', () => {
         ...webhookSource,
         routeFolder: '00-fixed/',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1362,7 +1362,7 @@ describe('runSourcesCommand', () => {
     // full no-op, exactly like declining outright — no call to updateSource,
     // same as the existing 'accepted unchanged' case above.
     it('makes no update call when the route folder is unchanged and every field-mapping field is left blank', async () => {
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1374,7 +1374,7 @@ describe('runSourcesCommand', () => {
         .mockResolvedValueOnce('')
         .mockResolvedValueOnce('')
         .mockResolvedValueOnce('');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123']);
 
@@ -1387,12 +1387,12 @@ describe('runSourcesCommand', () => {
 
   describe('delete', () => {
     it('deletes directly by uuid when one is provided and confirmed', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { select, confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1402,13 +1402,13 @@ describe('runSourcesCommand', () => {
     });
 
     it('prompts to pick a source when no uuid is given, then confirms', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { select, confirm } = await import('@inquirer/prompts');
       vi.mocked(select).mockResolvedValue('abc-123');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete']);
 
@@ -1419,13 +1419,13 @@ describe('runSourcesCommand', () => {
     // picker and honor the selection — not open the picker and then silently
     // discard the pick on the `!targetUuid` guard (the `??`-vs-`||` trap).
     it('falls through to the picker for an empty-string uuid and deletes the pick', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { select, confirm } = await import('@inquirer/prompts');
       vi.mocked(select).mockResolvedValue('abc-123');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', '']);
 
@@ -1436,11 +1436,11 @@ describe('runSourcesCommand', () => {
     // The confirmation is the whole point of the feature: a "no" answer must
     // abort before any DELETE reaches the server.
     it('aborts without deleting when the confirmation is declined', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(false);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1453,12 +1453,12 @@ describe('runSourcesCommand', () => {
     // The confirm message must name the source being deleted so the user knows
     // what they're destroying, and warn that it's irreversible.
     it('shows the uuid and an irreversible-warning in the confirmation prompt', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1477,12 +1477,12 @@ describe('runSourcesCommand', () => {
     // but wrong copy-pasted uuid shows its real name for the user to catch,
     // rather than echoing back the string they typed.
     it('names the looked-up source on the direct-uuid path', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1495,12 +1495,12 @@ describe('runSourcesCommand', () => {
     // transport error into []) must still confirm on the bare uuid — and flag
     // the miss so it isn't mistaken for a matched source — never block delete.
     it('flags the miss in the label when the source lookup finds nothing', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1515,7 +1515,7 @@ describe('runSourcesCommand', () => {
     // change. It falls back to the bare uuid, says the name is unavailable (not
     // that the source is missing), and still confirms + deletes.
     it('still confirms and deletes when the label lookup times out', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       const timeoutError = Object.assign(new Error('timed out'), {
         name: 'ApiTimeoutError',
       });
@@ -1523,7 +1523,7 @@ describe('runSourcesCommand', () => {
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1541,7 +1541,7 @@ describe('runSourcesCommand', () => {
     // before it reaches the confirm prompt, same as every other printed field.
     it('sanitizes the uuid in the confirmation prompt', async () => {
       const control = String.fromCharCode(0x1b);
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, uuid: `abc${control}123` },
       ]);
@@ -1549,7 +1549,7 @@ describe('runSourcesCommand', () => {
       const { select, confirm } = await import('@inquirer/prompts');
       vi.mocked(select).mockResolvedValue(`abc${control}123`);
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete']);
 
@@ -1562,10 +1562,10 @@ describe('runSourcesCommand', () => {
     // The scripting escape hatch: --yes deletes straight away with no prompt
     // and no label lookup (the short-circuit must skip fetchSources entirely).
     it('skips the confirmation and the label lookup when --yes is passed', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123', '--yes']);
 
@@ -1577,14 +1577,14 @@ describe('runSourcesCommand', () => {
     // A Ctrl+C at the confirmation is a deliberate abort: it must delete
     // nothing, exit 0, and stay quiet — never fall through to the DELETE.
     it('aborts cleanly without deleting when the confirmation is Ctrl+C-ed', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       const { confirm } = await import('@inquirer/prompts');
       const exitPromptError = Object.assign(new Error('User force closed'), {
         name: 'ExitPromptError',
       });
       vi.mocked(confirm).mockRejectedValue(exitPromptError);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1596,13 +1596,13 @@ describe('runSourcesCommand', () => {
     // The interactive confirmation names the picked source so the user can
     // recognize it, not just the opaque uuid they never typed.
     it('names the picked source in the confirmation prompt', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { select, confirm } = await import('@inquirer/prompts');
       vi.mocked(select).mockResolvedValue('abc-123');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete']);
 
@@ -1614,9 +1614,9 @@ describe('runSourcesCommand', () => {
     // --yes is meaningless outside delete; it must fail loudly like a misplaced
     // --json rather than appearing to take effect.
     it('rejects --yes on a non-delete subcommand', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchSources } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--yes']);
 
@@ -1632,10 +1632,10 @@ describe('runSourcesCommand', () => {
     // dispatch (no prompts, no API calls) so a future reorder that moves it
     // below dispatch can't slip past on the exit code alone.
     it('rejects --yes on create before dispatching', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { createSource } = await import('@/libs/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { createSource } = await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create', '--yes']);
 
@@ -1646,9 +1646,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('rejects --yes on update before dispatching', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchSources, updateSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', '--yes']);
 
@@ -1661,9 +1661,9 @@ describe('runSourcesCommand', () => {
     // --yes promises a non-interactive delete, so with no uuid it must fail
     // rather than open the picker a script can't answer.
     it('rejects --yes without a uuid instead of opening the picker', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', '--yes']);
 
@@ -1681,9 +1681,9 @@ describe('runSourcesCommand', () => {
     // rather than silently delete nothing and exit 0.
     it('fails loudly on a non-TTY stdin delete when --yes is absent', async () => {
       process.stdin.isTTY = false;
-      const { deleteSource } = await import('@/libs/sources.js');
+      const { deleteSource } = await import('#src/libs/sources.js');
       const { confirm } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1700,9 +1700,9 @@ describe('runSourcesCommand', () => {
     // the same way.
     it('fails loudly on a redirected-stdout delete when --yes is absent', async () => {
       process.stdout.isTTY = false;
-      const { deleteSource } = await import('@/libs/sources.js');
+      const { deleteSource } = await import('#src/libs/sources.js');
       const { confirm } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1717,10 +1717,10 @@ describe('runSourcesCommand', () => {
     // The scripting path: --yes with a uuid deletes on a non-TTY, no prompt.
     it('deletes on a non-TTY when a uuid and --yes are given', async () => {
       process.stdin.isTTY = false;
-      const { deleteSource } = await import('@/libs/sources.js');
+      const { deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123', '--yes']);
 
@@ -1729,10 +1729,10 @@ describe('runSourcesCommand', () => {
     });
 
     it('does nothing when there are no sources to pick from', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
       const { confirm } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete']);
 
@@ -1742,12 +1742,12 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports an error when deletion fails', async () => {
-      const { fetchSources, deleteSource } = await import('@/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue(null);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', 'abc-123']);
 
@@ -1761,14 +1761,14 @@ describe('runSourcesCommand', () => {
   describe('rotate-secret', () => {
     it('rotates by uuid for a generated provider and reveals the new secret once', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(rotateSourceSecret).mockResolvedValue({
         ...githubSource,
         providerSecret: 'whsec_rotated_value',
       });
       const { select, password } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'ghi-789']);
 
@@ -1797,13 +1797,13 @@ describe('runSourcesCommand', () => {
       process.stdin.isTTY = false;
       process.stdout.isTTY = false;
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(rotateSourceSecret).mockResolvedValue({
         ...githubSource,
         providerSecret: 'whsec_rotated_value',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'ghi-789']);
 
@@ -1813,7 +1813,7 @@ describe('runSourcesCommand', () => {
 
     it('prompts (masked) for the new secret and sends it for a manual-secret provider', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       const { password } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
       vi.mocked(password).mockResolvedValueOnce('whsec_pasted_stripe');
@@ -1824,7 +1824,7 @@ describe('runSourcesCommand', () => {
         ...stripeSource,
         providerSecret: 'whsec_echoed_by_server',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'str-123']);
 
@@ -1854,10 +1854,10 @@ describe('runSourcesCommand', () => {
     it('fails loudly on a non-TTY rotate-secret for a manual-secret provider instead of hanging on the password prompt', async () => {
       process.stdin.isTTY = false;
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       const { password } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'str-123']);
 
@@ -1878,10 +1878,10 @@ describe('runSourcesCommand', () => {
     it('fails loudly on a redirected-stdout rotate-secret for a manual-secret provider', async () => {
       process.stdout.isTTY = false;
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       const { password } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'str-123']);
 
@@ -1896,7 +1896,7 @@ describe('runSourcesCommand', () => {
 
     it('does not raise the missing-secret alarm for a manual provider (its response has none)', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       const { password } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
       vi.mocked(password).mockResolvedValueOnce('whsec_pasted_stripe');
@@ -1907,7 +1907,7 @@ describe('runSourcesCommand', () => {
         ...stripeSource,
         providerSecret: null,
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'str-123']);
 
@@ -1919,11 +1919,11 @@ describe('runSourcesCommand', () => {
 
     it('aborts without calling the API when a manual secret is left blank', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       const { password } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([stripeSource]);
       vi.mocked(password).mockResolvedValueOnce('   ');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'str-123']);
 
@@ -1935,9 +1935,9 @@ describe('runSourcesCommand', () => {
 
     it('refuses a source with no rotatable secret and skips the API call', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'abc-123']);
 
@@ -1949,9 +1949,9 @@ describe('runSourcesCommand', () => {
 
     it('reports not-found when the uuid does not match any source', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'unknown-uuid']);
 
@@ -1963,7 +1963,7 @@ describe('runSourcesCommand', () => {
 
     it('offers only rotatable sources in the interactive picker', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([
         webhookSource,
@@ -1975,7 +1975,7 @@ describe('runSourcesCommand', () => {
         ...githubSource,
         providerSecret: 'whsec_rotated_value',
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret']);
 
@@ -1989,9 +1989,9 @@ describe('runSourcesCommand', () => {
 
     it('explains rotate-secret needs a provider source when only non-rotatable sources exist', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource, emailSource]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret']);
 
@@ -2010,9 +2010,9 @@ describe('runSourcesCommand', () => {
     it('fails loudly on a non-TTY stdin rotate-secret with no uuid instead of opening the picker', async () => {
       process.stdin.isTTY = false;
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret']);
 
@@ -2030,9 +2030,9 @@ describe('runSourcesCommand', () => {
     it('fails loudly on a redirected-stdout rotate-secret with no uuid instead of opening the picker', async () => {
       process.stdout.isTTY = false;
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret']);
 
@@ -2046,9 +2046,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('falls back to the plain empty message when there are no sources at all', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret']);
 
@@ -2059,14 +2059,14 @@ describe('runSourcesCommand', () => {
 
     it('warns when a generated rotation succeeds but the response omits the secret', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       // Server rotated the secret (old one now dead) but returned no plaintext.
       vi.mocked(rotateSourceSecret).mockResolvedValue({
         ...githubSource,
         providerSecret: null,
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'ghi-789']);
 
@@ -2078,10 +2078,10 @@ describe('runSourcesCommand', () => {
 
     it('reports an error when the rotation fails', async () => {
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(rotateSourceSecret).mockResolvedValue(null);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'ghi-789']);
 
@@ -2096,13 +2096,13 @@ describe('runSourcesCommand', () => {
     it('strips control characters from a hostile rotated secret before printing', async () => {
       const control = String.fromCharCode(0x1b);
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
+        await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(rotateSourceSecret).mockResolvedValue({
         ...githubSource,
         providerSecret: `whsec_${control}[2J`,
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', 'ghi-789']);
 
@@ -2120,10 +2120,10 @@ describe('runSourcesCommand', () => {
     // rotate-secret reveals a one-time secret, so like `create` it must reject
     // --json before doing anything — a `| jq` pipeline would lose the secret.
     it('rejects --json on rotate-secret before prompting or calling the API', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
+      const { checkConfig } = await import('#src/libs/config.js');
       const { fetchSources, rotateSourceSecret } =
-        await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+        await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['rotate-secret', '--json']);
 
@@ -2135,12 +2135,12 @@ describe('runSourcesCommand', () => {
   });
 
   it('catches and logs unexpected errors (e.g. checkConfig failing)', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     // Once so the rejection can't leak into later tests — clearAllMocks clears
     // call history but not implementations, which would otherwise make the
     // fetch_failed test below throw at checkConfig instead of at the fetch.
     vi.mocked(checkConfig).mockRejectedValueOnce(new Error('boom'));
-    const { runSourcesCommand } = await import('@/commands/sources.js');
+    const { runSourcesCommand } = await import('#src/commands/sources.js');
 
     await runSourcesCommand(['list']);
 
@@ -2152,10 +2152,10 @@ describe('runSourcesCommand', () => {
   // process, so the command must short-circuit before dispatching to the
   // handler that would hit the network.
   it('does not reach the handler when checkConfig resolves false', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
-    const { fetchSources } = await import('@/libs/sources.js');
-    const { runSourcesCommand } = await import('@/commands/sources.js');
+    const { fetchSources } = await import('#src/libs/sources.js');
+    const { runSourcesCommand } = await import('#src/commands/sources.js');
 
     await runSourcesCommand(['list']);
 
@@ -2183,9 +2183,9 @@ describe('runSourcesCommand', () => {
     };
 
     it('calls testSource with the uuid and prints a human-readable preview', async () => {
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(testResult);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123']);
 
@@ -2197,10 +2197,10 @@ describe('runSourcesCommand', () => {
     });
 
     it('prints the full result as a single parseable JSON object with --json', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { testSource } = await import('@/libs/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(testResult);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123', '--json']);
 
@@ -2213,9 +2213,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('requires a uuid — fails with usage and never calls the API', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { testSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { testSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test']);
 
@@ -2228,9 +2228,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('fails loud (exit 1) when the test call returns null', async () => {
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(null);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123']);
 
@@ -2241,9 +2241,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('emits a fetch_failed JSON error on stderr when the test call returns null with --json', async () => {
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(null);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123', '--json']);
 
@@ -2262,9 +2262,9 @@ describe('runSourcesCommand', () => {
     it('still tests on a non-TTY (neither stdin nor stdout is a terminal)', async () => {
       process.stdin.isTTY = false;
       process.stdout.isTTY = false;
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(testResult);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123', '--json']);
 
@@ -2292,9 +2292,9 @@ describe('runSourcesCommand', () => {
           frontmatter: { note: `evil${control}note` },
         },
       };
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(evilResult);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123']);
 
@@ -2311,9 +2311,9 @@ describe('runSourcesCommand', () => {
         provider: null,
         payload: {},
       } as unknown as SourceTestResult;
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(malformedResult);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await expect(
         runSourcesCommand(['test', 'abc-123']),
@@ -2340,9 +2340,9 @@ describe('runSourcesCommand', () => {
           tags: null as unknown as string[],
         },
       };
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(malformedResult);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await expect(
         runSourcesCommand(['test', 'abc-123']),
@@ -2366,9 +2366,9 @@ describe('runSourcesCommand', () => {
           message: 'unrecognized status from a drifted server',
         },
       };
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue(proteanResult);
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await expect(
         runSourcesCommand(['test', 'abc-123']),
@@ -2389,12 +2389,12 @@ describe('runSourcesCommand', () => {
     ])(
       'exits 0 and renders the "%s" status like any other diagnostic outcome',
       async (status, message) => {
-        const { testSource } = await import('@/libs/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
         vi.mocked(testSource).mockResolvedValue({
           ...testResult,
           signatureCheck: { status, message },
         });
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand(['test', 'abc-123']);
 
@@ -2405,12 +2405,12 @@ describe('runSourcesCommand', () => {
     );
 
     it('renders "none" for a null provider (a slug-only source)', async () => {
-      const { testSource } = await import('@/libs/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
       vi.mocked(testSource).mockResolvedValue({
         ...testResult,
         provider: null,
       });
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123']);
 
@@ -2418,8 +2418,8 @@ describe('runSourcesCommand', () => {
     });
 
     it('emits a usage-coded JSON error on stderr when --json is used with no uuid', async () => {
-      const { testSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', '--json']);
 
@@ -2437,9 +2437,9 @@ describe('runSourcesCommand', () => {
     // be previewed against something other than the server's default sample.
     describe('--payload', () => {
       it('parses --payload as JSON and forwards it to testSource', async () => {
-        const { testSource } = await import('@/libs/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
         vi.mocked(testSource).mockResolvedValue(testResult);
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand([
           'test',
@@ -2455,9 +2455,9 @@ describe('runSourcesCommand', () => {
       });
 
       it('omits the payload field on testSource entirely when --payload is not given', async () => {
-        const { testSource } = await import('@/libs/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
         vi.mocked(testSource).mockResolvedValue(testResult);
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand(['test', 'abc-123']);
 
@@ -2472,9 +2472,9 @@ describe('runSourcesCommand', () => {
       // `testSource` as `{ payload: {} }`, not be treated as "absent" and
       // dropped like the previous test's bare `testSource('abc-123')` call.
       it('forwards an explicit empty object rather than treating it as absent', async () => {
-        const { testSource } = await import('@/libs/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
         vi.mocked(testSource).mockResolvedValue(testResult);
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand(['test', 'abc-123', '--payload', '{}']);
 
@@ -2482,8 +2482,8 @@ describe('runSourcesCommand', () => {
       });
 
       it('rejects malformed JSON with a usage error and never calls testSource', async () => {
-        const { testSource } = await import('@/libs/sources.js');
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand([
           'test',
@@ -2507,8 +2507,8 @@ describe('runSourcesCommand', () => {
       ])(
         'rejects %s payload (valid JSON, not an object) with a usage error',
         async (_description, rawPayload) => {
-          const { testSource } = await import('@/libs/sources.js');
-          const { runSourcesCommand } = await import('@/commands/sources.js');
+          const { testSource } = await import('#src/libs/sources.js');
+          const { runSourcesCommand } = await import('#src/commands/sources.js');
 
           await runSourcesCommand(['test', 'abc-123', '--payload', rawPayload]);
 
@@ -2521,8 +2521,8 @@ describe('runSourcesCommand', () => {
       );
 
       it('emits a usage-coded JSON error on stderr for malformed --payload with --json', async () => {
-        const { testSource } = await import('@/libs/sources.js');
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand([
           'test',
@@ -2542,8 +2542,8 @@ describe('runSourcesCommand', () => {
       });
 
       it('rejects --payload on a subcommand other than test', async () => {
-        const { fetchSources } = await import('@/libs/sources.js');
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { fetchSources } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand(['list', '--payload', '{"a":1}']);
 
@@ -2561,8 +2561,8 @@ describe('runSourcesCommand', () => {
       // invocation with a bad payload gets the "requires a uuid" message, not
       // the JSON one — and testSource is never reached either way.
       it('reports the missing-uuid error, not the malformed-payload one, when both are wrong', async () => {
-        const { testSource } = await import('@/libs/sources.js');
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand(['test', '--payload', '{bad']);
 
@@ -2583,8 +2583,8 @@ describe('runSourcesCommand', () => {
       // every other untrusted field in this file.
       it('strips control characters from the JSON.parse error before printing it', async () => {
         const control = String.fromCharCode(0x1b);
-        const { testSource } = await import('@/libs/sources.js');
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand([
           'test',
@@ -2607,8 +2607,8 @@ describe('runSourcesCommand', () => {
       // for any other malformed flag on this command (e.g. an unknown
       // option), which this pins down rather than assuming.
       it('fails loud when --payload is given with no value', async () => {
-        const { testSource } = await import('@/libs/sources.js');
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand(['test', 'abc-123', '--payload']);
 
@@ -2620,8 +2620,8 @@ describe('runSourcesCommand', () => {
       });
 
       it('emits a usage-coded JSON error on stderr for a non-object --payload with --json', async () => {
-        const { testSource } = await import('@/libs/sources.js');
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand([
           'test',
@@ -2641,9 +2641,9 @@ describe('runSourcesCommand', () => {
       });
 
       it('prints pure JSON on stdout for a successful --payload run with --json', async () => {
-        const { testSource } = await import('@/libs/sources.js');
+        const { testSource } = await import('#src/libs/sources.js');
         vi.mocked(testSource).mockResolvedValue(testResult);
-        const { runSourcesCommand } = await import('@/commands/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
         await runSourcesCommand([
           'test',
@@ -2667,9 +2667,9 @@ describe('runSourcesCommand', () => {
     // covered under --json in the "--json failure contract" describe below —
     // it must print the usage block (not silently succeed) with exit 1.
     it('exits 1 with the usage block on a stray positional past the uuid', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { testSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { testSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123', 'extra']);
 
@@ -2690,7 +2690,7 @@ describe('runSourcesCommand', () => {
   // parseable { error, message } shape on stderr.
   describe('--json failure contract', () => {
     it('emits a usage-coded JSON error when --json is rejected on delete', async () => {
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', '--json']);
 
@@ -2706,9 +2706,9 @@ describe('runSourcesCommand', () => {
     });
 
     it('emits a fetch_failed JSON error on stderr for a thrown fetch failure', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockRejectedValue(new Error('boom'));
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--json']);
 
@@ -2725,8 +2725,8 @@ describe('runSourcesCommand', () => {
     // #208's fix elsewhere). The whole-command `parseArgs` call used to share
     // the handler dispatch's outer catch, which miscoded it.
     it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', '--bogus', '--json']);
 
@@ -2743,8 +2743,8 @@ describe('runSourcesCommand', () => {
     // likewise a usage error, not silently discarded or miscoded as
     // fetch_failed.
     it('emits a usage-coded JSON error, not fetch_failed, for a stray positional', async () => {
-      const { testSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123', 'extra', '--json']);
 
@@ -2760,8 +2760,8 @@ describe('runSourcesCommand', () => {
     // `list` never reads its uuid slot (see SOURCES_HANDLERS) — a uuid-shaped
     // argument must fail loudly, not be silently accepted and discarded.
     it('emits a usage-coded JSON error for a uuid-shaped argument given to list', async () => {
-      const { fetchSources } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', 'extra', '--json']);
 
@@ -2780,9 +2780,9 @@ describe('runSourcesCommand', () => {
     // block, not silently list everything with exit 0. `--json` would hit the
     // separate `--json` rejection first, so this has to be the non-JSON case.
     it('exits 1 with the usage block for a uuid-shaped argument given to list', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchSources } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchSources } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['list', 'extra']);
 
@@ -2801,9 +2801,9 @@ describe('runSourcesCommand', () => {
     // separately so deleting it from that set wouldn't leave every test
     // green (create always prompts, so createSource must never be called).
     it('exits 1 with the usage block for a uuid-shaped argument given to create', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { createSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { createSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['create', 'extra']);
 
@@ -2823,8 +2823,8 @@ describe('runSourcesCommand', () => {
     // the terminal, same as every API-error path.
     it('strips control characters from a hostile stray positional before printing', async () => {
       const control = String.fromCharCode(0x1b);
-      const { testSource } = await import('@/libs/sources.js');
-      const { runSourcesCommand } = await import('@/commands/sources.js');
+      const { testSource } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['test', 'abc-123', `evil${control}[2J`]);
 

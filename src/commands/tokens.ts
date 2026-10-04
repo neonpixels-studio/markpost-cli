@@ -1,18 +1,21 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
-import { createToken, fetchTokens, revokeToken } from '@/libs/tokens.js';
-import { checkConfig } from '@/libs/config.js';
-import { getApiToken } from '@/libs/api.js';
-import { failWithMessage } from '@/libs/errors.js';
-import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
+import { createToken, fetchTokens, revokeToken } from '#src/libs/tokens.js';
+import { checkConfig } from '#src/libs/config.js';
+import { getApiToken } from '#src/libs/api.js';
+import { failWithMessage } from '#src/libs/errors.js';
+import {
+  isInteractiveTerminal,
+  sanitizeForTerminal,
+} from '#src/libs/terminal.js';
 import {
   failWithSubcommandUsage,
   failWithUsage,
   parseOrFailWithUsage,
-} from '@/libs/usage.js';
-import { hasJsonFlag, printJson } from '@/libs/output.js';
-import { CreateTokenInput, Token } from '@/types/tokens.types.js';
+} from '#src/libs/usage.js';
+import { hasJsonFlag, printJson } from '#src/libs/output.js';
+import { CreateTokenInput, Token } from '#src/types/tokens.types.js';
 
 export const USAGE = `Usage: markpost tokens <list|create|revoke> [id] [--yes]
 

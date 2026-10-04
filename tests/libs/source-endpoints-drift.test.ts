@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EMAIL_DOMAIN as cliEmailDomain,
   WEBHOOK_INGEST_BASE as cliWebhookIngestBase,
-} from '@/commands/sources.js';
+} from '#src/commands/sources.js';
 
 // Imported as a namespace (rather than destructuring the two names directly)
 // so the "exports exactly the expected constants" check below can inspect

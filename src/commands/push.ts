@@ -1,17 +1,17 @@
 import chalk from 'chalk';
-import { createRecord } from '@/libs/records.js';
+import { createRecord } from '#src/libs/records.js';
 import {
   ApiRequestError,
   describeRequestRejection,
   describeSystemicFailure,
   isSystemicApiFailure,
   rethrowIfTimeout,
-} from '@/libs/api.js';
-import { readMarkdown } from '@/libs/markdown.js';
-import { resolveMarkdownInputs } from '@/libs/files.js';
-import { checkConfig } from '@/libs/config.js';
-import { failWithUsage } from '@/libs/usage.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
+} from '#src/libs/api.js';
+import { readMarkdown } from '#src/libs/markdown.js';
+import { resolveMarkdownInputs } from '#src/libs/files.js';
+import { checkConfig } from '#src/libs/config.js';
+import { failWithUsage } from '#src/libs/usage.js';
+import { sanitizeForTerminal } from '#src/libs/terminal.js';
 
 export const USAGE = `Usage: markpost push [--dry-run] <path...>
 

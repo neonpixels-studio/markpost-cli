@@ -6,10 +6,10 @@ import {
   authedRequestWithHeaders,
   isSystemicApiFailure,
   logApiFailure,
-} from '@/libs/api.js';
-import { logErrorMessage } from '@/libs/errors.js';
-import { expandHomeDirectory } from '@/libs/paths.js';
-import { RecordExportRow } from '@/types/records.types.js';
+} from '#src/libs/api.js';
+import { logErrorMessage } from '#src/libs/errors.js';
+import { expandHomeDirectory } from '#src/libs/paths.js';
+import { RecordExportRow } from '#src/types/records.types.js';
 
 // Mirrors markpost's shared/utils/export.ts `EXPORT_TRUNCATED_HEADER` — the
 // header markpost's export endpoints set to signal the result was capped at
