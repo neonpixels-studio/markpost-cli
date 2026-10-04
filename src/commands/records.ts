@@ -6,18 +6,21 @@ import {
   PENDING_STATUS,
   RecordListFilters,
   updateRecord,
-} from '@/libs/records.js';
+} from '#src/libs/records.js';
 import {
   describeApiError,
   describeRequestRejection,
   isPerRecordRejection,
-} from '@/libs/api.js';
-import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, warnPartialRead } from '@/libs/errors.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage, parseOrFailWithUsage } from '@/libs/usage.js';
-import { hasJsonFlag, printJson } from '@/libs/output.js';
-import { Record } from '@/types/records.types.js';
+} from '#src/libs/api.js';
+import { checkConfig } from '#src/libs/config.js';
+import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
+import { sanitizeForTerminal } from '#src/libs/terminal.js';
+import {
+  failWithSubcommandUsage,
+  parseOrFailWithUsage,
+} from '#src/libs/usage.js';
+import { hasJsonFlag, printJson } from '#src/libs/output.js';
+import { Record } from '#src/types/records.types.js';
 
 const LIST_SUBCOMMAND = 'list';
 const UPDATE_SUBCOMMAND = 'update';

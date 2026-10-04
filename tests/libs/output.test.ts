@@ -7,7 +7,7 @@ import {
   JSON_ERROR_PARTIAL_READ,
   JSON_ERROR_USAGE,
   printJsonError,
-} from '@/libs/output.js';
+} from '#src/libs/output.js';
 
 describe('printJsonError', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;

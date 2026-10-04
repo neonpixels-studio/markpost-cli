@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ERROR_STATUS } from '@/libs/records.js';
-import { Record } from '@/types/records.types.js';
+import { ERROR_STATUS } from '#src/libs/records.js';
+import { Record } from '#src/types/records.types.js';
 
-vi.mock('@/libs/config.js', () => ({ checkConfig: vi.fn() }));
-vi.mock('@/libs/records.js', async () => {
+vi.mock('#src/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('#src/libs/records.js', async () => {
   // Pulls the real ERROR_STATUS through (via importActual, not a full-module
   // spread) rather than restating the literal, so these tests stay pinned to
   // the actual constant instead of drifting from it if it's ever renamed —
@@ -12,8 +12,8 @@ vi.mock('@/libs/records.js', async () => {
   // calling an unmocked function still fails loudly here instead of quietly
   // running the real implementation.
   const { ERROR_STATUS, PENDING_STATUS } =
-    await vi.importActual<typeof import('@/libs/records.js')>(
-      '@/libs/records.js',
+    await vi.importActual<typeof import('#src/libs/records.js')>(
+      '#src/libs/records.js',
     );
 
   return {
@@ -59,7 +59,7 @@ describe('runRecordsCommand', () => {
     process.exitCode = undefined;
     // resetAllMocks strips the default implementation, so re-pin checkConfig to
     // a passing resolve; failure-path tests override with mockRejectedValue.
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValue(true);
   });
 
@@ -68,14 +68,14 @@ describe('runRecordsCommand', () => {
   });
 
   it('always checks config before dispatching', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchAllRecords } = await import('#src/libs/records.js');
     vi.mocked(fetchAllRecords).mockResolvedValue({
       ok: true,
       records: [],
       partial: false,
     });
-    const { runRecordsCommand } = await import('@/commands/records.js');
+    const { runRecordsCommand } = await import('#src/commands/records.js');
 
     await runRecordsCommand(['list']);
 
@@ -83,10 +83,10 @@ describe('runRecordsCommand', () => {
   });
 
   it('never dispatches to list when checkConfig fails', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchAllRecords } = await import('@/libs/records.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchAllRecords } = await import('#src/libs/records.js');
     vi.mocked(checkConfig).mockRejectedValue(new Error('Missing API key'));
-    const { runRecordsCommand } = await import('@/commands/records.js');
+    const { runRecordsCommand } = await import('#src/commands/records.js');
 
     await runRecordsCommand(['list']);
 
@@ -97,10 +97,10 @@ describe('runRecordsCommand', () => {
   // checkConfig now signals failure by resolving false (diagnostic already
   // emitted, exitCode set) rather than throwing, so list must not run.
   it('never dispatches to list when checkConfig resolves false', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { runRecordsCommand } = await import('@/commands/records.js');
+    const { fetchAllRecords } = await import('#src/libs/records.js');
+    const { runRecordsCommand } = await import('#src/commands/records.js');
 
     await runRecordsCommand(['list']);
 
@@ -111,9 +111,9 @@ describe('runRecordsCommand', () => {
   });
 
   it('errors to stderr and exits 1 when no subcommand is given', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { runRecordsCommand } = await import('@/commands/records.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchAllRecords } = await import('#src/libs/records.js');
+    const { runRecordsCommand } = await import('#src/commands/records.js');
 
     await runRecordsCommand([]);
 
@@ -130,9 +130,9 @@ describe('runRecordsCommand', () => {
   });
 
   it('errors to stderr and exits 1 for an unrecognized subcommand', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { runRecordsCommand } = await import('@/commands/records.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchAllRecords } = await import('#src/libs/records.js');
+    const { runRecordsCommand } = await import('#src/commands/records.js');
 
     await runRecordsCommand(['bogus']);
 
@@ -150,13 +150,13 @@ describe('runRecordsCommand', () => {
 
   describe('list', () => {
     it('prints "No records found." when there are none', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -164,13 +164,13 @@ describe('runRecordsCommand', () => {
     });
 
     it('prints each fetched record', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord, secondRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -189,13 +189,13 @@ describe('runRecordsCommand', () => {
     });
 
     it("prints each record's status, and syncedAt when present", async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord, secondRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -213,13 +213,13 @@ describe('runRecordsCommand', () => {
     // syncedAt is null until a record is first written to disk, so a pending
     // record must not print a blank "synced at:" line.
     it('omits the synced at line for a record without syncedAt', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [secondRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -232,13 +232,13 @@ describe('runRecordsCommand', () => {
     });
 
     it('includes status and syncedAt in the --json output', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--json']);
 
@@ -250,7 +250,7 @@ describe('runRecordsCommand', () => {
     });
 
     it("prints an error-status record's errorMessage", async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       const erroredRecord: Record = {
         ...secondRecord,
         status: ERROR_STATUS,
@@ -261,7 +261,7 @@ describe('runRecordsCommand', () => {
         records: [firstRecord, erroredRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -273,13 +273,13 @@ describe('runRecordsCommand', () => {
     // Neither record has ever errored (the common case), so neither prints a
     // blank "error:" line.
     it('omits the error line for records without errorMessage', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord, secondRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -295,7 +295,7 @@ describe('runRecordsCommand', () => {
     // errorMessage happens to be null must not print a blank "error:" line
     // either — `status === ERROR_STATUS` alone isn't enough.
     it('omits the error line for an error-status record with no errorMessage', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       const erroredWithNoMessage: Record = {
         ...secondRecord,
         status: ERROR_STATUS,
@@ -306,7 +306,7 @@ describe('runRecordsCommand', () => {
         records: [erroredWithNoMessage],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -324,7 +324,7 @@ describe('runRecordsCommand', () => {
     // line must gate on the record's CURRENT status, not on errorMessage
     // alone, or a resolved failure would print as if it were still live.
     it('omits the error line for a synced record with a stale errorMessage', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       const staleRecord: Record = {
         ...firstRecord,
         status: 'synced',
@@ -335,7 +335,7 @@ describe('runRecordsCommand', () => {
         records: [staleRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -348,7 +348,7 @@ describe('runRecordsCommand', () => {
     });
 
     it('includes errorMessage in the --json output', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       const erroredRecord: Record = {
         ...secondRecord,
         status: ERROR_STATUS,
@@ -359,7 +359,7 @@ describe('runRecordsCommand', () => {
         records: [erroredRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--json']);
 
@@ -380,13 +380,13 @@ describe('runRecordsCommand', () => {
         status: ERROR_STATUS,
         errorMessage: `Sync ${control}failed`,
       };
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [evilRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -405,14 +405,14 @@ describe('runRecordsCommand', () => {
     });
 
     it('prints the records as a parseable JSON array with --json', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord, secondRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--json']);
 
@@ -436,13 +436,13 @@ describe('runRecordsCommand', () => {
     });
 
     it('still threads filters through when --json is passed', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--source', 'webhook', '--json']);
 
@@ -462,13 +462,13 @@ describe('runRecordsCommand', () => {
     });
 
     it('prints an empty JSON array (not "No records found.") for --json with no records', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--json']);
 
@@ -480,13 +480,13 @@ describe('runRecordsCommand', () => {
     // A partial read must keep stdout valid JSON (jq-safe): the warning goes to
     // stderr only, and the command still exits non-zero.
     it('writes clean JSON to stdout on a partial read, warning only on stderr', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord],
         partial: true,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--json']);
 
@@ -503,13 +503,13 @@ describe('runRecordsCommand', () => {
     // plain-text chalk line, which would choke a script parsing stderr as
     // JSON.
     it('emits a single JSON error object on stderr on a partial read under --json', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord],
         partial: true,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--json']);
 
@@ -534,13 +534,13 @@ describe('runRecordsCommand', () => {
     });
 
     it('passes no filters through when no flags are given', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -555,13 +555,13 @@ describe('runRecordsCommand', () => {
     });
 
     it('threads --source, --status, and --search into the fetch', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'list',
@@ -590,13 +590,13 @@ describe('runRecordsCommand', () => {
     });
 
     it('accepts the --flag=value form', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--source=email']);
 
@@ -611,9 +611,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('surfaces an error and never fetches when given an unknown flag', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--bogus', 'value']);
 
@@ -632,7 +632,7 @@ describe('runRecordsCommand', () => {
     // must print alongside the message.
     it('prints the usage block, not bare prose, for an unknown flag without --json', async () => {
       const { runRecordsCommand, USAGE } =
-        await import('@/commands/records.js');
+        await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--bogus', 'value']);
 
@@ -641,8 +641,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects a present-but-empty filter value instead of listing everything', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--source=']);
 
@@ -654,8 +654,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects a stray positional argument instead of listing everything', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', 'webhook']);
 
@@ -667,8 +667,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects a filter flag passed more than once instead of silently last-winning', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'list',
@@ -688,8 +688,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects a whitespace-only filter value', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--source', '   ']);
 
@@ -701,13 +701,13 @@ describe('runRecordsCommand', () => {
     });
 
     it('trims surrounding whitespace from a filter value before sending it', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--search', '  meeting notes  ']);
 
@@ -722,8 +722,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('surfaces an error and never fetches when a flag is missing its value', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--search']);
 
@@ -736,13 +736,13 @@ describe('runRecordsCommand', () => {
 
     it('never deletes the records it lists', async () => {
       const { fetchAllRecords, deleteRecords } =
-        await import('@/libs/records.js');
+        await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord, secondRecord],
         partial: false,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -752,9 +752,9 @@ describe('runRecordsCommand', () => {
     // A failed fetch (`ok: false`) must not print "No records found." — it has
     // to surface loudly and exit non-zero, distinct from an empty account.
     it('fails loud and exits non-zero when the fetch fails', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({ ok: false });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -773,13 +773,13 @@ describe('runRecordsCommand', () => {
     // but warn it may be incomplete and exit non-zero — never present a
     // truncated list as the full set.
     it('warns and exits non-zero on a partial read, still printing what it got', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [firstRecord],
         partial: true,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -795,13 +795,13 @@ describe('runRecordsCommand', () => {
     // A partial read that returned zero records must not claim "No records
     // found." — the read failed before any page came back, not an empty account.
     it('does not print "No records found." on a partial read with no records', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
         records: [],
         partial: true,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list']);
 
@@ -822,8 +822,8 @@ describe('runRecordsCommand', () => {
     };
 
     it('errors with usage and never calls updateRecord when no uuid is given', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update']);
 
@@ -835,8 +835,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('errors with usage and never calls updateRecord when neither --title nor --content is given', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123']);
 
@@ -850,8 +850,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects a present-but-empty --title instead of sending a blank update', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', '  ']);
 
@@ -863,8 +863,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects a present-but-empty --content instead of sending a blank update', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--content', '  ']);
 
@@ -876,8 +876,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects --title passed more than once', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'update',
@@ -898,8 +898,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects --content passed more than once', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'update',
@@ -920,8 +920,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects a stray extra positional argument', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'update',
@@ -939,8 +939,8 @@ describe('runRecordsCommand', () => {
     });
 
     it('rejects an unknown flag instead of silently ignoring it', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       // `--bogus` (not `--status`) so the assertion below can't be satisfied
       // by the USAGE block's own list-options text, which mentions "status".
@@ -960,8 +960,8 @@ describe('runRecordsCommand', () => {
     it.each(['.', '..', 'abc/123'])(
       'rejects a path-unsafe uuid %j instead of sending the request',
       async (unsafeUuid) => {
-        const { updateRecord } = await import('@/libs/records.js');
-        const { runRecordsCommand } = await import('@/commands/records.js');
+        const { updateRecord } = await import('#src/libs/records.js');
+        const { runRecordsCommand } = await import('#src/commands/records.js');
 
         await runRecordsCommand(['update', unsafeUuid, '--title', 'X']);
 
@@ -974,9 +974,9 @@ describe('runRecordsCommand', () => {
     );
 
     it('calls updateRecord with only the given attributes', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
@@ -987,9 +987,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('calls updateRecord with only --content when --title is omitted', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--content', 'New content']);
 
@@ -1000,9 +1000,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('accepts the --flag=value form', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title=Updated Title']);
 
@@ -1013,9 +1013,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('passes both --title and --content through together', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'update',
@@ -1033,9 +1033,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('prints a success line and the updated record (via printRecord)', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
@@ -1056,9 +1056,9 @@ describe('runRecordsCommand', () => {
     // back `pending` after the edit gets an explicit confirmation line so the
     // user knows it will be written to disk on the next sync run.
     it('confirms the resync requeue when the updated record is pending', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
@@ -1072,12 +1072,12 @@ describe('runRecordsCommand', () => {
     // A record whose status stays `synced` (e.g. off-contract response) must
     // not falsely claim it's pending.
     it('does not print the pending note for a record that stays synced', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue({
         ...firstRecord,
         status: 'synced',
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
@@ -1091,12 +1091,12 @@ describe('runRecordsCommand', () => {
     // character in it must not reach the terminal live via the success line.
     it('strips control characters from the updated record before printing the success line', async () => {
       const control = String.fromCharCode(0x1b);
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue({
         ...updatedRecord,
         title: `Evil${control}Title`,
       });
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Evil']);
 
@@ -1112,9 +1112,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('prints the updated record as JSON with --json', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'update',
@@ -1134,9 +1134,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('fails loud with a non-zero exit when updateRecord returns null', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(null);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
@@ -1147,12 +1147,12 @@ describe('runRecordsCommand', () => {
     });
 
     it('surfaces a systemic auth failure with a classified message and non-zero exit', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(updateRecord).mockRejectedValue(
         new ApiRequestError('Invalid or missing API token', 401),
       );
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
@@ -1163,10 +1163,10 @@ describe('runRecordsCommand', () => {
     });
 
     it('checks config before calling updateRecord', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { updateRecord } = await import('@/libs/records.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { updateRecord } = await import('#src/libs/records.js');
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
@@ -1179,10 +1179,10 @@ describe('runRecordsCommand', () => {
     });
 
     it('never calls updateRecord when checkConfig resolves false', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
+      const { checkConfig } = await import('#src/libs/config.js');
       vi.mocked(checkConfig).mockResolvedValueOnce(false);
-      const { updateRecord } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
@@ -1190,12 +1190,12 @@ describe('runRecordsCommand', () => {
     });
 
     it('reports a per-record 422 in text mode, naming the record and stripping escapes', async () => {
-      const { updateRecord } = await import('@/libs/records.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { updateRecord } = await import('#src/libs/records.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(updateRecord).mockRejectedValue(
         new ApiRequestError('Invalid Attribute: \u001b[31mbad\u001b[0m', 422),
       );
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'update',
@@ -1217,8 +1217,8 @@ describe('runRecordsCommand', () => {
     // on stderr, never bare chalk prose, and never touch stdout.
     describe('--json failure contract', () => {
       it('emits a usage-coded JSON error when nothing to update is given', async () => {
-        const { updateRecord } = await import('@/libs/records.js');
-        const { runRecordsCommand } = await import('@/commands/records.js');
+        const { updateRecord } = await import('#src/libs/records.js');
+        const { runRecordsCommand } = await import('#src/commands/records.js');
 
         await runRecordsCommand(['update', 'abc-123', '--json']);
 
@@ -1235,9 +1235,9 @@ describe('runRecordsCommand', () => {
       });
 
       it('emits a fetch_failed JSON error when updateRecord returns null', async () => {
-        const { updateRecord } = await import('@/libs/records.js');
+        const { updateRecord } = await import('#src/libs/records.js');
         vi.mocked(updateRecord).mockResolvedValue(null);
-        const { runRecordsCommand } = await import('@/commands/records.js');
+        const { runRecordsCommand } = await import('#src/commands/records.js');
 
         await runRecordsCommand([
           'update',
@@ -1259,9 +1259,9 @@ describe('runRecordsCommand', () => {
       });
 
       it('carries the server detail and status for a 404 vs a 422 rejection', async () => {
-        const { updateRecord } = await import('@/libs/records.js');
-        const { ApiRequestError } = await import('@/libs/api.js');
-        const { runRecordsCommand } = await import('@/commands/records.js');
+        const { updateRecord } = await import('#src/libs/records.js');
+        const { ApiRequestError } = await import('#src/libs/api.js');
+        const { runRecordsCommand } = await import('#src/commands/records.js');
         const messages: string[] = [];
 
         for (const [status, detail] of [
@@ -1296,12 +1296,12 @@ describe('runRecordsCommand', () => {
       });
 
       it('emits a fetch_failed JSON error for a systemic auth failure', async () => {
-        const { updateRecord } = await import('@/libs/records.js');
-        const { ApiRequestError } = await import('@/libs/api.js');
+        const { updateRecord } = await import('#src/libs/records.js');
+        const { ApiRequestError } = await import('#src/libs/api.js');
         vi.mocked(updateRecord).mockRejectedValue(
           new ApiRequestError('Invalid or missing API token', 401),
         );
-        const { runRecordsCommand } = await import('@/commands/records.js');
+        const { runRecordsCommand } = await import('#src/commands/records.js');
 
         await runRecordsCommand([
           'update',
@@ -1324,9 +1324,9 @@ describe('runRecordsCommand', () => {
 
   it('surfaces a fetch error instead of throwing', async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('@/libs/records.js');
+      await import('#src/libs/records.js');
     vi.mocked(fetchAllRecords).mockRejectedValue(new Error('Network error'));
-    const { runRecordsCommand } = await import('@/commands/records.js');
+    const { runRecordsCommand } = await import('#src/commands/records.js');
 
     await runRecordsCommand(['list']);
 
@@ -1341,12 +1341,12 @@ describe('runRecordsCommand', () => {
   // and must surface its classified, actionable message with a non-zero exit —
   // never masquerade as "No records found." (issue #89).
   it('surfaces a systemic auth failure with a classified message and non-zero exit', async () => {
-    const { fetchAllRecords } = await import('@/libs/records.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { fetchAllRecords } = await import('#src/libs/records.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(fetchAllRecords).mockRejectedValue(
       new ApiRequestError('Invalid or missing API token', 401),
     );
-    const { runRecordsCommand } = await import('@/commands/records.js');
+    const { runRecordsCommand } = await import('#src/commands/records.js');
 
     await runRecordsCommand(['list']);
 
@@ -1361,7 +1361,7 @@ describe('runRecordsCommand', () => {
   // failure both surface as one parseable { error, message } shape on stderr.
   describe('--json failure contract', () => {
     it('emits a usage-coded JSON error for an unknown subcommand', async () => {
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['bogus', '--json']);
 
@@ -1376,12 +1376,12 @@ describe('runRecordsCommand', () => {
     });
 
     it('emits a fetch_failed JSON error on stderr for a thrown fetch failure', async () => {
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(fetchAllRecords).mockRejectedValue(
         new ApiRequestError('Invalid or missing API token', 401),
       );
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--json']);
 
@@ -1397,9 +1397,9 @@ describe('runRecordsCommand', () => {
     // code, not `fetch_failed` — argument parsing used to share the fetch's
     // try/catch, miscoding it (issue #184).
     it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag on list', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--bogus', 'value', '--json']);
 
@@ -1414,9 +1414,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('emits a usage-coded JSON error, not fetch_failed, for a stray positional on list', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', 'webhook', '--json']);
 
@@ -1435,9 +1435,9 @@ describe('runRecordsCommand', () => {
     // code rather than `fetch_failed` — guards against a future refactor that
     // moves this validation elsewhere and reintroduces the miscode.
     it('emits a usage-coded JSON error, not fetch_failed, for a present-but-empty filter value', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand(['list', '--source=', '--json']);
 
@@ -1452,9 +1452,9 @@ describe('runRecordsCommand', () => {
     });
 
     it('emits a usage-coded JSON error, not fetch_failed, for a filter flag passed more than once', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchAllRecords } = await import('@/libs/records.js');
-      const { runRecordsCommand } = await import('@/commands/records.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
 
       await runRecordsCommand([
         'list',

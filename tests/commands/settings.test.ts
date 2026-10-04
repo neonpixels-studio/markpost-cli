@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { UserSettings } from '@/types/settings.types.js';
+import { UserSettings } from '#src/types/settings.types.js';
 
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/settings.js', async (importOriginal) => {
+vi.mock('#src/libs/settings.js', async (importOriginal) => {
   // Keep the real `resolveSyncSettings` (pure normalizer the command reuses to
   // print) and only stub the two network seams, so the tests exercise the real
   // print path against mocked API responses.
   const actual =
-    await importOriginal<typeof import('@/libs/settings.js')>();
+    await importOriginal<typeof import('#src/libs/settings.js')>();
 
   return {
     ...actual,
@@ -64,13 +64,13 @@ describe('runSettingsCommand', () => {
   });
 
   it('checks config before dispatching a valid subcommand', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchSettings } = await import('@/libs/settings.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
     vi.mocked(fetchSettings).mockResolvedValue({
       ok: true,
       settings: mockSettings,
     });
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['get']);
 
@@ -78,10 +78,10 @@ describe('runSettingsCommand', () => {
   });
 
   it('gates the handler on config: a rejected config check runs no API call', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockRejectedValueOnce(new Error('not configured'));
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['get']);
 
@@ -93,10 +93,10 @@ describe('runSettingsCommand', () => {
   // diagnostic and set exitCode) rather than throwing, so the handler must not
   // run its API call.
   it('gates the handler on config: a false config check runs no API call', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['get']);
 
@@ -107,8 +107,8 @@ describe('runSettingsCommand', () => {
   });
 
   it('errors to stderr and exits 1 when no subcommand is given', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand([]);
 
@@ -120,8 +120,8 @@ describe('runSettingsCommand', () => {
   });
 
   it('errors to stderr and exits 1 for an unknown subcommand', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['bogus']);
 
@@ -133,9 +133,9 @@ describe('runSettingsCommand', () => {
   });
 
   it('exits non-zero when a settings call throws', async () => {
-    const { fetchSettings } = await import('@/libs/settings.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
     vi.mocked(fetchSettings).mockRejectedValue(new Error('boom'));
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['get']);
 
@@ -157,12 +157,12 @@ describe('settings get', () => {
   });
 
   it('prints the current settings on a successful read', async () => {
-    const { fetchSettings } = await import('@/libs/settings.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
     vi.mocked(fetchSettings).mockResolvedValue({
       ok: true,
       settings: mockSettings,
     });
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['get']);
 
@@ -175,9 +175,9 @@ describe('settings get', () => {
   });
 
   it('prints markpost defaults when the account has no saved row', async () => {
-    const { fetchSettings } = await import('@/libs/settings.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
     vi.mocked(fetchSettings).mockResolvedValue({ ok: true, settings: null });
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['get']);
 
@@ -188,9 +188,9 @@ describe('settings get', () => {
   });
 
   it('fails loud (stderr + exit 1) when the read fails', async () => {
-    const { fetchSettings } = await import('@/libs/settings.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
     vi.mocked(fetchSettings).mockResolvedValue({ ok: false });
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['get']);
 
@@ -201,8 +201,8 @@ describe('settings get', () => {
   });
 
   it('rejects extra arguments to `get`', async () => {
-    const { fetchSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['get', 'autoSync=true']);
 
@@ -225,13 +225,13 @@ describe('settings set', () => {
   });
 
   it('sends the parsed fields as the update payload and prints the result', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
     vi.mocked(updateSettings).mockResolvedValue({
       ...mockSettings,
       autoDelete: false,
       conflictStrategy: 'overwrite',
     });
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand([
       'set',
@@ -249,9 +249,9 @@ describe('settings set', () => {
   });
 
   it('coerces the string "true"/"false" to real booleans in the payload', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
     vi.mocked(updateSettings).mockResolvedValue(mockSettings);
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'autoSync=false', 'frontmatter=true']);
 
@@ -262,8 +262,8 @@ describe('settings set', () => {
   });
 
   it('errors and never calls the API when no fields are given', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set']);
 
@@ -275,8 +275,8 @@ describe('settings set', () => {
   });
 
   it('rejects an unknown field name without calling the API', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'theme=dark']);
 
@@ -288,8 +288,8 @@ describe('settings set', () => {
   });
 
   it('rejects an inherited object member name as an unknown setting', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'toString=false']);
 
@@ -301,8 +301,8 @@ describe('settings set', () => {
   });
 
   it('rejects a non-boolean value for a boolean field', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'autoSync=yes']);
 
@@ -314,8 +314,8 @@ describe('settings set', () => {
   });
 
   it('rejects an off-contract conflictStrategy value', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'conflictStrategy=merge']);
 
@@ -327,8 +327,8 @@ describe('settings set', () => {
   });
 
   it('rejects a token with no `=` separator', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'autoSync']);
 
@@ -340,8 +340,8 @@ describe('settings set', () => {
   });
 
   it('rejects a repeated key rather than silently last-wins', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'autoDelete=true', 'autoDelete=false']);
 
@@ -356,8 +356,8 @@ describe('settings set', () => {
   // carrying its own `=` is validated intact (here rejected as off-contract)
   // rather than truncated to `over`.
   it('does not truncate a value that contains an `=`', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'conflictStrategy=over=write']);
 
@@ -369,8 +369,8 @@ describe('settings set', () => {
   });
 
   it('stops at the first invalid field and sends nothing', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'autoSync=true', 'bogus=1']);
 
@@ -379,9 +379,9 @@ describe('settings set', () => {
   });
 
   it('fails loud (stderr + exit 1) when the update call returns null', async () => {
-    const { updateSettings } = await import('@/libs/settings.js');
+    const { updateSettings } = await import('#src/libs/settings.js');
     vi.mocked(updateSettings).mockResolvedValue(null);
-    const { runSettingsCommand } = await import('@/commands/settings.js');
+    const { runSettingsCommand } = await import('#src/commands/settings.js');
 
     await runSettingsCommand(['set', 'autoSync=true']);
 

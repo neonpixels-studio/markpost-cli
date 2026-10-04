@@ -1,4 +1,4 @@
-import { Frontmatter, Record } from '@/types/records.types.js';
+import { Frontmatter, Record } from '#src/types/records.types.js';
 
 // Faithful mirror of markpost's server/utils/markdown.ts frontmatter assembly
 // (`quoteYamlScalar`, `serializeTagsLine`, `serializeFrontmatter`,

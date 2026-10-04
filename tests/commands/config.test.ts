@@ -17,8 +17,8 @@ vi.mock('conf', () => ({
 
 // Keep the real CONFIG_KEYS / isConfigKey / formatting so a new key added to
 // the source is exercised here automatically; mock only the I/O seams.
-vi.mock('@/libs/config.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/libs/config.js')>()),
+vi.mock('#src/libs/config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#src/libs/config.js')>()),
   getConfigValue: mockGetConfigValue,
   setConfigValue: mockSetConfigValue,
   getConfigPath: mockGetConfigPath,
@@ -38,12 +38,12 @@ const STORED_DIRECTORY = '/home/user/notes';
 const CONFIG_FILE_PATH = '/home/user/.config/@markpost/cli/config.json';
 
 const importCommand = async () => {
-  const { runConfigCommand } = await import('@/commands/config.js');
+  const { runConfigCommand } = await import('#src/commands/config.js');
   return runConfigCommand;
 };
 
 const importKeys = async () => {
-  const { CONFIG_KEYS } = await import('@/libs/config.js');
+  const { CONFIG_KEYS } = await import('#src/libs/config.js');
   return CONFIG_KEYS;
 };
 

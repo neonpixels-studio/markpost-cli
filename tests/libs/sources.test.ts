@@ -7,27 +7,27 @@ import {
   rotateSourceSecret,
   testSource,
   updateSource,
-} from '@/libs/sources.js';
-import { ApiTimeoutError } from '@/libs/api.js';
-import { logErrorMessage } from '@/libs/errors.js';
-import { ApiDeleteMeta } from '@/types/api.types.js';
+} from '#src/libs/sources.js';
+import { ApiTimeoutError } from '#src/libs/api.js';
+import { logErrorMessage } from '#src/libs/errors.js';
+import { ApiDeleteMeta } from '#src/types/api.types.js';
 import {
   Source,
   SourceTestResult,
   SourceType,
-} from '@/types/sources.types.js';
+} from '#src/types/sources.types.js';
 
-// @/libs/api.js imports @/libs/config.js, which constructs a real
+// #src/libs/api.js imports #src/libs/config.js, which constructs a real
 // `conf`-backed store (touching the developer's actual config directory) as
 // soon as it's loaded. Mock it so loading api.js doesn't pull in that side
 // effect — API_TOKEN below resolves the token before the store is consulted.
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   config: { get: vi.fn() },
 }));
 
 // Drive the external-service seams (base URL, token) through the env vars the
 // real `getBaseUrl`/`getApiToken` read, so the shared `authedRequest` helper
-// in @/libs/api.js resolves them the same way production does. Overriding the
+// in #src/libs/api.js resolves them the same way production does. Overriding the
 // exports wouldn't reach `authedRequest`, which calls those functions
 // internally. `vi.stubEnv` scopes and auto-restores the values so nothing
 // leaks into other test files sharing the worker. Everything else —
@@ -43,8 +43,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-vi.mock('@/libs/errors.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/libs/errors.js')>()),
+vi.mock('#src/libs/errors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#src/libs/errors.js')>()),
   logErrorMessage: vi.fn(),
 }));
 

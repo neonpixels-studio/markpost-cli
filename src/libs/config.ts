@@ -2,7 +2,10 @@ import Conf from 'conf';
 import packageJson from './../../package.json' with { type: 'json' };
 import { input } from '@inquirer/prompts';
 import chalk from 'chalk';
-import { JSON_ERROR_CONFIG_REQUIRED, printJsonError } from '@/libs/output.js';
+import {
+  JSON_ERROR_CONFIG_REQUIRED,
+  printJsonError,
+} from '#src/libs/output.js';
 
 const schema = {
   apiToken: {

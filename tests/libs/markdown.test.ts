@@ -11,16 +11,16 @@ import { resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import slugify from '@sindresorhus/slugify';
 
-import { config } from '@/libs/config.js';
+import { config } from '#src/libs/config.js';
 import {
   buildWritePreview,
   ensureOutputDirectory,
   MAX_COLLISION_SUFFIX,
   readMarkdown,
   writeMarkdown,
-} from '@/libs/markdown.js';
-import type { WrittenRecordState } from '@/libs/markdown.js';
-import { Record } from '@/types/records.types.js';
+} from '#src/libs/markdown.js';
+import type { WrittenRecordState } from '#src/libs/markdown.js';
+import { Record } from '#src/types/records.types.js';
 
 const EXCLUSIVE_WRITE_OPTIONS = { flag: 'wx' };
 
@@ -120,7 +120,7 @@ const identityStats = (deviceId: bigint, inode: bigint): ReturnType<
   } as unknown as ReturnType<typeof lstatSync>;
 };
 
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   config: { get: vi.fn() },
 }));
 

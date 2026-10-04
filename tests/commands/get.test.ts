@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ERROR_STATUS } from '@/libs/records.js';
-import { Record } from '@/types/records.types.js';
+import { ERROR_STATUS } from '#src/libs/records.js';
+import { Record } from '#src/types/records.types.js';
 
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/records.js', async () => {
+vi.mock('#src/libs/records.js', async () => {
   // Pulls the real ERROR_STATUS through (via importActual, not a full-module
   // spread) rather than restating the literal, so these tests stay pinned to
   // the actual constant instead of drifting from it if it's ever renamed —
@@ -14,8 +14,8 @@ vi.mock('@/libs/records.js', async () => {
   // calling an unmocked function still fails loudly here instead of quietly
   // running the real implementation.
   const { ERROR_STATUS } =
-    await vi.importActual<typeof import('@/libs/records.js')>(
-      '@/libs/records.js',
+    await vi.importActual<typeof import('#src/libs/records.js')>(
+      '#src/libs/records.js',
     );
 
   return { ERROR_STATUS, fetchRecord: vi.fn() };
@@ -50,7 +50,7 @@ describe('runGetCommand', () => {
   });
 
   it('errors to stderr and exits 1 when no uuid is given', async () => {
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand([]);
 
@@ -65,8 +65,8 @@ describe('runGetCommand', () => {
   });
 
   it('does not check config when no uuid is given', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand([]);
 
@@ -74,10 +74,10 @@ describe('runGetCommand', () => {
   });
 
   it('fetches and prints the record', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -91,9 +91,9 @@ describe('runGetCommand', () => {
   });
 
   it("prints the record's status and syncedAt", async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -108,13 +108,13 @@ describe('runGetCommand', () => {
   // syncedAt is null until a record is first written to disk, so a pending
   // record must not print a blank "synced at:" line.
   it('omits the synced at line when syncedAt is absent', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue({
       ...mockRecord,
       status: 'pending',
       syncedAt: null,
     });
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -130,9 +130,9 @@ describe('runGetCommand', () => {
   });
 
   it('includes status and syncedAt in the --json output', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123', '--json']);
 
@@ -144,13 +144,13 @@ describe('runGetCommand', () => {
   });
 
   it("prints an error-status record's errorMessage", async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue({
       ...mockRecord,
       status: ERROR_STATUS,
       errorMessage: 'Sync failed: file already exists',
     });
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -162,9 +162,9 @@ describe('runGetCommand', () => {
   // A synced record (the common case, no error ever happened) must not print
   // a blank "error:" line.
   it('omits the error line when errorMessage is absent', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -180,13 +180,13 @@ describe('runGetCommand', () => {
   // errorMessage happens to be null must not print a blank "error:" line
   // either — `status === ERROR_STATUS` alone isn't enough.
   it('omits the error line for an error-status record with no errorMessage', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue({
       ...mockRecord,
       status: ERROR_STATUS,
       errorMessage: null,
     });
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -204,13 +204,13 @@ describe('runGetCommand', () => {
   // must gate on the record's CURRENT status, not on errorMessage alone, or a
   // resolved failure would print as if it were still live.
   it('omits the error line for a synced record with a stale errorMessage', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue({
       ...mockRecord,
       status: 'synced',
       errorMessage: 'Sync failed: file already exists',
     });
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -223,13 +223,13 @@ describe('runGetCommand', () => {
   });
 
   it('includes errorMessage in the --json output', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue({
       ...mockRecord,
       status: ERROR_STATUS,
       errorMessage: 'Sync failed: file already exists',
     });
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123', '--json']);
 
@@ -240,9 +240,9 @@ describe('runGetCommand', () => {
   });
 
   it('reports an error when the record is not found', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(null);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -253,8 +253,8 @@ describe('runGetCommand', () => {
   });
 
   it('reports a 404 and a 422 with distinct, server-detailed messages', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(fetchRecord)
       .mockRejectedValueOnce(
         new ApiRequestError('Not Found: No record was found', 404),
@@ -262,7 +262,7 @@ describe('runGetCommand', () => {
       .mockRejectedValueOnce(
         new ApiRequestError('Invalid Attribute: uuid is malformed', 422),
       );
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['missing-1', 'bad-2']);
 
@@ -277,12 +277,12 @@ describe('runGetCommand', () => {
   });
 
   it('keeps fetching later uuids after a per-record 4xx rejection', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(fetchRecord)
       .mockRejectedValueOnce(new ApiRequestError('Not Found: gone', 404))
       .mockResolvedValueOnce(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['missing-1', 'abc-123']);
 
@@ -292,15 +292,15 @@ describe('runGetCommand', () => {
   });
 
   it('reports an earlier per-record 422 and then aborts on a systemic 401', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(fetchRecord)
       .mockRejectedValueOnce(
         new ApiRequestError('Invalid Attribute: uuid is malformed', 422),
       )
       .mockRejectedValueOnce(new ApiRequestError('Bad token', 401))
       .mockResolvedValue(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['bad-1', 'abc-123', 'never-fetched']);
 
@@ -316,9 +316,9 @@ describe('runGetCommand', () => {
   });
 
   it('aborts the batch on a non-API error without a per-uuid failure line', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockRejectedValue(new Error('Request timed out'));
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123', 'def-456']);
 
@@ -329,12 +329,12 @@ describe('runGetCommand', () => {
   });
 
   it('strips terminal escapes from a server-provided rejection detail', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(fetchRecord).mockRejectedValue(
       new ApiRequestError('Not Found: \u001b[31mevil\u001b[0m', 404),
     );
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -348,12 +348,12 @@ describe('runGetCommand', () => {
   // distinct from the generic "Failed to fetch record" a genuine 404 produces
   // (issue #89).
   it('surfaces a systemic auth failure with a classified message, not "not found"', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(fetchRecord).mockRejectedValue(
       new ApiRequestError('Invalid or missing API token', 401),
     );
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -371,12 +371,12 @@ describe('runGetCommand', () => {
   it('strips terminal escapes from a server-derived systemic error message', async () => {
     // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
     const escape = String.fromCharCode(0x1b);
-    const { fetchRecord } = await import('@/libs/records.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(fetchRecord).mockRejectedValue(
       new ApiRequestError(`${escape}[2JInvalid token`, 401),
     );
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -402,9 +402,9 @@ describe('runGetCommand', () => {
       status: ERROR_STATUS,
       errorMessage: `Sync ${control}failed`,
     };
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(evilRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['id-1']);
 
@@ -434,9 +434,9 @@ describe('runGetCommand', () => {
       content: multiLineContent,
       createdAt: '2024-01-01T00:00:00Z',
     };
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(record);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['id-1']);
 
@@ -446,10 +446,10 @@ describe('runGetCommand', () => {
   });
 
   it('prints the record as a single parseable JSON object with --json', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123', '--json']);
 
@@ -470,9 +470,9 @@ describe('runGetCommand', () => {
   });
 
   it('accepts --json before the uuid', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['--json', 'abc-123']);
 
@@ -490,12 +490,12 @@ describe('runGetCommand', () => {
     'emits faithful, \\u-escaped values on the --json path for control 0x%x',
     async (codePoint) => {
       const control = String.fromCharCode(codePoint);
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockResolvedValue({
         ...mockRecord,
         title: `A${control}B`,
       });
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', '--json']);
 
@@ -506,9 +506,9 @@ describe('runGetCommand', () => {
   );
 
   it('writes nothing to stdout and exits 1 when the record is missing, even with --json', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(null);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123', '--json']);
 
@@ -521,9 +521,9 @@ describe('runGetCommand', () => {
   // A bad flag now routes through failWithUsage, so the non-JSON path prints
   // the usage block, not bare prose — mirroring records.ts/events.ts (#208).
   it('exits 1 with the usage block on an unknown flag, before checking config or fetching', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchRecord } = await import('@/libs/records.js');
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123', '--bogus']);
 
@@ -539,11 +539,11 @@ describe('runGetCommand', () => {
   });
 
   it('catches and logs an error when checkConfig throws', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     // Once so the rejection can't leak into later tests via clearAllMocks
     // (which clears call history but not implementations).
     vi.mocked(checkConfig).mockRejectedValueOnce(new Error('boom'));
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -556,12 +556,12 @@ describe('runGetCommand', () => {
   // command must short-circuit before fetching or printing anything — and emit
   // nothing itself, since checkConfig already owns the diagnostic on this path.
   it('does not fetch or print when checkConfig resolves false', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     // Once so the false result can't leak past this test's single call
     // (clearAllMocks clears call history, not implementations).
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
-    const { fetchRecord } = await import('@/libs/records.js');
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -587,11 +587,11 @@ describe('runGetCommand', () => {
     };
 
     it('fetches every uuid given, not just the first', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
         uuid === 'abc-123' ? mockRecord : secondRecord,
       );
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'def-456']);
 
@@ -603,11 +603,11 @@ describe('runGetCommand', () => {
     });
 
     it('prints every found record as a single JSON array with --json', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
         uuid === 'abc-123' ? mockRecord : secondRecord,
       );
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'def-456', '--json']);
 
@@ -622,11 +622,11 @@ describe('runGetCommand', () => {
     });
 
     it('reports a missing uuid without dropping the rest of the batch', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
         uuid === 'abc-123' ? mockRecord : null,
       );
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'missing-uuid']);
 
@@ -638,11 +638,11 @@ describe('runGetCommand', () => {
     });
 
     it('omits a missing uuid from the --json array but still fails loud', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
         uuid === 'abc-123' ? mockRecord : null,
       );
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'missing-uuid', '--json']);
 
@@ -663,11 +663,11 @@ describe('runGetCommand', () => {
     });
 
     it('separates multiple printed records with a blank line', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
         uuid === 'abc-123' ? mockRecord : secondRecord,
       );
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'def-456']);
 
@@ -679,15 +679,15 @@ describe('runGetCommand', () => {
     });
 
     it('aborts remaining uuids on a systemic failure, matching the single-uuid path', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(fetchRecord).mockImplementation(async (uuid: string) => {
         if (uuid === 'abc-123') {
           return mockRecord;
         }
         throw new ApiRequestError('Invalid or missing API token', 401);
       });
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'def-456', 'ghi-789']);
 
@@ -707,15 +707,15 @@ describe('runGetCommand', () => {
     // single-uuid unwrapped-object shape just because only one resolved
     // before the abort.
     it('reports a pre-abort partial result as a JSON array, not a single object', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(fetchRecord).mockImplementation(async (uuid: string) => {
         if (uuid === 'abc-123') {
           return mockRecord;
         }
         throw new ApiRequestError('Invalid or missing API token', 401);
       });
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'def-456', 'ghi-789', '--json']);
 
@@ -729,9 +729,9 @@ describe('runGetCommand', () => {
     });
 
     it('ignores blank positionals and fetches the real uuid', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['', 'abc-123']);
 
@@ -740,8 +740,8 @@ describe('runGetCommand', () => {
     });
 
     it('reports no uuid given when every positional is blank', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['']);
 
@@ -753,9 +753,9 @@ describe('runGetCommand', () => {
     });
 
     it('writes nothing to stdout for a --json batch where every uuid is missing', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockResolvedValue(null);
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['missing-1', 'missing-2', '--json']);
 
@@ -765,12 +765,12 @@ describe('runGetCommand', () => {
     });
 
     it('writes nothing to stdout when the very first uuid of a --json batch hits a systemic failure', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(fetchRecord).mockRejectedValue(
         new ApiRequestError('Invalid or missing API token', 401),
       );
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'def-456', '--json']);
 
@@ -779,9 +779,9 @@ describe('runGetCommand', () => {
     });
 
     it('fetches a repeated uuid only once', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'abc-123']);
 
@@ -799,9 +799,9 @@ describe('runGetCommand', () => {
     // positionals in means array out, even when they're the same uuid twice
     // and only one fetch (and one array entry) results.
     it('still emits a --json array (of one entry) when two positionals dedupe to one uuid', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'abc-123', '--json']);
 
@@ -816,11 +816,11 @@ describe('runGetCommand', () => {
     // missing result never emits a stray leading blank line — pin the case
     // where the missing uuid comes *first*, not last.
     it('prints no leading blank line when the missing uuid comes before a found one', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockImplementation(async (uuid: string) =>
         uuid === 'abc-123' ? mockRecord : null,
       );
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['missing-uuid', 'abc-123']);
 
@@ -831,11 +831,11 @@ describe('runGetCommand', () => {
     // `printJson` throws on a non-serializable value, and that must surface
     // as a classified, non-zero-exit failure rather than a silent exit 0.
     it('fails loud when reporting itself throws', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       const circular: Record & { self?: unknown } = { ...mockRecord };
       circular.self = circular;
       vi.mocked(fetchRecord).mockResolvedValue(circular as Record);
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', 'def-456', '--json']);
 
@@ -849,9 +849,9 @@ describe('runGetCommand', () => {
   // mechanism, and this guards against it accidentally printing a leading gap
   // for the single-uuid case the original command never had.
   it('prints no leading blank line for a single uuid', async () => {
-    const { fetchRecord } = await import('@/libs/records.js');
+    const { fetchRecord } = await import('#src/libs/records.js');
     vi.mocked(fetchRecord).mockResolvedValue(mockRecord);
-    const { runGetCommand } = await import('@/commands/get.js');
+    const { runGetCommand } = await import('#src/commands/get.js');
 
     await runGetCommand(['abc-123']);
 
@@ -863,12 +863,12 @@ describe('runGetCommand', () => {
     // test's checkConfig rejection would leak in — pin it back to a passing
     // resolve (true) so the command proceeds to the fetch path under test.
     beforeEach(async () => {
-      const { checkConfig } = await import('@/libs/config.js');
+      const { checkConfig } = await import('#src/libs/config.js');
       vi.mocked(checkConfig).mockResolvedValue(true);
     });
 
     it('emits a usage-coded JSON error on stderr when no uuid is given', async () => {
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['--json']);
 
@@ -884,8 +884,8 @@ describe('runGetCommand', () => {
     // documented `usage` code, never `fetch_failed` (issue #208). Arg parsing
     // used to share the fetch's single outer catch, which miscoded it.
     it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', '--bogus', '--json']);
 
@@ -904,9 +904,9 @@ describe('runGetCommand', () => {
     });
 
     it('emits a fetch_failed JSON error on stderr when the record is missing', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
       vi.mocked(fetchRecord).mockResolvedValue(null);
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', '--json']);
 
@@ -922,9 +922,9 @@ describe('runGetCommand', () => {
     });
 
     it('carries the server detail and status in the JSON message for a 404 vs a 422', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
       const messages: string[] = [];
 
       for (const [status, detail] of [
@@ -953,12 +953,12 @@ describe('runGetCommand', () => {
     });
 
     it('emits a fetch_failed JSON error on stderr for a thrown systemic failure', async () => {
-      const { fetchRecord } = await import('@/libs/records.js');
-      const { ApiRequestError } = await import('@/libs/api.js');
+      const { fetchRecord } = await import('#src/libs/records.js');
+      const { ApiRequestError } = await import('#src/libs/api.js');
       vi.mocked(fetchRecord).mockRejectedValue(
         new ApiRequestError('Invalid or missing API token', 401),
       );
-      const { runGetCommand } = await import('@/commands/get.js');
+      const { runGetCommand } = await import('#src/commands/get.js');
 
       await runGetCommand(['abc-123', '--json']);
 

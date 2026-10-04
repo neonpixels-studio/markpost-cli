@@ -8,16 +8,19 @@ import {
   rotateSourceSecret,
   testSource,
   updateSource,
-} from '@/libs/sources.js';
-import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, messageFromError } from '@/libs/errors.js';
-import { isInteractiveTerminal, sanitizeForTerminal } from '@/libs/terminal.js';
+} from '#src/libs/sources.js';
+import { checkConfig } from '#src/libs/config.js';
+import { failWithMessage, messageFromError } from '#src/libs/errors.js';
+import {
+  isInteractiveTerminal,
+  sanitizeForTerminal,
+} from '#src/libs/terminal.js';
 import {
   failWithSubcommandUsage,
   failWithUsage,
   parseOrFailWithUsage,
-} from '@/libs/usage.js';
-import { hasJsonFlag, printJson } from '@/libs/output.js';
+} from '#src/libs/usage.js';
+import { hasJsonFlag, printJson } from '#src/libs/output.js';
 import {
   FIELD_MAPPING_KEYS,
   FieldMappingConfig,
@@ -33,7 +36,7 @@ import {
   SourceTestSignatureStatus,
   SourceType,
   UpdateSourceInput,
-} from '@/types/sources.types.js';
+} from '#src/types/sources.types.js';
 
 // Mirror the endpoint constants markpost's web app uses in
 // app/composables/useSources.ts so the CLI shows the same URL a user would

@@ -3,13 +3,13 @@ import {
   isSystemicApiFailure,
   logApiFailure,
   unwrapResourceCollection,
-} from '@/libs/api.js';
-import { ApiPaginationLinks } from '@/types/api.types.js';
+} from '#src/libs/api.js';
+import { ApiPaginationLinks } from '#src/types/api.types.js';
 import {
   Event,
   EventListApiResponse,
   PaginatedEventsMeta,
-} from '@/types/events.types.js';
+} from '#src/types/events.types.js';
 
 // markpost paginates the events feed with the same cursor scheme as records
 // (server/api/events/index.get.ts): each response's `links.next` embeds the
@@ -26,7 +26,7 @@ import {
 // with only two occurrences the rule of three doesn't yet require a shared
 // abstraction, and pulling in the whole records module for a few functions
 // would be a worse coupling than the duplication. Flagged as a follow-up
-// (extract a shared `fetchAllPages` into e.g. `@/libs/pagination.ts`) if a
+// (extract a shared `fetchAllPages` into e.g. `#src/libs/pagination.ts`) if a
 // third cursor-paginated CLI resource shows up — see the PR's follow-up
 // suggestions.
 const decodePercentEncoding = (value: string): string | undefined => {

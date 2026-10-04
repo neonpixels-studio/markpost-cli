@@ -11,7 +11,7 @@ import {
   logErrorMessage,
   messageFromError,
   warnPartialRead,
-} from '@/libs/errors.js';
+} from '#src/libs/errors.js';
 
 describe('logErrorMessage', () => {
   it('calls console.log', () => {

@@ -1,6 +1,10 @@
-import { getConfigValue } from '@/libs/config.js';
-import { ApiError, ApiErrorEnvelope, ApiResponse } from '@/types/api.types.js';
-import { logErrorMessage, messageFromError } from '@/libs/errors.js';
+import { getConfigValue } from '#src/libs/config.js';
+import {
+  ApiError,
+  ApiErrorEnvelope,
+  ApiResponse,
+} from '#src/types/api.types.js';
+import { logErrorMessage, messageFromError } from '#src/libs/errors.js';
 
 export const getBaseUrl = () => {
   return process.env.BASE_URL ?? 'https://sync.danholloran.me';

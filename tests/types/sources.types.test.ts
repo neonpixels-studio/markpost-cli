@@ -7,7 +7,7 @@ import {
   ROTATABLE_PROVIDERS,
   SECRET_BACKED_PROVIDERS,
   SOURCE_TYPES,
-} from '@/types/sources.types.js';
+} from '#src/types/sources.types.js';
 
 import { SOURCE_TYPES as MARKPOST_SOURCE_TYPES } from './vendor/markpost-source-types.generated.js';
 import {

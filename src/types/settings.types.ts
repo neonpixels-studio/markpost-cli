@@ -1,4 +1,4 @@
-import type { ApiResourceObject, ApiResponse } from '@/types/api.types.js';
+import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 
 // Mirrors markpost's user-settings contract by hand (markpost is the source
 // of truth): `CONFLICT_STRATEGIES` comes from `server/utils/response.ts` and
