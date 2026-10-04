@@ -3,16 +3,16 @@ import {
   logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
-} from '@/libs/api.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { ApiResponse } from '@/types/api.types.js';
+} from '#src/libs/api.js';
+import { sanitizeForTerminal } from '#src/libs/terminal.js';
+import { ApiResponse } from '#src/types/api.types.js';
 import {
   CreatedToken,
   CreatedTokenResource,
   CreateTokenInput,
   Token,
   TokenListApiResponse,
-} from '@/types/tokens.types.js';
+} from '#src/types/tokens.types.js';
 
 const JSON_API_CONTENT_TYPE = 'application/vnd.api+json';
 const TOKENS_PATH = '/api/tokens';

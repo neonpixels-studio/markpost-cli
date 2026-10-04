@@ -1,13 +1,16 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
-import { fetchAllEvents } from '@/libs/events.js';
-import { describeApiError } from '@/libs/api.js';
-import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, warnPartialRead } from '@/libs/errors.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { failWithSubcommandUsage, parseOrFailWithUsage } from '@/libs/usage.js';
-import { hasJsonFlag, printJson } from '@/libs/output.js';
-import { Event, EVENT_KINDS, EventKind } from '@/types/events.types.js';
+import { fetchAllEvents } from '#src/libs/events.js';
+import { describeApiError } from '#src/libs/api.js';
+import { checkConfig } from '#src/libs/config.js';
+import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
+import { sanitizeForTerminal } from '#src/libs/terminal.js';
+import {
+  failWithSubcommandUsage,
+  parseOrFailWithUsage,
+} from '#src/libs/usage.js';
+import { hasJsonFlag, printJson } from '#src/libs/output.js';
+import { Event, EVENT_KINDS, EventKind } from '#src/types/events.types.js';
 
 export const USAGE = `Usage: markpost events list [options]
 

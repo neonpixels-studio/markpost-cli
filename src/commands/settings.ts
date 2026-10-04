@@ -5,15 +5,15 @@ import {
   updateSettings,
   ResolvedSyncSettings,
   SettingsReadResult,
-} from '@/libs/settings.js';
-import { checkConfig } from '@/libs/config.js';
-import { failWithSubcommandUsage, failWithUsage } from '@/libs/usage.js';
+} from '#src/libs/settings.js';
+import { checkConfig } from '#src/libs/config.js';
+import { failWithSubcommandUsage, failWithUsage } from '#src/libs/usage.js';
 import {
   CONFLICT_STRATEGIES,
   ConflictStrategy,
   isConflictStrategy,
   UpdateSettingsInput,
-} from '@/types/settings.types.js';
+} from '#src/types/settings.types.js';
 
 // The boolean settings a `set` accepts, keyed by the exact attribute name
 // markpost's PUT contract expects (server/api/settings/index.put.ts). Named

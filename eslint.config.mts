@@ -21,7 +21,7 @@ export default tseslint.config(
         {
           name: 'fetch',
           message:
-            'Use apiFetch from @/libs/api.js so the request carries a timeout.',
+            'Use apiFetch from #src/libs/api.js so the request carries a timeout.',
         },
       ],
       // `no-restricted-globals` only catches the bare identifier; also block
@@ -33,13 +33,13 @@ export default tseslint.config(
           object: 'globalThis',
           property: 'fetch',
           message:
-            'Use apiFetch from @/libs/api.js so the request carries a timeout.',
+            'Use apiFetch from #src/libs/api.js so the request carries a timeout.',
         },
         {
           object: 'global',
           property: 'fetch',
           message:
-            'Use apiFetch from @/libs/api.js so the request carries a timeout.',
+            'Use apiFetch from #src/libs/api.js so the request carries a timeout.',
         },
       ],
     },

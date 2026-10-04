@@ -1,13 +1,13 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
-import { fetchRecordExport, writeExportFile } from '@/libs/export.js';
-import { describeApiError } from '@/libs/api.js';
-import { checkConfig } from '@/libs/config.js';
-import { failWithMessage, warnPartialRead } from '@/libs/errors.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
-import { parseOrFailWithUsage } from '@/libs/usage.js';
-import { hasJsonFlag, printJson } from '@/libs/output.js';
-import { RecordExportRow } from '@/types/records.types.js';
+import { fetchRecordExport, writeExportFile } from '#src/libs/export.js';
+import { describeApiError } from '#src/libs/api.js';
+import { checkConfig } from '#src/libs/config.js';
+import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
+import { sanitizeForTerminal } from '#src/libs/terminal.js';
+import { parseOrFailWithUsage } from '#src/libs/usage.js';
+import { hasJsonFlag, printJson } from '#src/libs/output.js';
+import { RecordExportRow } from '#src/types/records.types.js';
 
 export const USAGE = `Usage: markpost export [options]
 

@@ -1,4 +1,4 @@
-import type { ApiResourceObject, ApiResponse } from '@/types/api.types.js';
+import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 
 // Mirrors markpost's canonical source-type list (shared/utils/sourceTypes.ts).
 // Keep in lockstep: the server rejects any type absent here with a 400. RSS was

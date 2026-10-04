@@ -1,20 +1,20 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
-import { ERROR_STATUS, fetchRecord } from '@/libs/records.js';
+import { ERROR_STATUS, fetchRecord } from '#src/libs/records.js';
 import {
   describeApiError,
   describeRequestRejection,
   isPerRecordRejection,
-} from '@/libs/api.js';
-import { checkConfig } from '@/libs/config.js';
-import { failWithMessage } from '@/libs/errors.js';
+} from '#src/libs/api.js';
+import { checkConfig } from '#src/libs/config.js';
+import { failWithMessage } from '#src/libs/errors.js';
 import {
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
-} from '@/libs/terminal.js';
-import { failWithUsage, parseOrFailWithUsage } from '@/libs/usage.js';
-import { hasJsonFlag, printJson } from '@/libs/output.js';
-import { Record } from '@/types/records.types.js';
+} from '#src/libs/terminal.js';
+import { failWithUsage, parseOrFailWithUsage } from '#src/libs/usage.js';
+import { hasJsonFlag, printJson } from '#src/libs/output.js';
+import { Record } from '#src/types/records.types.js';
 
 export const USAGE = `Usage: markpost get <uuid...> [--json]
 

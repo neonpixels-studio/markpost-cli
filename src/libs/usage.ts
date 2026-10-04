@@ -1,7 +1,7 @@
 import chalk from 'chalk';
-import { messageFromError } from '@/libs/errors.js';
-import { JSON_ERROR_USAGE, printJsonError } from '@/libs/output.js';
-import { sanitizeForTerminal } from '@/libs/terminal.js';
+import { messageFromError } from '#src/libs/errors.js';
+import { JSON_ERROR_USAGE, printJsonError } from '#src/libs/output.js';
+import { sanitizeForTerminal } from '#src/libs/terminal.js';
 
 // A missing or unknown subcommand (or required argument) is a usage error, not
 // a no-op. Print the offending detail plus the command's usage to stderr and

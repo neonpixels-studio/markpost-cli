@@ -2,7 +2,7 @@ import {
   authedRequest,
   logApiFailure,
   unwrapResourceAttributes,
-} from '@/libs/api.js';
+} from '#src/libs/api.js';
 import {
   ConflictStrategy,
   DEFAULT_CONFLICT_STRATEGY,
@@ -15,7 +15,7 @@ import {
   UserSettings,
   UserSettingsApiResponse,
   USER_SETTINGS_RESOURCE_TYPE,
-} from '@/types/settings.types.js';
+} from '#src/types/settings.types.js';
 
 // A read either succeeded (`ok: true`) or failed. On success `settings` may
 // still be `null` — a valid `{ data: null }` body for an account with no

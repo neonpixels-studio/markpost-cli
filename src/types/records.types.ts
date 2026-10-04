@@ -1,4 +1,4 @@
-import type { ApiResourceObject, ApiResponse } from '@/types/api.types.js';
+import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 
 // Mirrors markpost's frontmatter shape (server/utils/markdown.ts
 // `FrontmatterObject`): the object markpost assembles at ingestion and stores

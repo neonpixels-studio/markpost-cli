@@ -3,12 +3,12 @@ import {
   logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
-} from '@/libs/api.js';
+} from '#src/libs/api.js';
 import {
   ApiDeleteMeta,
   ApiDeleteResponse,
   ApiResponse,
-} from '@/types/api.types.js';
+} from '#src/types/api.types.js';
 import {
   CreatedSource,
   CreatedSourceResource,
@@ -21,7 +21,7 @@ import {
   SourceTestResource,
   SourceTestResult,
   UpdateSourceInput,
-} from '@/types/sources.types.js';
+} from '#src/types/sources.types.js';
 
 const JSON_API_CONTENT_TYPE = 'application/vnd.api+json';
 

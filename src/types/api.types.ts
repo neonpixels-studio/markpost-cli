@@ -15,9 +15,9 @@ export type {
   ApiError,
   ApiResourceObject,
   ApiResponse,
-} from '@/types/vendor/markpost-api.types.js';
+} from '#src/types/vendor/markpost-api.types.js';
 
-import type { ApiError } from '@/types/vendor/markpost-api.types.js';
+import type { ApiError } from '#src/types/vendor/markpost-api.types.js';
 
 // CLI-only additions below: shapes markpost's handlers return that aren't
 // (and don't need to be) part of the shared generic contract.

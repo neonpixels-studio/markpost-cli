@@ -11,7 +11,7 @@ import {
   normalizeAutoSync,
   normalizeConflictStrategy,
   normalizeFrontmatterEnabled,
-} from '@/types/settings.types.js';
+} from '#src/types/settings.types.js';
 
 import {
   CONFLICT_STRATEGIES as MARKPOST_CONFLICT_STRATEGIES,

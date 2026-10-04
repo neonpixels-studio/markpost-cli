@@ -4,7 +4,7 @@ import {
   isInteractiveTerminal,
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
-} from '@/libs/terminal.js';
+} from '#src/libs/terminal.js';
 
 // Control characters are built via fromCharCode so no raw control byte lives in
 // the source file (mirrors the convention in index.test.ts).

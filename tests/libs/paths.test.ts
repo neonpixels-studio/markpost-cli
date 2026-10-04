@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { expandHomeDirectory } from '@/libs/paths.js';
+import { expandHomeDirectory } from '#src/libs/paths.js';
 
 const HOME = '/home/user';
 const resolveHome = () => HOME;

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Record } from '@/types/records.types.js';
+import { Record } from '#src/types/records.types.js';
 
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/records.js', () => ({ createRecord: vi.fn() }));
-vi.mock('@/libs/markdown.js', () => ({ readMarkdown: vi.fn() }));
-vi.mock('@/libs/files.js', () => ({ resolveMarkdownInputs: vi.fn() }));
+vi.mock('#src/libs/records.js', () => ({ createRecord: vi.fn() }));
+vi.mock('#src/libs/markdown.js', () => ({ readMarkdown: vi.fn() }));
+vi.mock('#src/libs/files.js', () => ({ resolveMarkdownInputs: vi.fn() }));
 vi.mock('chalk', () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
@@ -44,7 +44,7 @@ describe('runPushCommand', () => {
   });
 
   it('errors to stderr and exits 1 when no path is given', async () => {
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand([]);
 
@@ -59,8 +59,8 @@ describe('runPushCommand', () => {
   });
 
   it('does not check config when no path is given', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand([]);
 
@@ -68,8 +68,8 @@ describe('runPushCommand', () => {
   });
 
   it('errors to stderr, exits 1, and skips config for an empty-string argument', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['']);
 
@@ -85,10 +85,10 @@ describe('runPushCommand', () => {
   });
 
   it('reads the markdown file and creates a record from a single file', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['./notes/test-title.md'],
       missing: [],
@@ -100,7 +100,7 @@ describe('runPushCommand', () => {
       tags: [],
     });
     vi.mocked(createRecord).mockResolvedValue(mockRecord);
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./notes/test-title.md']);
 
@@ -118,9 +118,9 @@ describe('runPushCommand', () => {
   // pulled-edited-repushed file must forward those tags to createRecord
   // instead of silently dropping them.
   it('forwards frontmatter tags extracted by readMarkdown to createRecord', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['./notes/test-title.md'],
       missing: [],
@@ -132,7 +132,7 @@ describe('runPushCommand', () => {
       tags: ['ci', 'deploy'],
     });
     vi.mocked(createRecord).mockResolvedValue(mockRecord);
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./notes/test-title.md']);
 
@@ -148,9 +148,9 @@ describe('runPushCommand', () => {
   // via tagsLineUnparseable, and push must surface it as a per-file warning
   // while still completing the push (tags dropped, not failed).
   it('warns when readMarkdown flags an unparseable tags line, but still pushes with no tags', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['./notes/test-title.md'],
       missing: [],
@@ -163,7 +163,7 @@ describe('runPushCommand', () => {
       tagsLineUnparseable: true,
     });
     vi.mocked(createRecord).mockResolvedValue(mockRecord);
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./notes/test-title.md']);
 
@@ -182,8 +182,8 @@ describe('runPushCommand', () => {
   });
 
   it('does not warn when readMarkdown omits tagsLineUnparseable', async () => {
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['./notes/test-title.md'],
       missing: [],
@@ -194,9 +194,9 @@ describe('runPushCommand', () => {
       content: 'Test Content',
       tags: [],
     });
-    const { createRecord } = await import('@/libs/records.js');
+    const { createRecord } = await import('#src/libs/records.js');
     vi.mocked(createRecord).mockResolvedValue(mockRecord);
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./notes/test-title.md']);
 
@@ -205,8 +205,8 @@ describe('runPushCommand', () => {
   });
 
   it('does not warn when readMarkdown explicitly reports tagsLineUnparseable: false', async () => {
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['./notes/test-title.md'],
       missing: [],
@@ -218,9 +218,9 @@ describe('runPushCommand', () => {
       tags: ['ci'],
       tagsLineUnparseable: false,
     });
-    const { createRecord } = await import('@/libs/records.js');
+    const { createRecord } = await import('#src/libs/records.js');
     vi.mocked(createRecord).mockResolvedValue(mockRecord);
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./notes/test-title.md']);
 
@@ -234,11 +234,11 @@ describe('runPushCommand', () => {
   // process, so push must short-circuit before resolving inputs or creating a
   // record.
   it('does not resolve inputs or create a record when checkConfig resolves false', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
-    const { createRecord } = await import('@/libs/records.js');
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./notes/test-title.md']);
 
@@ -250,9 +250,9 @@ describe('runPushCommand', () => {
   });
 
   it('pushes every file when given multiple', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md'],
       missing: [],
@@ -264,7 +264,7 @@ describe('runPushCommand', () => {
     vi.mocked(createRecord)
       .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
       .mockResolvedValueOnce(recordFor('B', 'uuid-b'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md']);
 
@@ -282,9 +282,9 @@ describe('runPushCommand', () => {
   });
 
   it('pushes files sequentially rather than in parallel', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md'],
       missing: [],
@@ -301,7 +301,7 @@ describe('runPushCommand', () => {
     vi.mocked(createRecord)
       .mockReturnValueOnce(firstPending)
       .mockResolvedValueOnce(recordFor('B', 'uuid-b'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     const run = runPushCommand(['a.md', 'b.md']);
     await new Promise((resolvePromise) => setImmediate(resolvePromise));
@@ -315,9 +315,9 @@ describe('runPushCommand', () => {
   });
 
   it('continues pushing after one file fails and sets a failure exit code', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md', 'c.md'],
       missing: [],
@@ -331,7 +331,7 @@ describe('runPushCommand', () => {
       .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(recordFor('C', 'uuid-c'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md', 'c.md']);
 
@@ -352,9 +352,9 @@ describe('runPushCommand', () => {
   });
 
   it('continues after a file read throws instead of aborting the batch', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['bad.md', 'good.md'],
       missing: [],
@@ -366,7 +366,7 @@ describe('runPushCommand', () => {
       })
       .mockReturnValueOnce({ title: 'Good', content: 'Content', tags: [] });
     vi.mocked(createRecord).mockResolvedValue(recordFor('Good', 'uuid-good'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['bad.md', 'good.md']);
 
@@ -383,12 +383,12 @@ describe('runPushCommand', () => {
   // A timeout must abort the whole batch immediately, not be caught per-file
   // and retried on the next — otherwise a hung server stalls once per file.
   it('aborts the batch on a timeout instead of retrying the next file', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     // Import from the same (reset) module instance push.js will resolve, so
     // `instanceof ApiTimeoutError` in rethrowIfTimeout matches this error.
-    const { ApiTimeoutError } = await import('@/libs/api.js');
+    const { ApiTimeoutError } = await import('#src/libs/api.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md'],
       missing: [],
@@ -400,7 +400,7 @@ describe('runPushCommand', () => {
     vi.mocked(createRecord).mockRejectedValueOnce(
       new ApiTimeoutError('https://example.com/api/records'),
     );
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md']);
 
@@ -409,14 +409,14 @@ describe('runPushCommand', () => {
   });
 
   it('errors when no inputs resolve to any file', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: [],
       missing: ['./missing/*.md'],
       skipped: [],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./missing/*.md']);
 
@@ -431,9 +431,9 @@ describe('runPushCommand', () => {
   });
 
   it('pushes resolved files but flags a partially-missing input set', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['real.md'],
       missing: ['ghost.md'],
@@ -445,7 +445,7 @@ describe('runPushCommand', () => {
       tags: [],
     });
     vi.mocked(createRecord).mockResolvedValue(recordFor('Real', 'uuid-real'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['real.md', 'ghost.md']);
 
@@ -459,14 +459,14 @@ describe('runPushCommand', () => {
   });
 
   it('reports unreadable skipped paths and fails when nothing is left to push', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: [],
       missing: [],
       skipped: ['./vault/locked'],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./vault']);
 
@@ -478,9 +478,9 @@ describe('runPushCommand', () => {
   });
 
   it('pushes resolved files but still fails when a path was skipped', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['ok.md'],
       missing: [],
@@ -492,7 +492,7 @@ describe('runPushCommand', () => {
       tags: [],
     });
     vi.mocked(createRecord).mockResolvedValue(recordFor('Ok', 'uuid-ok'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['ok.md', './vault']);
 
@@ -506,10 +506,10 @@ describe('runPushCommand', () => {
   });
 
   it('aborts the batch on a systemic auth failure without attempting later files', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md', 'c.md'],
       missing: [],
@@ -524,7 +524,7 @@ describe('runPushCommand', () => {
       .mockRejectedValueOnce(
         new ApiRequestError('Invalid or missing token', 401),
       );
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md', 'c.md']);
 
@@ -544,15 +544,15 @@ describe('runPushCommand', () => {
   });
 
   it('aborts on the very first file when the token is already expired', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md', 'c.md'],
       missing: [],
       skipped: [],
     });
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(readMarkdown).mockReturnValue({
       title: 'A',
       content: 'Content',
@@ -561,7 +561,7 @@ describe('runPushCommand', () => {
     vi.mocked(createRecord).mockRejectedValue(
       new ApiRequestError('Invalid or missing token', 401),
     );
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md', 'c.md']);
 
@@ -576,10 +576,10 @@ describe('runPushCommand', () => {
 
   // A rate-limit (429) is systemic too: keep firing and it only gets worse.
   it('aborts the batch on a 429 rate-limit response', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md'],
       missing: [],
@@ -593,7 +593,7 @@ describe('runPushCommand', () => {
     vi.mocked(createRecord).mockRejectedValue(
       new ApiRequestError('Too many requests', 429),
     );
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md']);
 
@@ -607,10 +607,10 @@ describe('runPushCommand', () => {
   });
 
   it('aborts the batch on a systemic 5xx server failure', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md', 'c.md'],
       missing: [],
@@ -624,7 +624,7 @@ describe('runPushCommand', () => {
       .mockRejectedValueOnce(
         new ApiRequestError('Unknown error occurred', 503),
       );
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md', 'c.md']);
 
@@ -640,10 +640,10 @@ describe('runPushCommand', () => {
   // When the abort lands on the final file there's nothing left to skip, so the
   // "N file(s) not attempted" clause is dropped rather than reading "0 file(s)".
   it('omits the not-attempted clause when the last file aborts', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md'],
       missing: [],
@@ -655,7 +655,7 @@ describe('runPushCommand', () => {
     vi.mocked(createRecord)
       .mockResolvedValueOnce(recordFor('A', 'uuid-a'))
       .mockRejectedValueOnce(new ApiRequestError('Server fell over', 500));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md']);
 
@@ -671,10 +671,10 @@ describe('runPushCommand', () => {
   });
 
   it('reports a per-file 422 with the server detail and keeps pushing the rest', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { ApiRequestError } = await import('@/libs/api.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { ApiRequestError } = await import('#src/libs/api.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md'],
       missing: [],
@@ -688,7 +688,7 @@ describe('runPushCommand', () => {
         new ApiRequestError('Invalid Attribute: Title is too long', 422),
       )
       .mockResolvedValueOnce(recordFor('B', 'uuid-b'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md']);
 
@@ -705,9 +705,9 @@ describe('runPushCommand', () => {
   // surfaces from createRecord as a null return, so the batch logs it and
   // keeps going rather than aborting.
   it('does not abort on a per-file failure — it keeps pushing the rest', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md'],
       missing: [],
@@ -719,7 +719,7 @@ describe('runPushCommand', () => {
     vi.mocked(createRecord)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(recordFor('B', 'uuid-b'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md']);
 
@@ -737,15 +737,15 @@ describe('runPushCommand', () => {
   });
 
   it('previews the resolved files without creating any records on --dry-run', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md', 'b.md'],
       missing: [],
       skipped: [],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', 'b.md', '--dry-run']);
 
@@ -768,10 +768,10 @@ describe('runPushCommand', () => {
   // A mistyped --dry-run must fail loud, never fall through to the real push and
   // create records the user only meant to preview.
   it('rejects a mistyped dry-run flag without resolving inputs or pushing', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { createRecord } = await import('@/libs/records.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', '--dryrun']);
 
@@ -786,14 +786,14 @@ describe('runPushCommand', () => {
 
   // A dry run makes no network calls, so it must not gate on a configured token.
   it('does not check config on a dry run', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md'],
       missing: [],
       skipped: [],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', '--dry-run']);
 
@@ -807,13 +807,13 @@ describe('runPushCommand', () => {
   // A dry run walks directories, so a previewed path can carry a filename the
   // user never typed; a control character in it must be stripped before print.
   it('strips control characters from a previewed path', async () => {
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['notes/\u001b[2Jgotcha.md'],
       missing: [],
       skipped: [],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['notes', '--dry-run']);
 
@@ -828,13 +828,13 @@ describe('runPushCommand', () => {
   // A file whose name starts with dashes is pushable via the POSIX `--`
   // end-of-options separator, so a glob that expands to one isn't rejected.
   it('treats args after -- as literal paths even when dash-leading', async () => {
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['--notes.md'],
       missing: [],
       skipped: [],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['--dry-run', '--', '--notes.md']);
 
@@ -850,9 +850,9 @@ describe('runPushCommand', () => {
   // An unexpected flag is rejected even alongside --dry-run: the guard runs
   // before the preview, so a typo can't ride in on a valid dry run.
   it('rejects an unexpected flag even when --dry-run is present', async () => {
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
-    const { createRecord } = await import('@/libs/records.js');
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md', '--dry-run', '--verbose']);
 
@@ -867,9 +867,9 @@ describe('runPushCommand', () => {
   // A record title is server-controlled and untrusted; a control character in
   // it must be stripped before the success line reaches the terminal.
   it('strips control characters from a pushed record title', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { readMarkdown } = await import('@/libs/markdown.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { readMarkdown } = await import('#src/libs/markdown.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md'],
       missing: [],
@@ -883,7 +883,7 @@ describe('runPushCommand', () => {
     vi.mocked(createRecord).mockResolvedValue(
       recordFor('Sneaky\u001b[2KTitle', 'uuid-a'),
     );
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['a.md']);
 
@@ -896,13 +896,13 @@ describe('runPushCommand', () => {
   });
 
   it('excludes the --dry-run flag from the resolved input paths', async () => {
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['a.md'],
       missing: [],
       skipped: [],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['--dry-run', 'a.md']);
 
@@ -911,9 +911,9 @@ describe('runPushCommand', () => {
   });
 
   it('fails with usage when --dry-run is the only argument', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['--dry-run']);
 
@@ -926,14 +926,14 @@ describe('runPushCommand', () => {
   });
 
   it('reports missing inputs and exits 1 on a dry run without pushing', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['real.md'],
       missing: ['ghost.md'],
       skipped: [],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['real.md', 'ghost.md', '--dry-run']);
 
@@ -950,14 +950,14 @@ describe('runPushCommand', () => {
   });
 
   it('reports skipped unreadable inputs and exits 1 on a dry run without pushing', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: ['real.md'],
       missing: [],
       skipped: ['./vault/locked'],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['real.md', './vault', '--dry-run']);
 
@@ -972,14 +972,14 @@ describe('runPushCommand', () => {
   });
 
   it('exits 1 on a dry run when no inputs resolve to any file', async () => {
-    const { createRecord } = await import('@/libs/records.js');
-    const { resolveMarkdownInputs } = await import('@/libs/files.js');
+    const { createRecord } = await import('#src/libs/records.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
     vi.mocked(resolveMarkdownInputs).mockReturnValue({
       files: [],
       missing: ['./missing/*.md'],
       skipped: [],
     });
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./missing/*.md', '--dry-run']);
 
@@ -994,9 +994,9 @@ describe('runPushCommand', () => {
   });
 
   it('catches and logs an unexpected error from config setup', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
+    const { checkConfig } = await import('#src/libs/config.js');
     vi.mocked(checkConfig).mockRejectedValue(Error('config blew up'));
-    const { runPushCommand } = await import('@/commands/push.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
 
     await runPushCommand(['./missing.md']);
 

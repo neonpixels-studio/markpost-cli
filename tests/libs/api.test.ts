@@ -20,16 +20,16 @@ import {
   rethrowIfTimeout,
   unwrapResourceAttributes,
   unwrapResourceCollection,
-} from '@/libs/api.js';
-import { logErrorMessage } from '@/libs/errors.js';
-import { ApiError, ApiResourceObject, ApiResponse } from '@/types/api.types.js';
+} from '#src/libs/api.js';
+import { logErrorMessage } from '#src/libs/errors.js';
+import { ApiError, ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   getConfigValue: vi.fn(),
 }));
 
-vi.mock('@/libs/errors.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/libs/errors.js')>()),
+vi.mock('#src/libs/errors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#src/libs/errors.js')>()),
   logErrorMessage: vi.fn(),
 }));
 
@@ -65,7 +65,7 @@ describe('getApiToken', () => {
 
   it('returns undefined when neither API_TOKEN nor the stored config value is set', async () => {
     delete process.env.API_TOKEN;
-    const { getConfigValue } = await import('@/libs/config.js');
+    const { getConfigValue } = await import('#src/libs/config.js');
     vi.mocked(getConfigValue).mockReturnValue(undefined);
     expect(getApiToken()).toBeUndefined();
   });
@@ -75,7 +75,7 @@ describe('getApiToken', () => {
   // apiToken` last wrote.
   it('falls back to the stored config value when API_TOKEN is not set', async () => {
     delete process.env.API_TOKEN;
-    const { getConfigValue } = await import('@/libs/config.js');
+    const { getConfigValue } = await import('#src/libs/config.js');
     vi.mocked(getConfigValue).mockReturnValue('stored-token');
     expect(getApiToken()).toBe('stored-token');
   });
@@ -85,7 +85,7 @@ describe('getApiToken', () => {
   // (libs/config.ts) treats as authoritative for a fresh, unconfigured field.
   it('prefers API_TOKEN over a different stored config value', async () => {
     process.env.API_TOKEN = 'env-token';
-    const { getConfigValue } = await import('@/libs/config.js');
+    const { getConfigValue } = await import('#src/libs/config.js');
     vi.mocked(getConfigValue).mockReturnValue('stored-token');
     expect(getApiToken()).toBe('env-token');
   });

@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CreatedToken, Token } from '@/types/tokens.types.js';
+import { CreatedToken, Token } from '#src/types/tokens.types.js';
 
-vi.mock('@/libs/config.js', () => ({
+vi.mock('#src/libs/config.js', () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
-vi.mock('@/libs/api.js', () => ({
+vi.mock('#src/libs/api.js', () => ({
   getApiToken: vi.fn(),
 }));
-vi.mock('@/libs/tokens.js', () => ({
+vi.mock('#src/libs/tokens.js', () => ({
   fetchTokens: vi.fn(),
   createToken: vi.fn(),
   revokeToken: vi.fn(),
@@ -85,10 +85,10 @@ describe('runTokensCommand', () => {
   });
 
   it('always checks config before dispatching', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { fetchTokens } = await import('@/libs/tokens.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { fetchTokens } = await import('#src/libs/tokens.js');
     vi.mocked(fetchTokens).mockResolvedValue([]);
-    const { runTokensCommand } = await import('@/commands/tokens.js');
+    const { runTokensCommand } = await import('#src/commands/tokens.js');
 
     await runTokensCommand(['list']);
 
@@ -96,8 +96,8 @@ describe('runTokensCommand', () => {
   });
 
   it('errors to stderr and exits 1 when no subcommand is given', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runTokensCommand } = await import('@/commands/tokens.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runTokensCommand } = await import('#src/commands/tokens.js');
 
     await runTokensCommand([]);
 
@@ -113,8 +113,8 @@ describe('runTokensCommand', () => {
   });
 
   it('errors to stderr and exits 1 for an unknown subcommand', async () => {
-    const { checkConfig } = await import('@/libs/config.js');
-    const { runTokensCommand } = await import('@/commands/tokens.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { runTokensCommand } = await import('#src/commands/tokens.js');
 
     await runTokensCommand(['bogus']);
 
@@ -130,9 +130,9 @@ describe('runTokensCommand', () => {
   // subcommand's own API call, not just list's fetchTokens (tested
   // separately below).
   it('exits non-zero when a create call throws', async () => {
-    const { createToken } = await import('@/libs/tokens.js');
+    const { createToken } = await import('#src/libs/tokens.js');
     vi.mocked(createToken).mockRejectedValue(new Error('boom'));
-    const { runTokensCommand } = await import('@/commands/tokens.js');
+    const { runTokensCommand } = await import('#src/commands/tokens.js');
 
     await runTokensCommand(['create', '--name', 'CI token']);
 
@@ -141,9 +141,9 @@ describe('runTokensCommand', () => {
 
   describe('list', () => {
     it('prints "No API tokens found." when there are none', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list']);
 
@@ -151,9 +151,9 @@ describe('runTokensCommand', () => {
     });
 
     it('prints each token, showing the prefix rather than a secret', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken, scopedToken]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list']);
 
@@ -169,9 +169,9 @@ describe('runTokensCommand', () => {
     });
 
     it('renders "never" and "never used" for null expiresAt/lastUsedAt', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list']);
 
@@ -191,9 +191,9 @@ describe('runTokensCommand', () => {
     // "No API tokens found." and exit 0 — that would misreport an error as
     // an empty account.
     it('exits non-zero and prints nothing to stdout when the fetch fails', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockRejectedValue(new Error('Server error'));
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list']);
 
@@ -202,9 +202,9 @@ describe('runTokensCommand', () => {
     });
 
     it('exits non-zero and prints nothing to stdout in --json mode when the fetch fails', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockRejectedValue(new Error('Server error'));
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', '--json']);
 
@@ -213,9 +213,9 @@ describe('runTokensCommand', () => {
     });
 
     it('renders "full access" for a null scopes list', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list']);
 
@@ -228,9 +228,9 @@ describe('runTokensCommand', () => {
     // object that somehow still carries one on a list response must never
     // leak it.
     it('never prints a raw token secret carried on a listed token', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mintedToken]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list']);
 
@@ -244,9 +244,9 @@ describe('runTokensCommand', () => {
         name: `Evil${control}Token`,
         prefix: `mp_${control}live`,
       };
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([evilToken]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list']);
 
@@ -263,10 +263,10 @@ describe('runTokensCommand', () => {
     });
 
     it('prints the tokens as a parseable JSON array when --json is passed', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken, scopedToken]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', '--json']);
 
@@ -283,9 +283,9 @@ describe('runTokensCommand', () => {
     });
 
     it('prints an empty JSON array (not "No API tokens found.") for --json with no tokens', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', '--json']);
 
@@ -298,9 +298,9 @@ describe('runTokensCommand', () => {
     // spreading the object, so a one-time raw secret riding on a malformed
     // list response can never surface — same invariant the pretty path holds.
     it('never leaks a raw token secret carried on a listed token in --json mode', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mintedToken]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', '--json']);
 
@@ -311,9 +311,9 @@ describe('runTokensCommand', () => {
     // doing `tokens create --json | jq` fails loudly instead of losing the
     // one-time secret to human-formatted text.
     it('rejects --json on create rather than prompting or calling the API', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { createToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { createToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['create', '--json', '--name', 'x']);
 
@@ -326,9 +326,9 @@ describe('runTokensCommand', () => {
     });
 
     it('rejects --json on revoke before dispatching', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { revokeToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { revokeToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123', '--json']);
 
@@ -345,8 +345,8 @@ describe('runTokensCommand', () => {
     // bare/generic prose — mirroring get.ts/export.ts/records.ts/events.ts
     // (issue #218, #208).
     it("fails loudly with the usage block on a typo'd flag instead of silently listing", async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', '--jsn']);
 
@@ -358,8 +358,8 @@ describe('runTokensCommand', () => {
     });
 
     it('fails loudly with the usage block on a stray positional instead of silently listing', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', 'foo']);
 
@@ -375,8 +375,8 @@ describe('runTokensCommand', () => {
     // #208's fix elsewhere). `list`'s own `parseArgs` throw used to
     // propagate to the runner's outer catch, which miscoded it.
     it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', '--bogus', '--json']);
 
@@ -391,8 +391,8 @@ describe('runTokensCommand', () => {
 
     // Likewise a stray positional (`list` takes none) must not be miscoded.
     it('emits a usage-coded JSON error, not fetch_failed, for a stray positional', async () => {
-      const { fetchTokens } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', 'foo', '--json']);
 
@@ -412,9 +412,9 @@ describe('runTokensCommand', () => {
     it('still lists on a non-TTY (neither stdin nor stdout is a terminal)', async () => {
       process.stdin.isTTY = false;
       process.stdout.isTTY = false;
-      const { fetchTokens } = await import('@/libs/tokens.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', '--json']);
 
@@ -425,9 +425,9 @@ describe('runTokensCommand', () => {
 
   describe('create', () => {
     it('mints a token from --name and prints it with the revealed secret', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
       vi.mocked(createToken).mockResolvedValue(mintedToken);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['create', '--name', 'CI token']);
 
@@ -448,9 +448,9 @@ describe('runTokensCommand', () => {
     });
 
     it('passes --expires-in-days through as a number', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
       vi.mocked(createToken).mockResolvedValue(mintedToken);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand([
         'create',
@@ -472,8 +472,8 @@ describe('runTokensCommand', () => {
     // silently accepted or ignored — there is no way to hand the CLI a raw
     // secret as a shell argument.
     it('rejects an attempt to pass a raw secret as a flag instead of silently accepting it', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand([
         'create',
@@ -488,8 +488,8 @@ describe('runTokensCommand', () => {
     });
 
     it('fails with usage when --name is missing', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['create']);
 
@@ -505,8 +505,8 @@ describe('runTokensCommand', () => {
     // elsewhere) rather than the generic prose a propagated-to-the-runner's
     // outer-catch throw would otherwise produce.
     it('fails with the usage block on an unrecognized flag instead of generic prose', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['create', '--name', 'CI token', '--bogus']);
 
@@ -518,8 +518,8 @@ describe('runTokensCommand', () => {
     });
 
     it('fails with usage when --expires-in-days is not a whole number', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand([
         'create',
@@ -542,8 +542,8 @@ describe('runTokensCommand', () => {
     it.each(['0x10', '1e2', '', '   '])(
       'rejects an unparseable --expires-in-days value (%j) rather than silently accepting it',
       async (value) => {
-        const { createToken } = await import('@/libs/tokens.js');
-        const { runTokensCommand } = await import('@/commands/tokens.js');
+        const { createToken } = await import('#src/libs/tokens.js');
+        const { runTokensCommand } = await import('#src/commands/tokens.js');
 
         await runTokensCommand([
           'create',
@@ -564,9 +564,9 @@ describe('runTokensCommand', () => {
     // resolveExpiresInDays trims before matching the whole-number pattern, so
     // surrounding whitespace must not be rejected as malformed.
     it('trims surrounding whitespace from a valid --expires-in-days value', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
       vi.mocked(createToken).mockResolvedValue(mintedToken);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand([
         'create',
@@ -583,9 +583,9 @@ describe('runTokensCommand', () => {
     });
 
     it('reports an error and exits non-zero when creation fails', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
       vi.mocked(createToken).mockResolvedValue(null);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['create', '--name', 'CI token']);
 
@@ -602,9 +602,9 @@ describe('runTokensCommand', () => {
     // unusable token — mirrors the equivalent generated-provider guard in
     // commands/sources.ts.
     it('fails when the create response omits the token secret', async () => {
-      const { createToken } = await import('@/libs/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
       vi.mocked(createToken).mockResolvedValue(mockToken);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['create', '--name', 'CI token']);
 
@@ -624,12 +624,12 @@ describe('runTokensCommand', () => {
 
     it('strips control characters from a hostile token secret before printing', async () => {
       const control = String.fromCharCode(0x1b);
-      const { createToken } = await import('@/libs/tokens.js');
+      const { createToken } = await import('#src/libs/tokens.js');
       vi.mocked(createToken).mockResolvedValue({
         ...mintedToken,
         token: `mp_live_${control}[2J`,
       });
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['create', '--name', 'CI token']);
 
@@ -647,12 +647,12 @@ describe('runTokensCommand', () => {
 
   describe('revoke', () => {
     it('revokes a token by id after the confirmation is accepted', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -666,11 +666,11 @@ describe('runTokensCommand', () => {
     // The confirmation is the whole point of the feature: a "no" answer must
     // revoke nothing and report the abort.
     it('aborts without revoking when the confirmation is declined', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(false);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -682,12 +682,12 @@ describe('runTokensCommand', () => {
     // The confirm message must name the token being revoked and warn that the
     // action is irreversible so the user knows what they're destroying.
     it('names the token and warns it is irreversible in the confirmation prompt', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -711,14 +711,14 @@ describe('runTokensCommand', () => {
     // masked prefix) to the raw secret this CLI is configured with — revoking
     // it would lock the CLI out.
     it('shows a stronger warning when revoking the CLI’s own configured token', async () => {
-      const { getApiToken } = await import('@/libs/api.js');
+      const { getApiToken } = await import('#src/libs/api.js');
       vi.mocked(getApiToken).mockReturnValue('mp_live_ab12_rest_of_secret');
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -731,14 +731,14 @@ describe('runTokensCommand', () => {
     // A token whose prefix is not a prefix of the stored secret is a different
     // token, so the stronger warning must not fire.
     it('does not show the stronger warning for a token that is not the configured one', async () => {
-      const { getApiToken } = await import('@/libs/api.js');
+      const { getApiToken } = await import('#src/libs/api.js');
       vi.mocked(getApiToken).mockReturnValue('mp_live_zz99_other_secret');
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -751,10 +751,10 @@ describe('runTokensCommand', () => {
     // The scripting escape hatch: --yes revokes straight away with no prompt
     // and no label lookup (the short-circuit must skip fetchTokens entirely).
     it('skips the confirmation and the label lookup when --yes is passed', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123', '--yes']);
 
@@ -768,10 +768,10 @@ describe('runTokensCommand', () => {
     it('fails loudly on a non-TTY revoke when --yes is absent instead of hanging', async () => {
       process.stdin.isTTY = false;
       process.stdout.isTTY = false;
-      const { checkConfig } = await import('@/libs/config.js');
-      const { revokeToken } = await import('@/libs/tokens.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { revokeToken } = await import('#src/libs/tokens.js');
       const { confirm } = await import('@inquirer/prompts');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -790,9 +790,9 @@ describe('runTokensCommand', () => {
     // renders to stdout — same hang, so it must fail the same way.
     it('fails loudly on a redirected-stdout revoke when --yes is absent', async () => {
       process.stdout.isTTY = false;
-      const { revokeToken } = await import('@/libs/tokens.js');
+      const { revokeToken } = await import('#src/libs/tokens.js');
       const { confirm } = await import('@inquirer/prompts');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -808,10 +808,10 @@ describe('runTokensCommand', () => {
     it('revokes on a non-TTY when an id and --yes are given', async () => {
       process.stdin.isTTY = false;
       process.stdout.isTTY = false;
-      const { revokeToken } = await import('@/libs/tokens.js');
+      const { revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123', '--yes']);
 
@@ -822,14 +822,14 @@ describe('runTokensCommand', () => {
     // A Ctrl+C at the confirmation is a deliberate abort: it must revoke
     // nothing, exit 0, and stay quiet — never fall through to the revoke.
     it('aborts cleanly without revoking when the confirmation is Ctrl+C-ed', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
       const { confirm } = await import('@inquirer/prompts');
       const exitPromptError = Object.assign(new Error('User force closed'), {
         name: 'ExitPromptError',
       });
       vi.mocked(confirm).mockRejectedValue(exitPromptError);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -845,12 +845,12 @@ describe('runTokensCommand', () => {
     // case below — the two notes are deliberately worded differently because
     // a failed load must never be mis-reported as a confirmed non-match.
     it('still confirms and revokes when the label lookup fails', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockRejectedValue(new Error('Server error'));
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -865,12 +865,12 @@ describe('runTokensCommand', () => {
     // source of truth on whether the id is real, but the prompt must say so
     // rather than reusing the "could not load the list" wording.
     it('still confirms with a distinct note when the list resolves with no matching token', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([]);
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -885,14 +885,14 @@ describe('runTokensCommand', () => {
     // always true — that would falsely flag every token as the one this CLI
     // is configured with.
     it('does not show the stronger warning for a token with an empty prefix', async () => {
-      const { getApiToken } = await import('@/libs/api.js');
+      const { getApiToken } = await import('#src/libs/api.js');
       vi.mocked(getApiToken).mockReturnValue('mp_live_ab12_rest_of_secret');
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([{ ...mockToken, prefix: '' }]);
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -907,12 +907,12 @@ describe('runTokensCommand', () => {
     // flag-detection in the runner has to agree with that, not just the
     // ordinary case where --yes trails a real id.
     it('still confirms when the id is the literal string "--yes" passed after --', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([]);
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', '--', '--yes']);
 
@@ -923,9 +923,9 @@ describe('runTokensCommand', () => {
     // --yes is meaningless outside revoke; it must fail loudly like a misplaced
     // --json rather than appearing to take effect.
     it('rejects --yes on a non-revoke subcommand', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { fetchTokens } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchTokens } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['list', '--yes']);
 
@@ -942,9 +942,9 @@ describe('runTokensCommand', () => {
     // an unconfigured, non-interactive run instead of failing loud. Mirrors
     // `sources delete`'s equivalent `--yes requires a uuid` guard.
     it('rejects --yes with no id before the config check', async () => {
-      const { checkConfig } = await import('@/libs/config.js');
-      const { revokeToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { revokeToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', '--yes']);
 
@@ -957,8 +957,8 @@ describe('runTokensCommand', () => {
     });
 
     it('fails with usage when no id is given', async () => {
-      const { revokeToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { revokeToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke']);
 
@@ -973,8 +973,8 @@ describe('runTokensCommand', () => {
     // `revoke a b` would revoke only `a` and still exit 0, so a script
     // expecting both ids revoked would misread it as fully done.
     it('fails with usage instead of silently dropping a second id', async () => {
-      const { revokeToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { revokeToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-a', 'tok-b']);
 
@@ -989,8 +989,8 @@ describe('runTokensCommand', () => {
     // is rejected by parseArgs's strict mode rather than being sent to the
     // API as a literal token id.
     it('fails loudly with the usage block instead of treating an unrecognized flag as a literal id', async () => {
-      const { revokeToken } = await import('@/libs/tokens.js');
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { revokeToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', '--help']);
 
@@ -1002,12 +1002,12 @@ describe('runTokensCommand', () => {
     });
 
     it('exits non-zero when revocation fails', async () => {
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([mockToken]);
       vi.mocked(revokeToken).mockResolvedValue(false);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', 'tok-abc-123']);
 
@@ -1017,12 +1017,12 @@ describe('runTokensCommand', () => {
 
     it('sanitizes the id before printing it back', async () => {
       const control = String.fromCharCode(0x1b);
-      const { fetchTokens, revokeToken } = await import('@/libs/tokens.js');
+      const { fetchTokens, revokeToken } = await import('#src/libs/tokens.js');
       vi.mocked(fetchTokens).mockResolvedValue([]);
       vi.mocked(revokeToken).mockResolvedValue(true);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(true);
-      const { runTokensCommand } = await import('@/commands/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
 
       await runTokensCommand(['revoke', `tok${control}123`]);
 
