@@ -1,4 +1,6 @@
 import Conf from 'conf';
+import envPaths from 'env-paths';
+import path from 'node:path';
 import packageJson from './../../package.json' with { type: 'json' };
 import { input } from '@inquirer/prompts';
 import chalk from 'chalk';
@@ -16,8 +18,31 @@ const schema = {
   },
 };
 
+// conf 16's env-paths rejects a scoped name like "@markpost/cli" as an unsafe
+// filename, but conf 15 accepted it and nested the store at
+// <config dir>/@markpost/cli-nodejs. Resolve that same directory ourselves so
+// upgrading doesn't strand existing users' API token and settings. env-paths
+// is called with a safe placeholder that is then swapped for the scoped path,
+// which keeps each platform's layout (e.g. Windows' trailing `Config`).
+const CONFIG_DIRECTORY_PLACEHOLDER = 'markpost-config-directory';
+const LEGACY_CONFIG_DIRECTORY = path.join(
+  ...`${packageJson.name}-nodejs`.split('/'),
+);
+
+const resolveConfigDirectory = (): string => {
+  const { config: placeholderDirectory } = envPaths(
+    CONFIG_DIRECTORY_PLACEHOLDER,
+    { suffix: '' },
+  );
+
+  return placeholderDirectory.replace(
+    CONFIG_DIRECTORY_PLACEHOLDER,
+    LEGACY_CONFIG_DIRECTORY,
+  );
+};
+
 export const config = new Conf({
-  projectName: packageJson.name,
+  cwd: resolveConfigDirectory(),
   schema,
   // The store holds the API token, so keep the file readable only by its
   // owner instead of the default world-readable 0o644.
