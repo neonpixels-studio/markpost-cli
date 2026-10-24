@@ -39,19 +39,19 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",
-    "@vitest/ui": "^5.0.4",
-    "eslint": "^10.12.0",
+    "@vitest/ui": "^5.0.5",
+    "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.7",
     "husky": "^9.1.7",
     "jiti": "^2.7.0",
     "prettier": "^3.9.10",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.2",
+    "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.0"
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.7.3",
+    "@inquirer/prompts": "^8.7.4",
     "@sindresorhus/slugify": "^3.0.1",
     "chalk": "^6.0.1",
     "cli-spinners": "^3.4.0",
