@@ -2191,6 +2191,23 @@ describe('markRecordsSynced', () => {
     );
   });
 
+  it('sends the vault-relative filePath it is given in the bulk PATCH body', async () => {
+    mockBulkPatchEcho();
+
+    await markRecordsSynced([
+      { uuid: 'rel-1', filePath: '99-incoming/2026-01-01-hello.md' },
+    ]);
+
+    const [, requestInit] = vi.mocked(global.fetch).mock.calls[0];
+    const sentBody = JSON.parse(String(requestInit?.body));
+
+    expect(sentBody.data.attributes.records[0]).toEqual({
+      uuid: 'rel-1',
+      status: 'synced',
+      filePath: '99-incoming/2026-01-01-hello.md',
+    });
+  });
+
   // Regression coverage for markpost#302: markpost's bulk PATCH /api/records
   // 422s any request that includes a client-supplied `syncedAt`
   // (markpost#271) — the server stamps it itself. This CLI has no separate

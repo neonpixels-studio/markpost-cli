@@ -30,6 +30,10 @@ vi.mock('#src/libs/markdown.js', () => ({
   writeMarkdown: vi.fn(),
   ensureOutputDirectory: vi.fn(),
   buildWritePreview: vi.fn(),
+  // Identity by default: the absolute-to-vault-relative conversion itself is
+  // covered in tests/libs/markdown.test.ts; here it only needs to flow the
+  // written path through so the settle/report orchestration can be asserted.
+  toVaultRelativePath: vi.fn((path: string) => path),
 }));
 vi.mock('#src/libs/settings.js', () => ({ fetchSettings: vi.fn() }));
 // Run the sync once synchronously instead of arming a real timer: the
@@ -865,6 +869,10 @@ describe('index', () => {
     expect(markRecordsSynced).toHaveBeenCalledWith([
       { uuid: 'abc-123', filePath: '/mock/output/abc-123.md' },
     ]);
+    // The written path is routed through toVaultRelativePath so the stored value
+    // is vault-relative (no home directory) and round-trips on a re-queue.
+    const { toVaultRelativePath } = await import('#src/libs/markdown.js');
+    expect(toVaultRelativePath).toHaveBeenCalledWith('/mock/output/abc-123.md');
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('Deferred 1 record(s)'),
     );

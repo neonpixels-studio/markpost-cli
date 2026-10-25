@@ -17,10 +17,12 @@ import {
   ensureOutputDirectory,
   MAX_COLLISION_SUFFIX,
   readMarkdown,
+  toVaultRelativePath,
   writeMarkdown,
 } from '#src/libs/markdown.js';
 import type { WrittenRecordState } from '#src/libs/markdown.js';
 import { Record } from '#src/types/records.types.js';
+import { ConflictStrategy } from '#src/types/settings.types.js';
 
 const EXCLUSIVE_WRITE_OPTIONS = { flag: 'wx' };
 
@@ -405,6 +407,100 @@ describe('writeMarkdown', () => {
     );
   });
 
+  it('writes a record to its server filePath subfolder, creating the folder', () => {
+    const subfolderRecord: Record = {
+      ...mockRecord,
+      filePath: '99-incoming/2026-01-01-hello.md',
+    };
+
+    const writtenPath = writeMarkdown(subfolderRecord);
+
+    expect(mkdirSync).toHaveBeenCalledWith(
+      resolve(outputDirectory, '99-incoming'),
+      { recursive: true },
+    );
+    expect(writeFileSync).toHaveBeenCalledWith(
+      resolve(outputDirectory, '99-incoming/2026-01-01-hello.md'),
+      subfolderRecord.content,
+      EXCLUSIVE_WRITE_OPTIONS,
+    );
+    expect(writtenPath).toBe(
+      resolve(outputDirectory, '99-incoming/2026-01-01-hello.md'),
+    );
+  });
+
+  it('falls back to <slug>.md at the output root when filePath is null', () => {
+    const nullPathRecord: Record = { ...mockRecord, filePath: null };
+
+    const writtenPath = writeMarkdown(nullPathRecord);
+
+    expect(writtenPath).toBe(resolve(outputDirectory, 'test-title.md'));
+    expect(writeFileSync).toHaveBeenCalledWith(
+      resolve(outputDirectory, 'test-title.md'),
+      nullPathRecord.content,
+      EXCLUSIVE_WRITE_OPTIONS,
+    );
+  });
+
+  it.each([
+    ['a parent-escape path', '../escape.md'],
+    ['an absolute POSIX path', '/etc/passwd'],
+    ['an absolute Windows path', 'C:\\x.md'],
+    ['a Windows reserved device segment', 'notes/CON/x.md'],
+  ])(
+    'falls back to <slug>.md and warns, writing nothing outside the output directory, for %s',
+    (_label, filePath) => {
+      const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const unsafeRecord: Record = { ...mockRecord, filePath };
+
+      const writtenPath = writeMarkdown(unsafeRecord);
+
+      expect(writtenPath).toBe(resolve(outputDirectory, 'test-title.md'));
+      vi.mocked(writeFileSync).mock.calls.forEach(([writtenCallPath]) => {
+        expect(
+          (writtenCallPath as string).startsWith(
+            resolve(outputDirectory) + sep,
+          ),
+        ).toBe(true);
+      });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(unsafeRecord.uuid),
+      );
+
+      warn.mockRestore();
+    },
+  );
+
+  it.each<ConflictStrategy>(['suffix', 'overwrite', 'skip'])(
+    'writes two same-slug records in different folders to distinct files under %s',
+    (strategy) => {
+      mockWriteFileSyncRejectingExistingPaths();
+      const seenSlugs = new Map<string, string>();
+      const firstRecord: Record = {
+        ...mockRecord,
+        uuid: 'first',
+        title: 'Hello',
+        filePath: 'alpha/hello.md',
+      };
+      const secondRecord: Record = {
+        ...mockRecord,
+        uuid: 'second',
+        title: 'Hello',
+        filePath: 'beta/hello.md',
+      };
+
+      const firstWrittenPath = writeMarkdown(firstRecord, strategy, seenSlugs);
+      const secondWrittenPath = writeMarkdown(
+        secondRecord,
+        strategy,
+        seenSlugs,
+      );
+
+      expect(firstWrittenPath).toBe(resolve(outputDirectory, 'alpha/hello.md'));
+      expect(secondWrittenPath).toBe(resolve(outputDirectory, 'beta/hello.md'));
+    },
+  );
+
   it('keeps incrementing the suffix past the first collision', () => {
     mockWriteFileSyncRejectingExistingPaths([
       resolve(outputDirectory, 'test-title.md'),
@@ -426,7 +522,7 @@ describe('writeMarkdown', () => {
     });
 
     expect(() => writeMarkdown(mockRecord)).toThrow(
-      'Too many filename collisions for "test-title"',
+      'Too many filename collisions for "test-title.md"',
     );
     expect(vi.mocked(writeFileSync).mock.calls.length).toBeGreaterThan(1);
     expect(vi.mocked(writeFileSync).mock.calls.length).toBeLessThanOrEqual(
@@ -1955,5 +2051,27 @@ describe('buildWritePreview', () => {
 
     expect(preview.action).toBe('write');
     expect(preview.path).toBe(resolve(outputDirectory, 'test-title.md'));
+  });
+});
+
+describe('toVaultRelativePath', () => {
+  beforeEach(() => {
+    process.env.OUTPUT_DIRECTORY = outputDirectory;
+  });
+
+  afterEach(() => {
+    delete process.env.OUTPUT_DIRECTORY;
+  });
+
+  it('returns the write path relative to the output directory', () => {
+    expect(
+      toVaultRelativePath(resolve(outputDirectory, '99-incoming/hello.md')),
+    ).toBe('99-incoming/hello.md');
+  });
+
+  it('returns a bare filename for a write at the output root', () => {
+    expect(toVaultRelativePath(resolve(outputDirectory, 'hello.md'))).toBe(
+      'hello.md',
+    );
   });
 });

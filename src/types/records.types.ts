@@ -46,6 +46,14 @@ export type Record = {
   source?: string | null;
   tags?: string[] | null;
   frontmatter?: Frontmatter | null;
+  // The vault-relative path markpost computed for this record:
+  // `<source routeFolder>/<filename template output>` (e.g.
+  // `99-incoming/2026-06-14-deploy-ok.md`), with server-side collision
+  // suffixing already applied. The CLI writes the record to
+  // `<outputDirectory>/<filePath>` (see src/libs/markdown.ts). Typed optional,
+  // like the fields above, for older/off-contract responses that omit it; a
+  // null/absolute/unsafe value falls back to `<slug>.md` at the output root.
+  filePath?: string | null;
 };
 
 export type PaginatedRecordsMeta = {

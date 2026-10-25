@@ -18,6 +18,7 @@ import {
 import {
   buildWritePreview,
   ensureOutputDirectory,
+  toVaultRelativePath,
   writeMarkdown,
   WritePreview,
   WrittenRecordState,
@@ -593,14 +594,18 @@ function reportDeferredServerChanges(deferredRecords: WrittenRecord[]): void {
 
 // Projects each written record down to the `{ uuid, filePath }` shape the bulk
 // mark-synced call needs, preserving order so the returned outcomes stay aligned
-// to `writtenRecords` by index. Chunking and the stop-on-abort logic (timeout, a
+// to `writtenRecords` by index. The absolute path writeMarkdown returned is
+// converted to a vault-relative path (with `/` separators) here, so the value
+// sent to markpost carries no home directory and round-trips as
+// `record.filePath` on a re-queue (see toVaultRelativePath and
+// buildBulkRecordPayload). Chunking and the stop-on-abort logic (timeout, a
 // systemic failure with a permanent one also stopping the daemon, or a repeated
 // request-shape 4xx) live in
 // `markRecordsSynced` (the records lib), keeping the API surface isolated there.
 function toMarkSyncedItems(writtenRecords: WrittenRecord[]): MarkSyncedItem[] {
   return writtenRecords.map(({ record, filePath }) => ({
     uuid: record.uuid,
-    filePath,
+    filePath: toVaultRelativePath(filePath),
   }));
 }
 

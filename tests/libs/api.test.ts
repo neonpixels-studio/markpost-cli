@@ -47,7 +47,7 @@ describe('getBaseUrl', () => {
 
   it('returns default URL when BASE_URL is not set', () => {
     delete process.env.BASE_URL;
-    expect(getBaseUrl()).toBe('https://sync.danholloran.me');
+    expect(getBaseUrl()).toBe('https://markpost.io');
   });
 });
 

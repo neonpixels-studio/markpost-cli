@@ -25,6 +25,7 @@ import {
   extractFrontmatterTagsWithDiagnostics,
   stripFrontmatterDocument,
 } from '#src/libs/frontmatter.js';
+import { warnMessage } from '#src/libs/errors.js';
 import { Record } from '#src/types/records.types.js';
 import {
   ConflictStrategy,
@@ -32,6 +33,27 @@ import {
 } from '#src/types/settings.types.js';
 
 const MARKDOWN_EXTENSION = '.md';
+// markpost builds `record.filePath` with `/` separators (see
+// src/types/records.types.ts); the CLI splits on it to validate each segment
+// and never treats a backslash as a separator (a `\` is rejected outright).
+const VAULT_PATH_SEPARATOR = '/';
+const PARENT_DIRECTORY_SEGMENT = '..';
+const BACKSLASH = '\\';
+const NUL_BYTE = '\0';
+// Windows reserved device names: a file whose segment name (ignoring any
+// extension) is one of these can't be created on Windows. Rejected as ANY path
+// segment so a server-built `record.filePath` can't produce an un-writable
+// path on a Windows vault. CON/PRN/AUX/NUL plus COM1-9 and LPT1-9.
+const WINDOWS_RESERVED_DEVICE_NAMES = ((): Set<string> => {
+  const names = new Set(['CON', 'PRN', 'AUX', 'NUL']);
+
+  for (let ordinal = 1; ordinal <= 9; ordinal += 1) {
+    names.add(`COM${ordinal}`);
+    names.add(`LPT${ordinal}`);
+  }
+
+  return names;
+})();
 const FIRST_COLLISION_SUFFIX = 2;
 // Give up rather than loop forever if a directory somehow has this many
 // same-slug files already; something else is wrong at that point. Exported
@@ -145,14 +167,130 @@ const resolveWithinOutputDirectory = (
   return resolvedPath;
 };
 
-// The `<slug>.md` path a record lands on when no collision pushes it to a
+// The base relative path a record lands on when no collision pushes it to a
 // suffix — the target `overwrite`/`skip` always aim at, and the identity used
-// for slug ownership (see writeMarkdown).
-const resolveBasePath = (outputDirectory: string, slug: string): string => {
-  return resolveWithinOutputDirectory(
-    outputDirectory,
-    `${slug}${MARKDOWN_EXTENSION}`,
+// for path ownership (see writeMarkdown). `relativePath` is a vault-relative
+// path that already includes its folder and `.md` extension (either the
+// server's `record.filePath` or the `<slug>.md` fallback), so this is just the
+// containment guard applied to it.
+const resolveBasePath = (
+  outputDirectory: string,
+  relativePath: string,
+): string => {
+  return resolveWithinOutputDirectory(outputDirectory, relativePath);
+};
+
+// Whether a path segment names a Windows reserved device, ignoring any
+// extension (Windows treats `CON.md` as reserved too, so compare the portion
+// before the first dot), case-insensitively.
+const isReservedDeviceSegment = (segment: string): boolean => {
+  const name = segment.split('.')[0]?.toUpperCase() ?? '';
+
+  return WINDOWS_RESERVED_DEVICE_NAMES.has(name);
+};
+
+// Whether `record.filePath` is a safe vault-relative path the CLI will honor:
+// a non-empty relative path with no `..` segment, no backslash or NUL byte, and
+// no Windows reserved device name as any segment. Anything else (including an
+// absolute path, which earlier CLI versions sent back on mark-synced so old
+// records may still hold one) is rejected and the caller falls back to
+// `<slug>.md` at the output root (see resolveWriteRelativePath).
+const isSafeRelativeFilePath = (filePath: string): boolean => {
+  if (!filePath || isAbsolute(filePath)) {
+    return false;
+  }
+
+  if (filePath.includes(BACKSLASH) || filePath.includes(NUL_BYTE)) {
+    return false;
+  }
+
+  return filePath
+    .split(VAULT_PATH_SEPARATOR)
+    .every(
+      (segment) =>
+        segment !== PARENT_DIRECTORY_SEGMENT &&
+        !isReservedDeviceSegment(segment),
+    );
+};
+
+// Decide the vault-relative path a record's document is written to. Honor the
+// server's `record.filePath` when it's a safe relative path; otherwise fall
+// back to `<slug>.md` at the output root and flag the fallback so the caller
+// can warn (naming the record) rather than silently dropping the server's
+// intended placement.
+const resolveWriteRelativePath = (
+  filePath: string | null | undefined,
+  slug: string,
+): { relativePath: string; usedFallback: boolean } => {
+  if (filePath && isSafeRelativeFilePath(filePath)) {
+    return { relativePath: filePath, usedFallback: false };
+  }
+
+  return { relativePath: `${slug}${MARKDOWN_EXTENSION}`, usedFallback: true };
+};
+
+// Warn (without failing the sync) that a record couldn't be written where the
+// server asked, naming the record uuid so the line is actionable. The record
+// is still written to `fallbackPath`, never skipped.
+const warnFilePathFallback = (
+  recordUuid: string,
+  filePath: string | null | undefined,
+  fallbackPath: string,
+): void => {
+  const serverPath = filePath ? `"${filePath}"` : '(none)';
+
+  warnMessage(
+    `Record ${recordUuid}: server file path ${serverPath} is missing or unsafe; writing to ${fallbackPath} at the output root instead.`,
   );
+};
+
+// Insert a collision suffix before the final segment's extension, keeping the
+// folder intact: `99-incoming/hello.md` + 2 -> `99-incoming/hello-2.md`.
+const collisionCandidate = (relativePath: string, suffix: number): string => {
+  const extension = extname(relativePath);
+  const stem = relativePath.slice(0, relativePath.length - extension.length);
+
+  return `${stem}-${suffix}${extension}`;
+};
+
+// Create the parent directory of a target path when it isn't the output root
+// itself (which ensureOutputDirectory already created). Lets a record whose
+// `record.filePath` names a subfolder (e.g. `99-incoming/...`) land there,
+// creating `99-incoming/` on demand. `recursive` so a nested folder is made in
+// one call and an already-present directory is a no-op.
+const ensureParentDirectory = (
+  outputDirectory: string,
+  targetPath: string,
+): void => {
+  const parentDirectory = dirname(targetPath);
+
+  if (resolve(parentDirectory) === resolve(outputDirectory)) {
+    return;
+  }
+
+  mkdirSync(parentDirectory, { recursive: true });
+};
+
+// Case-folded key for the in-memory collision maps (seenSlugs / preview
+// plannedPaths). markpost compares paths case-insensitively (macOS/Windows
+// filesystems), so the CLI's own ownership/collision checks fold case to stay
+// consistent — two paths differing only in case are the same target.
+const pathKey = (path: string): string => path.toLowerCase();
+
+// The path the CLI wrote, expressed relative to the output directory with `/`
+// separators (even on Windows), for sending back to markpost on mark-synced.
+// Sending this instead of the absolute local path keeps the user's home
+// directory out of the stored value AND lets it round-trip: markpost stores it
+// and hands it back as `record.filePath` when the record is re-queued, so the
+// next sync writes to the same place (see src/libs/records.ts
+// buildBulkRecordPayload). `absolutePath` is a path writeMarkdown returned, so
+// it already resolves under the output directory.
+export const toVaultRelativePath = (absolutePath: string): string => {
+  const outputDirectory = resolve(getOutputDirectory());
+
+  return relative(outputDirectory, absolutePath)
+    .split(/[\\/]/)
+    .join(VAULT_PATH_SEPARATOR);
 };
 
 const isFileAlreadyExistsError = (error: unknown): boolean => {
@@ -170,16 +308,16 @@ const isFileAlreadyExistsError = (error: unknown): boolean => {
 // with a race between them.
 const writeToFirstAvailablePath = (
   outputDirectory: string,
-  slug: string,
+  relativePath: string,
   content: string,
 ): string => {
-  let candidateFileName = `${slug}${MARKDOWN_EXTENSION}`;
+  let candidateRelativePath = relativePath;
   let suffix = FIRST_COLLISION_SUFFIX;
 
   while (suffix <= MAX_COLLISION_SUFFIX) {
     const candidatePath = resolveWithinOutputDirectory(
       outputDirectory,
-      candidateFileName,
+      candidateRelativePath,
     );
 
     try {
@@ -191,12 +329,12 @@ const writeToFirstAvailablePath = (
       }
     }
 
-    candidateFileName = `${slug}-${suffix}${MARKDOWN_EXTENSION}`;
+    candidateRelativePath = collisionCandidate(relativePath, suffix);
     suffix += 1;
   }
 
   throw Error(
-    `Too many filename collisions for "${slug}" in ${outputDirectory}`,
+    `Too many filename collisions for "${relativePath}" in ${outputDirectory}`,
   );
 };
 
@@ -220,10 +358,10 @@ const writeReplacingExisting = (targetPath: string, content: string): void => {
 // rationale that keeps the write from following a planted symlink.
 const writeOverwriting = (
   outputDirectory: string,
-  slug: string,
+  relativePath: string,
   content: string,
 ): string => {
-  const candidatePath = resolveBasePath(outputDirectory, slug);
+  const candidatePath = resolveBasePath(outputDirectory, relativePath);
 
   writeReplacingExisting(candidatePath, content);
 
@@ -237,10 +375,10 @@ const writeOverwriting = (
 // never persisted). Any other error still propagates.
 const writeIfAbsent = (
   outputDirectory: string,
-  slug: string,
+  relativePath: string,
   content: string,
 ): string | null => {
-  const candidatePath = resolveBasePath(outputDirectory, slug);
+  const candidatePath = resolveBasePath(outputDirectory, relativePath);
 
   try {
     writeFileSync(candidatePath, content, { flag: EXCLUSIVE_WRITE_FLAG });
@@ -260,7 +398,11 @@ const writeIfAbsent = (
 // by hand. `null` in the return union is the `skip`-collision signal.
 const STRATEGY_WRITERS = new Map<
   ConflictStrategy,
-  (outputDirectory: string, slug: string, content: string) => string | null
+  (
+    outputDirectory: string,
+    relativePath: string,
+    content: string,
+  ) => string | null
 >([
   ['suffix', writeToFirstAvailablePath],
   ['overwrite', writeOverwriting],
@@ -285,9 +427,10 @@ const resolveStrategyForSlug = (
   recordUuid: string,
   seenSlugs: Map<string, string>,
 ): ConflictStrategy => {
+  const baseKey = pathKey(basePath);
   const claimedByOtherRecord =
-    seenSlugs.has(basePath) &&
-    (!recordUuid || seenSlugs.get(basePath) !== recordUuid);
+    seenSlugs.has(baseKey) &&
+    (!recordUuid || seenSlugs.get(baseKey) !== recordUuid);
 
   if (conflictStrategy === 'overwrite' && claimedByOtherRecord) {
     return 'suffix';
@@ -644,7 +787,6 @@ export const writeMarkdown = (
   const outputDirectory = ensureOutputDirectory();
 
   const slug = slugifyTitle(record.title, record.uuid);
-  const basePath = resolveBasePath(outputDirectory, slug);
   const content = buildRecordDocument(record, includeFrontmatter);
 
   // A re-fetched, still-unsettled record reuses its own file rather than letting
@@ -671,6 +813,21 @@ export const writeMarkdown = (
     );
   }
 
+  // Write where the server asked (`<outputDirectory>/<record.filePath>`),
+  // creating the subfolder on demand; fall back to `<slug>.md` at the output
+  // root (with a warning) when the server path is missing or unsafe.
+  const { relativePath, usedFallback } = resolveWriteRelativePath(
+    record.filePath,
+    slug,
+  );
+  const basePath = resolveBasePath(outputDirectory, relativePath);
+
+  if (usedFallback) {
+    warnFilePathFallback(record.uuid, record.filePath, relativePath);
+  }
+
+  ensureParentDirectory(outputDirectory, basePath);
+
   const effectiveStrategy = resolveStrategyForSlug(
     conflictStrategy,
     basePath,
@@ -680,16 +837,17 @@ export const writeMarkdown = (
   const writer =
     STRATEGY_WRITERS.get(effectiveStrategy) ?? writeToFirstAvailablePath;
 
-  const writtenPath = writer(outputDirectory, slug, content);
-  // Ownership means "this uuid wrote `<slug>.md`", so record it only when the
-  // write actually landed on the base path — never for a `skip` no-op (null) or
-  // a `suffix` write that spilled to `<slug>-2.md`. Ownership transfers to
-  // whoever last wrote the base path: a suffix-downgraded record starts at the
-  // base path too and claims it when that path is free (e.g. the prior owner's
-  // file was moved out of the vault), which is correct — the record on disk owns
-  // the slug.
+  const writtenPath = writer(outputDirectory, relativePath, content);
+  // Ownership means "this uuid wrote the base path", so record it only when the
+  // write actually landed there — never for a `skip` no-op (null) or a `suffix`
+  // write that spilled to `<name>-2.md`. The key is the resolved base path
+  // (case-folded, see pathKey), not the bare slug, so two records sharing a slug
+  // in different folders own different paths. Ownership transfers to whoever last
+  // wrote the base path: a suffix-downgraded record starts at the base path too
+  // and claims it when that path is free (e.g. the prior owner's file was moved
+  // out of the vault), which is correct — the record on disk owns the path.
   if (writtenPath === basePath) {
-    seenSlugs.set(basePath, record.uuid);
+    seenSlugs.set(pathKey(basePath), record.uuid);
   }
 
   // Remember the file (and the content written there) for this uuid so a later
@@ -738,28 +896,31 @@ const requireOutputDirectory = (): string => {
 // create (a write), so it can plan without touching the filesystem.
 const previewSuffixPath = (
   outputDirectory: string,
-  slug: string,
+  relativePath: string,
   plannedPaths: Set<string>,
 ): string => {
-  let candidateFileName = `${slug}${MARKDOWN_EXTENSION}`;
+  let candidateRelativePath = relativePath;
   let suffix = FIRST_COLLISION_SUFFIX;
 
   while (suffix <= MAX_COLLISION_SUFFIX) {
     const candidatePath = resolveWithinOutputDirectory(
       outputDirectory,
-      candidateFileName,
+      candidateRelativePath,
     );
 
-    if (!plannedPaths.has(candidatePath) && !existsSync(candidatePath)) {
+    if (
+      !plannedPaths.has(pathKey(candidatePath)) &&
+      !existsSync(candidatePath)
+    ) {
       return candidatePath;
     }
 
-    candidateFileName = `${slug}-${suffix}${MARKDOWN_EXTENSION}`;
+    candidateRelativePath = collisionCandidate(relativePath, suffix);
     suffix += 1;
   }
 
   throw Error(
-    `Too many filename collisions for "${slug}" in ${outputDirectory}`,
+    `Too many filename collisions for "${relativePath}" in ${outputDirectory}`,
   );
 };
 
@@ -776,20 +937,22 @@ const previewRecordWrite = (
   plannedPaths: Set<string>,
 ): WritePreview => {
   const slug = slugifyTitle(record.title, record.uuid);
-  const basePath = resolveBasePath(outputDirectory, slug);
-  const baseTaken = plannedPaths.has(basePath) || existsSync(basePath);
+  const { relativePath } = resolveWriteRelativePath(record.filePath, slug);
+  const basePath = resolveBasePath(outputDirectory, relativePath);
+  const baseKey = pathKey(basePath);
+  const baseTaken = plannedPaths.has(baseKey) || existsSync(basePath);
 
   if (conflictStrategy === 'skip' && baseTaken) {
     return { record, path: basePath, action: 'skip' };
   }
 
   if (conflictStrategy === 'skip') {
-    plannedPaths.add(basePath);
+    plannedPaths.add(baseKey);
     return { record, path: basePath, action: 'write' };
   }
 
-  if (conflictStrategy === 'overwrite' && !plannedPaths.has(basePath)) {
-    plannedPaths.add(basePath);
+  if (conflictStrategy === 'overwrite' && !plannedPaths.has(baseKey)) {
+    plannedPaths.add(baseKey);
     return {
       record,
       path: basePath,
@@ -797,8 +960,12 @@ const previewRecordWrite = (
     };
   }
 
-  const writtenPath = previewSuffixPath(outputDirectory, slug, plannedPaths);
-  plannedPaths.add(writtenPath);
+  const writtenPath = previewSuffixPath(
+    outputDirectory,
+    relativePath,
+    plannedPaths,
+  );
+  plannedPaths.add(pathKey(writtenPath));
   return { record, path: writtenPath, action: 'write' };
 };
 
