@@ -9,6 +9,14 @@ export const logErrorMessage = (title: string, message: string) => {
   return console.error(chalk.redBright(`${title}\n${message}`));
 };
 
+// A non-fatal warning (yellow) printed to stderr WITHOUT touching the exit
+// code: the caller recovered (e.g. wrote a record to a fallback path) but the
+// user should still see that something degraded. Distinct from
+// `warnPartialRead`, which flags an incomplete read AND sets a non-zero exit.
+export const warnMessage = (message: string): void => {
+  console.error(chalk.yellow(`Warning: ${message}`));
+};
+
 // Pulls a printable string off an unknown thrown value: an `Error`'s
 // message, otherwise its `String()` form. Not API-specific, so it lives here
 // rather than in libs/api.ts, and is shared by callers across both API

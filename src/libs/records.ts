@@ -443,8 +443,12 @@ export const createRecord = async (
 // endpoint (issue #123).
 export const MAX_MARK_SYNCED_BATCH_SIZE = 100;
 
-// One record the CLI wants marked synced: the uuid to update and the on-disk
-// path markpost stores so its UI can show where the note landed.
+// One record the CLI wants marked synced: the uuid to update and the
+// vault-relative path (with `/` separators) markpost stores so its UI can show
+// where the note landed. Relative, not absolute, so the stored value carries no
+// home directory and round-trips as `record.filePath` on a re-queue (see
+// `buildBulkRecordPayload`); the caller derives it from the absolute write path
+// via `toVaultRelativePath`.
 export type MarkSyncedItem = {
   uuid: string;
   filePath: string;
@@ -482,9 +486,12 @@ export type MarkSyncedResult = {
 // The `records[]` item markpost's bulk PATCH expects: the uuid to match plus
 // the attributes to set. The CLI always sets `status` and `filePath` together
 // — moving a written record out of `pending` so the next run's pending-only
-// fetch skips it. `filePath` is sent deliberately: markpost stores it on the
-// record so its UI can show where a synced note landed — the user's own local
-// path going to their own account, not a third-party leak. `syncedAt` is
+// fetch skips it. `filePath` is the vault-relative path the record was written
+// to (with `/` separators), sent deliberately: markpost stores it so its UI can
+// show where a synced note landed, and hands it back as `record.filePath` when
+// the record is re-queued so the next sync writes to the same place. Relative,
+// not absolute, so the stored value never embeds the user's home directory (see
+// `MarkSyncedItem`). `syncedAt` is
 // deliberately NOT sent: markpost's PATCH /api/records rejects any request
 // that includes a client-supplied `syncedAt` with a 422 (markpost#271 on this
 // bulk endpoint, markpost#297 on the single-uuid endpoint) and stamps it

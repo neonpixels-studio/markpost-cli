@@ -7,7 +7,7 @@ import {
 import { logErrorMessage, messageFromError } from '#src/libs/errors.js';
 
 export const getBaseUrl = () => {
-  return process.env.BASE_URL ?? 'https://sync.danholloran.me';
+  return process.env.BASE_URL ?? 'https://markpost.io';
 };
 
 export const getApiToken = (): string | undefined => {

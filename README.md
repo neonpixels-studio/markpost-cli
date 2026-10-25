@@ -1,6 +1,6 @@
 # @markpost/cli
 
-CLI tool for sync.danholloran.me
+CLI tool for markpost.io
 
 ## Installation
 
@@ -173,7 +173,7 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 
 | Variable           | Description                                                                                                                                                                                                                                                     |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `API_TOKEN`        | API token for sync.danholloran.me                                                                                                                                                                                                                               |
+| `API_TOKEN`        | API token for markpost.io                                                                                                                                                                                                                                       |
 | `BASE_URL`         | Base URL of the sync API (e.g. `http://localhost:8888` for local dev)                                                                                                                                                                                           |
 | `OUTPUT_DIRECTORY` | Path to the directory where synced files are written; a leading `~`, `$HOME`, or `${HOME}` is expanded to your home directory. A relative path is resolved against the current working directory, so prefer an absolute path or a `~` prefix for scheduled runs |
 
