@@ -219,10 +219,12 @@ describe('records delete', () => {
   it('refuses without --yes when stdout is redirected', async () => {
     process.stdout.isTTY = false;
     const { confirm } = await import('@inquirer/prompts');
+    const { deleteRecords } = await import('#src/libs/records.js');
 
     await run([UUID_A]);
 
     expect(confirm).not.toHaveBeenCalled();
+    expect(deleteRecords).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 
@@ -304,6 +306,33 @@ describe('records delete', () => {
     await run([UUID_A.toUpperCase(), '--yes']);
 
     expect(deleteRecords).toHaveBeenCalledWith([UUID_A]);
+  });
+
+  it('reports a non-abort prompt failure and deletes nothing', async () => {
+    const { confirm } = await import('@inquirer/prompts');
+    const { deleteRecords } = await import('#src/libs/records.js');
+    vi.mocked(confirm).mockRejectedValue(new Error('tty closed'));
+
+    await run([UUID_A]);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('tty closed'),
+    );
+    expect(deleteRecords).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('counts only what the server confirmed when a chunk deleted fewer than it held', async () => {
+    const { deleteRecords } = await import('#src/libs/records.js');
+    vi.mocked(deleteRecords)
+      .mockResolvedValueOnce(outcome(90))
+      .mockResolvedValueOnce(failedOutcome);
+
+    await run([...makeUuids(150), '--yes']);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Deleted 90 of 150'),
+    );
   });
 
   it('treats Ctrl+C at the prompt as a quiet abort, deleting nothing', async () => {
