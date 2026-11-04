@@ -270,7 +270,48 @@ describe('records delete', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('sends lowercased uuids when given uppercase', async () => {
+    const { deleteRecords } = await import('#src/libs/records.js');
+    vi.mocked(deleteRecords).mockResolvedValue(outcome(1));
+
+    await run([UUID_A.toUpperCase(), '--yes']);
+
+    expect(deleteRecords).toHaveBeenCalledWith([UUID_A]);
+  });
+
+  it('treats Ctrl+C at the prompt as a quiet abort, deleting nothing', async () => {
+    const { confirm } = await import('@inquirer/prompts');
+    const { deleteRecords } = await import('#src/libs/records.js');
+    vi.mocked(confirm).mockRejectedValue(
+      Object.assign(new Error('User force closed'), {
+        name: 'ExitPromptError',
+      }),
+    );
+
+    await run([UUID_A]);
+
+    expect(deleteRecords).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
   describe('--json', () => {
+    it('refuses --json without --yes rather than prompting on stdout', async () => {
+      const { confirm } = await import('@inquirer/prompts');
+      const { deleteRecords } = await import('#src/libs/records.js');
+
+      await run([UUID_A, '--json']);
+
+      const parsed = JSON.parse(
+        vi.mocked(console.error).mock.calls[0][0] as string,
+      );
+      expect(parsed.error).toBe('usage');
+      expect(parsed.message).toContain('--yes');
+      expect(confirm).not.toHaveBeenCalled();
+      expect(deleteRecords).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
     it('prints the deleted and requested counts on success', async () => {
       const { deleteRecords } = await import('#src/libs/records.js');
       vi.mocked(deleteRecords).mockResolvedValue(outcome(2));

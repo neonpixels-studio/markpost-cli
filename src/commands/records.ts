@@ -40,11 +40,11 @@ const DELETE_SUBCOMMAND = 'delete';
 
 export const USAGE = `Usage: markpost records <list|update|delete> [options]
 
-  list           List records, optionally filtered by source, status, or search text
-  update <uuid>  Edit an existing record's title and/or content — requeues it to
-                 pending (for resync) if the record was already synced
+  list              List records, optionally filtered by source, status, or search text
+  update <uuid>     Edit an existing record's title and/or content — requeues it to
+                    pending (for resync) if the record was already synced
   delete <uuid...>  Delete one or more records from the server. Asks to confirm
-                 first (this cannot be undone); pass --yes to skip the prompt
+                    first (this cannot be undone); pass --yes to skip the prompt
 
 List options:
   --source <type>    Filter by source type (markpost reports the valid types if the value is rejected)
@@ -59,7 +59,8 @@ blank — pass a non-empty value):
   --json            Print the updated record as JSON instead of formatted text
 
 Delete options:
-  --yes             Skip the confirmation prompt (required when not running in a terminal)
+  --yes             Skip the confirmation prompt (required when not running in a
+                    terminal, and with --json)
   --json            Print the deleted count as JSON instead of formatted text`;
 
 export const runRecordsCommand = async (args: string[]): Promise<void> => {
@@ -500,8 +501,20 @@ const parseDeleteArgs = (args: string[]): DeleteRecordsArgs => {
 
 // The prompt reads from and renders to a TTY, so a redirected run would hang
 // (or exit 0 without deleting). Refuse up front, matching `sources delete`.
-const nonInteractiveRefusal = (skipConfirm: boolean): string | null => {
-  if (skipConfirm || isInteractiveTerminal()) {
+const nonInteractiveRefusal = (
+  skipConfirm: boolean,
+  json: boolean,
+): string | null => {
+  if (skipConfirm) {
+    return null;
+  }
+
+  // The prompt renders on stdout, which --json reserves for the JSON payload.
+  if (json) {
+    return `\`records ${DELETE_SUBCOMMAND} --json\` needs --yes: the confirmation prompt would corrupt the JSON on stdout.`;
+  }
+
+  if (isInteractiveTerminal()) {
     return null;
   }
 
@@ -690,7 +703,7 @@ const runDeleteCommand = async (
     return;
   }
 
-  const refusal = nonInteractiveRefusal(parsed.skipConfirm);
+  const refusal = nonInteractiveRefusal(parsed.skipConfirm, json);
 
   if (refusal) {
     failWithUsage(refusal, USAGE, json);
@@ -704,6 +717,11 @@ const runDeleteCommand = async (
 
     await deleteRecordsAndReport(parsed, json);
   } catch (error) {
+    // A deliberate Ctrl+C at the prompt is a user abort, not a failure.
+    if (error instanceof Error && error.name === 'ExitPromptError') {
+      return;
+    }
+
     failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
   }
 };
