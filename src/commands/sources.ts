@@ -786,15 +786,19 @@ const applySourceUpdate = async (
   return true;
 };
 
-const hasStoredFieldMapping = (source: Source): boolean =>
-  Object.keys(source.fieldMapping ?? {}).length > 0;
+// Only a mapping the list response reports as null or empty is known-empty;
+// an omitted field is unknown, so the clear is still sent.
+const isKnownEmptyFieldMapping = (source: Source): boolean =>
+  source.fieldMapping === null ||
+  (source.fieldMapping !== undefined &&
+    Object.keys(source.fieldMapping).length === 0);
 
 // Explicit, prompt-free clear of the whole stored mapping. Unlike the
 // interactive flow (where blank means "no change"), the flag is the user's
 // unambiguous intent, so it sends `fieldMapping: null`. A source with nothing
 // stored is left alone rather than sending a no-op PATCH.
 const clearFieldMappingCommand = async (target: Source): Promise<void> => {
-  if (!hasStoredFieldMapping(target)) {
+  if (isKnownEmptyFieldMapping(target)) {
     console.log('Nothing to update: field mapping is already empty.');
     return;
   }
@@ -858,9 +862,13 @@ const updateSourceCommand = async (
     ? await findSourceByUuid(uuid)
     : await promptForSource('update');
 
+  // Scripted use: a mistyped uuid must not look like a successful clear.
+  if (!target && clearFieldMapping) {
+    process.exitCode = 1;
+    return;
+  }
+
   if (!target) {
-    // Scripted use: a mistyped uuid must not look like a successful clear.
-    process.exitCode = clearFieldMapping ? 1 : process.exitCode;
     return;
   }
 
