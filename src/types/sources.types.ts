@@ -115,7 +115,8 @@ export type CreateSourceInput = {
 // routeFolder and fieldMapping updates. Per server/api/sources/[uuid].patch.ts,
 // omitting the key entirely leaves whatever is stored untouched; `null`
 // explicitly clears a stored mapping. The CLI's `sources update` prompt sends
-// `null` when the user removes every stored key with its `-` sentinel (see
+// `null` when the user removes every stored key with its `-` sentinel and the stored
+// mapping holds no keys unknown to this CLI, which are preserved (see
 // promptFieldMapping); an all-blank answer with nothing stored is read as
 // "leave untouched", not "clear".
 export type UpdateSourceInput = {
