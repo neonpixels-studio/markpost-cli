@@ -12,6 +12,7 @@ vi.mock('#src/libs/tokens.js', () => ({
   fetchTokens: vi.fn(),
   createToken: vi.fn(),
   revokeToken: vi.fn(),
+  updateTokenScopes: vi.fn(),
 }));
 vi.mock('@inquirer/prompts', () => ({
   confirm: vi.fn(),
@@ -320,7 +321,9 @@ describe('runTokensCommand', () => {
       expect(checkConfig).not.toHaveBeenCalled();
       expect(createToken).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('--json is only supported by `tokens list`.'),
+        expect.stringContaining(
+          '--json is only supported by `tokens list` and `tokens update`.',
+        ),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -420,6 +423,210 @@ describe('runTokensCommand', () => {
 
       expect(fetchTokens).toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
+    });
+  });
+
+  describe('create --scopes', () => {
+    it('sends the parsed scopes to createToken', async () => {
+      const { createToken } = await import('#src/libs/tokens.js');
+      vi.mocked(createToken).mockResolvedValue(mintedToken);
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand([
+        'create',
+        '--name',
+        'CI token',
+        '--scopes',
+        'records:read, sources:read',
+      ]);
+
+      expect(createToken).toHaveBeenCalledWith({
+        name: 'CI token',
+        expiresInDays: undefined,
+        scopes: ['records:read', 'sources:read'],
+      });
+    });
+
+    it('does not include a scopes key when the flag is omitted', async () => {
+      const { createToken } = await import('#src/libs/tokens.js');
+      vi.mocked(createToken).mockResolvedValue(mintedToken);
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand(['create', '--name', 'CI token']);
+
+      expect(vi.mocked(createToken).mock.calls[0][0]).not.toHaveProperty(
+        'scopes',
+      );
+    });
+
+    it('rejects an unknown scope, listing the valid ones, without calling the API', async () => {
+      const { createToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand([
+        'create',
+        '--name',
+        'CI token',
+        '--scopes',
+        'records:read,bogus:scope',
+      ]);
+
+      expect(createToken).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Unknown scope(s): bogus:scope'),
+      );
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Valid scopes: records:read'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects an empty --scopes value without calling the API', async () => {
+      const { createToken } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand(['create', '--name', 'x', '--scopes', ' , ']);
+
+      expect(createToken).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+  });
+
+  describe('update', () => {
+    it('updates scopes and prints the updated token', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      vi.mocked(updateTokenScopes).mockResolvedValue(scopedToken);
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand([
+        'update',
+        'tok-def-456',
+        '--scopes',
+        'records:read',
+      ]);
+
+      expect(updateTokenScopes).toHaveBeenCalledWith('tok-def-456', {
+        scopes: ['records:read'],
+      });
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Updated token "Read-only token"'),
+      );
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('records:read'),
+      );
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('prints the updated token as JSON with --json', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      vi.mocked(updateTokenScopes).mockResolvedValue({
+        ...scopedToken,
+        token: 'leaked-secret',
+      } as Token);
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand([
+        'update',
+        'tok-def-456',
+        '--scopes',
+        'records:read',
+        '--json',
+      ]);
+
+      const printed = JSON.parse(
+        String(vi.mocked(console.log).mock.calls[0][0]),
+      );
+      expect(printed).toEqual(scopedToken);
+    });
+
+    it('rejects an unknown scope without calling the API', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand(['update', 'tok-1', '--scopes', 'nope']);
+
+      expect(updateTokenScopes).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Unknown scope(s): nope'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('requires --scopes', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand(['update', 'tok-1']);
+
+      expect(updateTokenScopes).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('requires --scopes'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it.each([
+      ['no id', ['update', '--scopes', 'records:read']],
+      ['two ids', ['update', 'a', 'b', '--scopes', 'records:read']],
+      ['blank id', ['update', '  ', '--scopes', 'records:read']],
+    ])('requires exactly one id (%s)', async (_label, args) => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand(args);
+
+      expect(updateTokenScopes).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('takes exactly one id'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('reports a bad scope in the JSON error shape with --json', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand(['update', 'tok-1', '--scopes', 'nope', '--json']);
+
+      expect(updateTokenScopes).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      expect(loggedText()).toContain('Unknown scope(s): nope');
+      expect(() =>
+        JSON.parse(String(vi.mocked(console.error).mock.calls[0][0])),
+      ).not.toThrow();
+    });
+
+    it('reports an API failure in the JSON error shape with --json', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      vi.mocked(updateTokenScopes).mockResolvedValue(null);
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand([
+        'update',
+        'tok-1',
+        '--scopes',
+        'records:read',
+        '--json',
+      ]);
+
+      expect(process.exitCode).toBe(1);
+      expect(() =>
+        JSON.parse(String(vi.mocked(console.error).mock.calls[0][0])),
+      ).not.toThrow();
+      expect(loggedText()).toContain('Failed to update token.');
+    });
+
+    it('exits non-zero when the API call fails', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      vi.mocked(updateTokenScopes).mockResolvedValue(null);
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand(['update', 'tok-1', '--scopes', 'records:read']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to update token.'),
+      );
+      expect(process.exitCode).toBe(1);
     });
   });
 

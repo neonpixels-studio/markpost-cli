@@ -1,4 +1,5 @@
 import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
+import type { ScopeName } from '#src/types/vendor/markpost-scopes.generated.js';
 
 // Mirrors markpost's API token contract by hand (markpost is the source of
 // truth): the resource shape from `tokenSerializer`
@@ -8,11 +9,11 @@ import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 // live inline in the handler files), so this file is the CLI's one hand
 // vendored copy of both.
 //
-// `scopes` is carried as a plain `string[] | null` rather than a strict
-// `ScopeName` union: the CLI only ever displays scopes (list output) and
-// mints full-access tokens (create never sends a `scopes` attribute), so it
-// has no need to validate against markpost's allowlist — that enforcement
-// stays server-side.
+// `scopes` on a read token stays a plain `string[] | null` rather than a
+// strict `ScopeName` union: it is display-only there, and an older token may
+// carry a scope this CLI build predates. Scopes the CLI *sends* (create and
+// update) are validated against the allowlist vendored from markpost by
+// `npm run sync:scopes-contract` (see libs/scopes.ts).
 export type Token = {
   id: string;
   name: string;
@@ -35,14 +36,19 @@ export type CreatedToken = Token & {
 };
 
 // Mirrors markpost's POST /api/tokens mint attributes
-// (server/api/tokens/index.post.ts `MintTokenAttributes`). `scopes` is
-// deliberately omitted: the CLI always mints a full-access token today (the
-// same default a Clerk-session mint gets by omitting the attribute), and
-// exposing a `--scopes` flag is out of scope for this contract to avoid
-// re-deriving markpost's `ScopeName` allowlist by hand.
+// (server/api/tokens/index.post.ts `MintTokenAttributes`). Omitting `scopes`
+// mints a full-access token (the same default a Clerk-session mint gets).
 export type CreateTokenInput = {
   name: string;
   expiresInDays?: number;
+  scopes?: ScopeName[];
+};
+
+// Mirrors PATCH /api/tokens/{id} (server/api/tokens/[id].patch.ts). The
+// handler requires `scopes` to be present; the CLI only ever sends a
+// non-empty list (the handler also accepts null for full access).
+export type UpdateTokenScopesInput = {
+  scopes: ScopeName[];
 };
 
 // The JSON:API resource object markpost's `tokenSerializer` produces:

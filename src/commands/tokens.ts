@@ -1,7 +1,13 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
-import { createToken, fetchTokens, revokeToken } from '#src/libs/tokens.js';
+import {
+  createToken,
+  fetchTokens,
+  revokeToken,
+  updateTokenScopes,
+} from '#src/libs/tokens.js';
+import { parseScopesFlag } from '#src/libs/scopes.js';
 import { checkConfig } from '#src/libs/config.js';
 import { getApiToken } from '#src/libs/api.js';
 import { failWithMessage } from '#src/libs/errors.js';
@@ -16,15 +22,19 @@ import {
 } from '#src/libs/usage.js';
 import { hasJsonFlag, printJson } from '#src/libs/output.js';
 import { CreateTokenInput, Token } from '#src/types/tokens.types.js';
+import type { ScopeName } from '#src/types/vendor/markpost-scopes.generated.js';
 
-export const USAGE = `Usage: markpost tokens <list|create|revoke> [id] [--yes]
+export const USAGE = `Usage: markpost tokens <list|create|update|revoke> [id] [--yes]
 
   list                                             List all API tokens (pass --json for machine-readable output)
-  create --name <name> [--expires-in-days <days>]  Mint a new API token; the raw secret is shown once and cannot be retrieved again
+  create --name <name> [--expires-in-days <days>] [--scopes <a,b>]
+                                                   Mint a new API token; the raw secret is shown once and cannot be retrieved again. Omit --scopes for a full-access token
+  update <id> --scopes <a,b>                       Replace an existing token's scopes without rotating its secret (pass --json for machine-readable output)
   revoke <id>                                      Revoke an API token by id. Asks to confirm first (revoking is irreversible); pass --yes to skip the prompt (for scripts)`;
 
 const LIST_SUBCOMMAND = 'list';
 const CREATE_SUBCOMMAND = 'create';
+const UPDATE_SUBCOMMAND = 'update';
 // `revoke` is the only subcommand `--yes` applies to, so it's named for the
 // guard that rejects the flag elsewhere as well as its handler-map key.
 const REVOKE_SUBCOMMAND = 'revoke';
@@ -48,6 +58,8 @@ const hasYesFlag = (args: string[]): boolean => {
     terminatorIndex === -1 ? args : args.slice(0, terminatorIndex);
   return scanned.includes(YES_FLAG);
 };
+
+const JSON_SUBCOMMANDS = new Set([LIST_SUBCOMMAND, UPDATE_SUBCOMMAND]);
 
 const TOKEN_SECRET_NOTICE =
   'API token (shown once — copy it now, it cannot be retrieved later):';
@@ -181,6 +193,7 @@ const parseCreateArgs = (rest: string[]) =>
     options: {
       name: { type: 'string' },
       'expires-in-days': { type: 'string' },
+      scopes: { type: 'string' },
     },
   });
 
@@ -209,6 +222,18 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
   }
 
   const input: CreateTokenInput = { name: values.name, expiresInDays };
+
+  if (values.scopes !== undefined) {
+    const parsedScopes = parseScopesFlag(values.scopes);
+
+    if (!parsedScopes.ok) {
+      failWithUsage(parsedScopes.message, USAGE);
+      return;
+    }
+
+    input.scopes = parsedScopes.scopes;
+  }
+
   const created = await createToken(input);
 
   if (!created) {
@@ -247,6 +272,85 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
   );
   printToken(tokenFields);
   printTokenSecret(secret);
+};
+
+const parseUpdateArgs = (rest: string[]) =>
+  parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { scopes: { type: 'string' }, json: { type: 'boolean' } },
+  });
+
+type UpdateTokenInvocation = { id: string; scopes: ScopeName[] };
+
+// Validates everything about a `tokens update` invocation that can be checked
+// without a request. Reports the first problem as a usage error and returns
+// null, so the caller never sends a request for a bad invocation.
+const resolveUpdateInvocation = (
+  parsed: ReturnType<typeof parseUpdateArgs>,
+  json: boolean,
+): UpdateTokenInvocation | null => {
+  const [rawId, ...extraPositionals] = parsed.positionals;
+  const id = rawId?.trim();
+
+  if (!id || extraPositionals.length > 0) {
+    failWithUsage(
+      '`tokens update` takes exactly one id: `markpost tokens update <id> --scopes <a,b>`.',
+      USAGE,
+      json,
+    );
+    return null;
+  }
+
+  if (parsed.values.scopes === undefined) {
+    failWithUsage('`tokens update` requires --scopes <a,b>.', USAGE, json);
+    return null;
+  }
+
+  const parsedScopes = parseScopesFlag(parsed.values.scopes);
+
+  if (!parsedScopes.ok) {
+    failWithUsage(parsedScopes.message, USAGE, json);
+    return null;
+  }
+
+  return { id, scopes: parsedScopes.scopes };
+};
+
+const updateTokenCommand = async (
+  rest: string[],
+  json: boolean,
+): Promise<void> => {
+  const parsed = parseOrFailWithUsage(() => parseUpdateArgs(rest), USAGE, json);
+
+  if (!parsed) {
+    return;
+  }
+
+  const invocation = resolveUpdateInvocation(parsed, json);
+
+  if (!invocation) {
+    return;
+  }
+
+  const updated = await updateTokenScopes(invocation.id, {
+    scopes: invocation.scopes,
+  });
+
+  if (!updated) {
+    failWithMessage('Failed to update token.', json);
+    return;
+  }
+
+  if (json) {
+    printJson(serializeTokenForJson(updated));
+    return;
+  }
+
+  console.log(
+    chalk.greenBright(`Updated token "${sanitizeForTerminal(updated.name)}"`),
+  );
+  printToken(updated);
 };
 
 // Fetch the token list and pick one out by id, or null if none matches.
@@ -409,6 +513,7 @@ const TOKENS_HANDLERS = new Map<
 >([
   [LIST_SUBCOMMAND, (rest, json) => listTokensCommand(rest, json)],
   [CREATE_SUBCOMMAND, (rest) => createTokenCommand(rest)],
+  [UPDATE_SUBCOMMAND, (rest, json) => updateTokenCommand(rest, json)],
   [
     REVOKE_SUBCOMMAND,
     (rest, _json, skipConfirm) => revokeTokenCommand(rest, skipConfirm),
@@ -446,11 +551,15 @@ const usageErrorFor = (
   skipConfirm: boolean,
   isInteractive: boolean,
 ): string | null => {
-  // Only `list` renders JSON; reject it elsewhere rather than silently
-  // ignoring it — `tokens create --json` would otherwise "succeed" with human
-  // text on stdout, losing the one-time secret it was trying to capture.
-  if (json && subcommand !== LIST_SUBCOMMAND) {
-    return `--json is only supported by \`tokens ${LIST_SUBCOMMAND}\`.`;
+  // Only `list` and `update` render JSON; reject it elsewhere rather than
+  // silently ignoring it — `tokens create --json` would otherwise "succeed"
+  // with human text on stdout, losing the one-time secret it was trying to
+  // capture.
+  if (json && !JSON_SUBCOMMANDS.has(subcommand)) {
+    const supported = [...JSON_SUBCOMMANDS]
+      .map((name) => `\`tokens ${name}\``)
+      .join(' and ');
+    return `--json is only supported by ${supported}.`;
   }
 
   // --yes only skips the revoke confirmation; reject it elsewhere so a
