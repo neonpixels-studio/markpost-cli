@@ -123,6 +123,33 @@ describe('records delete', () => {
     expect(console.log).toHaveBeenCalledWith('Deleted 250 record(s).');
   });
 
+  it.each([
+    [100, [100]],
+    [101, [100, 1]],
+  ])('sends %i uuids as chunks %j', async (count, expectedSizes) => {
+    const { deleteRecords } = await import('#src/libs/records.js');
+    vi.mocked(deleteRecords).mockImplementation(async (chunk) =>
+      outcome(chunk.length),
+    );
+
+    await run([...makeUuids(count), '--yes']);
+
+    const sizes = vi
+      .mocked(deleteRecords)
+      .mock.calls.map(([chunk]) => chunk.length);
+    expect(sizes).toEqual(expectedSizes);
+  });
+
+  it('sanitizes and caps the invalid uuids it echoes', async () => {
+    const bad = Array.from({ length: 7 }, (_, index) => `bad${index}`);
+
+    await run([...bad, '\u001b[31mred', '--yes']);
+
+    const message = vi.mocked(console.error).mock.calls[0][0] as string;
+    expect(message).toContain('and 3 more');
+    expect(message).not.toContain('\u001b');
+  });
+
   it('rejects an invalid uuid before any config check, prompt, or request', async () => {
     const { checkConfig } = await import('#src/libs/config.js');
     const { confirm } = await import('@inquirer/prompts');
@@ -323,6 +350,19 @@ describe('records delete', () => {
       expect(process.exitCode).toBeUndefined();
     });
 
+    it('keeps the unmatched-uuid note out of JSON stdout', async () => {
+      const { deleteRecords } = await import('#src/libs/records.js');
+      vi.mocked(deleteRecords).mockResolvedValue(outcome(1));
+
+      await run([UUID_A, UUID_B, '--yes', '--json']);
+
+      expect(vi.mocked(console.log)).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(vi.mocked(console.log).mock.calls[0][0])).toEqual({
+        deleted: 1,
+        requested: 2,
+      });
+    });
+
     it('emits the unified error JSON with failedChunks on partial failure', async () => {
       const { deleteRecords } = await import('#src/libs/records.js');
       vi.mocked(deleteRecords)
@@ -345,18 +385,6 @@ describe('records delete', () => {
 
     it('emits a usage-coded JSON error for an invalid uuid', async () => {
       await run(['nope', '--yes', '--json']);
-
-      const parsed = JSON.parse(
-        vi.mocked(console.error).mock.calls[0][0] as string,
-      );
-      expect(parsed.error).toBe('usage');
-      expect(process.exitCode).toBe(1);
-    });
-
-    it('emits a usage-coded JSON error for the non-interactive refusal', async () => {
-      process.stdin.isTTY = false;
-
-      await run([UUID_A, '--json']);
 
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,

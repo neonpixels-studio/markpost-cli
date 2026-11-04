@@ -458,6 +458,21 @@ const runUpdateCommand = async (
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const MAX_INVALID_UUIDS_SHOWN = 5;
+
+// Argv is untrusted (xargs over a file, say): sanitize before echoing it, and
+// cap the list so a large bad input doesn't flood stderr.
+const describeInvalidUuids = (invalid: string[]): string => {
+  const shown = invalid
+    .slice(0, MAX_INVALID_UUIDS_SHOWN)
+    .map((uuid) => `"${sanitizeForTerminal(uuid)}"`)
+    .join(', ');
+  const hidden = invalid.length - MAX_INVALID_UUIDS_SHOWN;
+  const more = hidden > 0 ? ` and ${hidden} more` : '';
+
+  return `Not a valid record uuid: ${shown}${more}. Nothing was deleted.`;
+};
+
 type DeleteRecordsArgs = {
   uuids: string[];
   skipConfirm: boolean;
@@ -491,9 +506,7 @@ const parseDeleteArgs = (args: string[]): DeleteRecordsArgs => {
   const invalid = rawUuids.filter((uuid) => !UUID_PATTERN.test(uuid));
 
   if (invalid.length > 0) {
-    throw new Error(
-      `Not a valid record uuid: ${invalid.map((uuid) => `"${uuid}"`).join(', ')}. Nothing was deleted.`,
-    );
+    throw new Error(describeInvalidUuids(invalid));
   }
 
   return { uuids: dedupeUuids(rawUuids), skipConfirm: Boolean(values.yes) };
@@ -586,6 +599,26 @@ const notAttemptedFailures = (
     reason: NOT_ATTEMPTED_REASON,
   }));
 
+// Folds a chunk's outcome into the run; returns true when the run must stop.
+const recordChunkOutcome = (
+  run: DeleteRun,
+  chunkNumber: number,
+  outcome: ChunkOutcome,
+): boolean => {
+  run.deleted += outcome.deleted;
+
+  if (outcome.failureReason !== null) {
+    run.failures.push({ chunk: chunkNumber, reason: outcome.failureReason });
+  }
+
+  if (!outcome.systemic) {
+    return false;
+  }
+
+  run.failures.push(...notAttemptedFailures(chunkNumber + 1, run.totalChunks));
+  return true;
+};
+
 // Sends one chunk at a time through the shared deleteRecords lib (one chunk is
 // a single request, so the lib's own chunking is a no-op here) because it only
 // reports a whole-run `null` on failure; going chunk by chunk is what lets us
@@ -599,19 +632,9 @@ const deleteInChunks = async (uuids: string[]): Promise<DeleteRun> => {
   };
 
   for (const [index, chunk] of chunks.entries()) {
-    const chunkNumber = index + 1;
     const outcome = await attemptChunk(chunk);
 
-    run.deleted += outcome.deleted;
-
-    if (outcome.failureReason !== null) {
-      run.failures.push({ chunk: chunkNumber, reason: outcome.failureReason });
-    }
-
-    if (outcome.systemic) {
-      run.failures.push(
-        ...notAttemptedFailures(chunkNumber + 1, chunks.length),
-      );
+    if (recordChunkOutcome(run, index + 1, outcome)) {
       return run;
     }
   }
