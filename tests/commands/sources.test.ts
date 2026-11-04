@@ -1417,7 +1417,11 @@ describe('runSourcesCommand', () => {
       const { fetchSources, updateSource } =
         await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
-      vi.mocked(updateSource).mockResolvedValue(mappedSource);
+      const { input, confirm, select } = await import('@inquirer/prompts');
+      vi.mocked(updateSource).mockResolvedValue({
+        ...mappedSource,
+        fieldMapping: null,
+      });
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', 'abc-123', '--clear-field-mapping']);
@@ -1425,6 +1429,9 @@ describe('runSourcesCommand', () => {
       expect(updateSource).toHaveBeenCalledWith('abc-123', {
         fieldMapping: null,
       });
+      expect(input).not.toHaveBeenCalled();
+      expect(confirm).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
     });
 
@@ -1495,6 +1502,9 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['update', 'nope', '--clear-field-mapping']);
 
       expect(updateSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Source not found'),
+      );
       expect(process.exitCode).toBe(1);
     });
 
