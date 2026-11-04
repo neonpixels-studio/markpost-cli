@@ -49,11 +49,16 @@ export const EMAIL_DOMAIN = 'in.markpost.io';
 // stored key can't be cleared with a blank answer; this sentinel removes it.
 const CLEAR_FIELD_MAPPING_KEY_SENTINEL = '-';
 
+// Non-interactive counterpart to the per-key sentinel: `sources update <uuid>
+// --clear-field-mapping` sends `fieldMapping: null`, markpost's explicit
+// "clear the whole stored mapping" value, without opening any prompt.
+const CLEAR_FIELD_MAPPING_FLAG = 'clear-field-mapping';
+
 export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret|test> [uuid]
 
   list                  List all sources (pass --json for machine-readable output)
   create                Create a new source (prompts for details)
-  update [uuid]         Update a source's route folder and/or field mapping; prompts to pick one if uuid is omitted
+  update [uuid]         Update a source's route folder and/or field mapping; prompts to pick one if uuid is omitted. Pass a uuid with --clear-field-mapping to remove the whole stored field mapping without prompting (for scripts)
   delete [uuid]         Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
   rotate-secret [uuid]  Rotate a provider source's signing secret; prompts to pick one if uuid is omitted
   test <uuid>           Preview signature verification and field mapping for a source against a sample payload, without a real delivery (pass --json for machine-readable output, --payload '<json object>' to test against a custom sample instead of the server's default)`;
@@ -103,11 +108,16 @@ const SOURCES_HANDLERS = new Map<
     json: boolean,
     skipConfirm: boolean,
     payload: Record<string, unknown> | undefined,
+    clearFieldMapping: boolean,
   ) => Promise<void>
 >([
   [LIST_SUBCOMMAND, (_uuid, json) => listSources(json)],
   [CREATE_SUBCOMMAND, () => createSourceCommand()],
-  [UPDATE_SUBCOMMAND, (uuid) => updateSourceCommand(uuid)],
+  [
+    UPDATE_SUBCOMMAND,
+    (uuid, _json, _skipConfirm, _payload, clearFieldMapping) =>
+      updateSourceCommand(uuid, clearFieldMapping),
+  ],
   [
     DELETE_SUBCOMMAND,
     (uuid, _json, skipConfirm) => deleteSourceCommand(uuid, skipConfirm),
@@ -137,6 +147,7 @@ const interactiveGuardMessageFor = (
   subcommand: string | undefined,
   uuid: string | undefined,
   skipConfirm: boolean,
+  clearFieldMapping: boolean,
 ): string | null => {
   if (subcommand === DELETE_SUBCOMMAND && !skipConfirm) {
     return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
@@ -146,8 +157,8 @@ const interactiveGuardMessageFor = (
     return `\`sources ${CREATE_SUBCOMMAND}\` needs an interactive terminal — it always prompts for the source details.`;
   }
 
-  if (subcommand === UPDATE_SUBCOMMAND) {
-    return `\`sources ${UPDATE_SUBCOMMAND}\` needs an interactive terminal — it prompts for the route folder and field mapping, and to pick a source when no uuid is given.`;
+  if (subcommand === UPDATE_SUBCOMMAND && !clearFieldMapping) {
+    return `\`sources ${UPDATE_SUBCOMMAND}\` needs an interactive terminal — it prompts for the route folder and field mapping, and to pick a source when no uuid is given; pass a uuid with --${CLEAR_FIELD_MAPPING_FLAG} to clear the field mapping without a prompt.`;
   }
 
   if (subcommand === ROTATE_SECRET_SUBCOMMAND && !uuid) {
@@ -216,6 +227,7 @@ const usageErrorFor = (
   // that would type-check either way and let a malformed --payload pass
   // validation.
   payloadInput: { flag: string | undefined; error: string | undefined },
+  clearFieldMapping: boolean,
 ): string | null => {
   const { flag: payloadFlag, error: payloadError } = payloadInput;
   // Reject --json where it does nothing rather than silently ignoring it:
@@ -268,6 +280,16 @@ const usageErrorFor = (
     return payloadError;
   }
 
+  // --clear-field-mapping only exists to clear a mapping on `update`, and it
+  // skips every prompt, so it needs an explicit uuid (no picker to fall back to).
+  if (clearFieldMapping && subcommand !== UPDATE_SUBCOMMAND) {
+    return `--${CLEAR_FIELD_MAPPING_FLAG} is only supported by \`sources ${UPDATE_SUBCOMMAND}\`.`;
+  }
+
+  if (clearFieldMapping && !uuid) {
+    return `--${CLEAR_FIELD_MAPPING_FLAG} requires a uuid: \`markpost sources ${UPDATE_SUBCOMMAND} <uuid> --${CLEAR_FIELD_MAPPING_FLAG}\`.`;
+  }
+
   // --yes promises a non-interactive delete, so it needs an explicit uuid —
   // without one the picker still opens and a script blocks on it forever.
   if (skipConfirm && !uuid) {
@@ -275,7 +297,12 @@ const usageErrorFor = (
   }
 
   if (!isInteractive) {
-    return interactiveGuardMessageFor(subcommand, uuid, skipConfirm);
+    return interactiveGuardMessageFor(
+      subcommand,
+      uuid,
+      skipConfirm,
+      clearFieldMapping,
+    );
   }
 
   return null;
@@ -295,6 +322,7 @@ const parseSourcesArgs = (
   uuid: string | undefined;
   skipConfirm: boolean;
   payloadFlag: string | undefined;
+  clearFieldMapping: boolean;
 } => {
   const { positionals, values } = parseArgs({
     args,
@@ -303,6 +331,7 @@ const parseSourcesArgs = (
       json: { type: 'boolean' },
       yes: { type: 'boolean' },
       payload: { type: 'string' },
+      [CLEAR_FIELD_MAPPING_FLAG]: { type: 'boolean' },
     },
   });
 
@@ -317,6 +346,7 @@ const parseSourcesArgs = (
     uuid,
     skipConfirm: Boolean(values.yes),
     payloadFlag: values.payload,
+    clearFieldMapping: Boolean(values[CLEAR_FIELD_MAPPING_FLAG]),
   };
 };
 
@@ -337,7 +367,8 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
-  const { subcommand, uuid, skipConfirm, payloadFlag } = parsed;
+  const { subcommand, uuid, skipConfirm, payloadFlag, clearFieldMapping } =
+    parsed;
   // Parsed exactly once, ahead of both the usage check and the handler call —
   // see `parsePayloadFlag`.
   const { payload, error: payloadError } = parsePayloadFlag(payloadFlag);
@@ -367,6 +398,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
     skipConfirm,
     isInteractive,
     { flag: payloadFlag, error: payloadError },
+    clearFieldMapping,
   );
 
   if (usageError) {
@@ -379,7 +411,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    await handler(uuid, json, skipConfirm, payload);
+    await handler(uuid, json, skipConfirm, payload, clearFieldMapping);
   } catch (error) {
     // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
     // that's a user abort, not a command failure, so don't flag it non-zero.
@@ -736,6 +768,39 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
   return null;
 };
 
+const applySourceUpdate = async (
+  target: Source,
+  updateInput: UpdateSourceInput,
+): Promise<void> => {
+  const source = await updateSource(target.uuid, updateInput);
+
+  if (!source) {
+    console.error(chalk.redBright('Failed to update source.'));
+    return;
+  }
+
+  console.log(
+    chalk.greenBright(`Updated source "${sanitizeForTerminal(source.name)}"`),
+  );
+  printSource(source);
+};
+
+const hasStoredFieldMapping = (source: Source): boolean =>
+  Object.keys(source.fieldMapping ?? {}).length > 0;
+
+// Explicit, prompt-free clear of the whole stored mapping. Unlike the
+// interactive flow (where blank means "no change"), the flag is the user's
+// unambiguous intent, so it sends `fieldMapping: null`. A source with nothing
+// stored is left alone rather than sending a no-op PATCH.
+const clearFieldMappingCommand = async (target: Source): Promise<void> => {
+  if (!hasStoredFieldMapping(target)) {
+    console.log('Nothing to update: field mapping is already empty.');
+    return;
+  }
+
+  await applySourceUpdate(target, { fieldMapping: null });
+};
+
 // Prompts for both updatable attributes and sends whichever actually
 // changed in one PATCH. The field-mapping prompt prefills each key with the
 // stored value (`Source.fieldMapping`), so accepting a default keeps that key;
@@ -776,25 +841,23 @@ const promptAndApplyUpdates = async (target: Source): Promise<void> => {
     ...(fieldMapping !== undefined ? { fieldMapping } : {}),
   };
 
-  const source = await updateSource(target.uuid, updateInput);
-
-  if (!source) {
-    console.error(chalk.redBright('Failed to update source.'));
-    return;
-  }
-
-  console.log(
-    chalk.greenBright(`Updated source "${sanitizeForTerminal(source.name)}"`),
-  );
-  printSource(source);
+  await applySourceUpdate(target, updateInput);
 };
 
-const updateSourceCommand = async (uuid?: string): Promise<void> => {
+const updateSourceCommand = async (
+  uuid?: string,
+  clearFieldMapping = false,
+): Promise<void> => {
   const target = uuid
     ? await findSourceByUuid(uuid)
     : await promptForSource('update');
 
   if (!target) {
+    return;
+  }
+
+  if (clearFieldMapping) {
+    await clearFieldMappingCommand(target);
     return;
   }
 
