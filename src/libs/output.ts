@@ -77,6 +77,11 @@ const JSON_FLAG = '--json';
 export const hasJsonFlag = (args: string[]): boolean =>
   args.includes(JSON_FLAG);
 
+// Drops `--json` so a command can parse its subcommand and positionals without
+// the flag shifting them (`--json get` must behave like `get --json`).
+export const withoutJsonFlag = (args: string[]): string[] =>
+  args.filter((token) => token !== JSON_FLAG);
+
 // The single serializer for every `--json` failure. Config, argument/usage,
 // and fetch/result errors all route through here so a script parsing stderr
 // sees one documented shape: `{ "error": <code>, "message": <string>, ... }`.
