@@ -771,18 +771,19 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
 const applySourceUpdate = async (
   target: Source,
   updateInput: UpdateSourceInput,
-): Promise<void> => {
+): Promise<boolean> => {
   const source = await updateSource(target.uuid, updateInput);
 
   if (!source) {
     console.error(chalk.redBright('Failed to update source.'));
-    return;
+    return false;
   }
 
   console.log(
     chalk.greenBright(`Updated source "${sanitizeForTerminal(source.name)}"`),
   );
   printSource(source);
+  return true;
 };
 
 const hasStoredFieldMapping = (source: Source): boolean =>
@@ -798,7 +799,12 @@ const clearFieldMappingCommand = async (target: Source): Promise<void> => {
     return;
   }
 
-  await applySourceUpdate(target, { fieldMapping: null });
+  const updated = await applySourceUpdate(target, { fieldMapping: null });
+
+  // Scripted use: a failed clear must not look like success to the caller.
+  if (!updated) {
+    process.exitCode = 1;
+  }
 };
 
 // Prompts for both updatable attributes and sends whichever actually
@@ -853,6 +859,8 @@ const updateSourceCommand = async (
     : await promptForSource('update');
 
   if (!target) {
+    // Scripted use: a mistyped uuid must not look like a successful clear.
+    process.exitCode = clearFieldMapping ? 1 : process.exitCode;
     return;
   }
 

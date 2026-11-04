@@ -1430,6 +1430,10 @@ describe('runSourcesCommand', () => {
       });
       expect(input).not.toHaveBeenCalled();
       expect(confirm).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Updated source'),
+      );
+      expect(process.exitCode).toBeUndefined();
     });
 
     it('works without an interactive terminal', async () => {
@@ -1475,6 +1479,19 @@ describe('runSourcesCommand', () => {
       await runSourcesCommand(['update', 'abc-123', '--clear-field-mapping']);
 
       expect(console.error).toHaveBeenCalledWith('Failed to update source.');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('exits non-zero when the uuid matches no source', async () => {
+      const { fetchSources, updateSource } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', 'nope', '--clear-field-mapping']);
+
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     });
 
     it('requires a uuid instead of opening the picker', async () => {
@@ -1493,6 +1510,39 @@ describe('runSourcesCommand', () => {
       );
       expect(process.exitCode).toBe(1);
     });
+
+    it('is rejected on `test` even with a uuid', async () => {
+      const { fetchSources } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', '--clear-field-mapping']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '--clear-field-mapping is only supported by `sources update`',
+        ),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it.each(['--yes', '--json', '--payload={}'])(
+      'rejects combining it with %s',
+      async (extraFlag) => {
+        const { updateSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+        await runSourcesCommand([
+          'update',
+          'abc-123',
+          '--clear-field-mapping',
+          extraFlag,
+        ]);
+
+        expect(updateSource).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      },
+    );
 
     it.each(['list', 'create', 'delete', 'rotate-secret'])(
       'is rejected on `%s`',
@@ -1513,24 +1563,6 @@ describe('runSourcesCommand', () => {
         expect(process.exitCode).toBe(1);
       },
     );
-
-    it('leaves blank interactive input as "no change" (clearing stays explicit)', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
-      const { input, confirm } = await import('@inquirer/prompts');
-      vi.mocked(fetchSources).mockResolvedValue([
-        { ...webhookSource, fieldMapping: null },
-      ]);
-      vi.mocked(confirm).mockResolvedValue(true);
-      vi.mocked(input)
-        .mockResolvedValueOnce(webhookSource.routeFolder)
-        .mockResolvedValue('');
-      const { runSourcesCommand } = await import('#src/commands/sources.js');
-
-      await runSourcesCommand(['update', 'abc-123']);
-
-      expect(updateSource).not.toHaveBeenCalled();
-    });
   });
 
   describe('delete', () => {
