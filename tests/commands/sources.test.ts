@@ -1556,6 +1556,219 @@ describe('runSourcesCommand', () => {
     });
   });
 
+  describe('update --clear-field-mapping', () => {
+    it('sends fieldMapping: null with no other attribute and opens no prompt', async () => {
+      const { fetchSources, updateSource } =
+        await import('#src/libs/sources.js');
+      const { input, confirm } = await import('@inquirer/prompts');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      vi.mocked(updateSource).mockResolvedValue({
+        ...mappedSource,
+        fieldMapping: null,
+      });
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123', '--clear-field-mapping']);
+
+      expect(updateSource).toHaveBeenCalledTimes(1);
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: null,
+      });
+      expect(input).not.toHaveBeenCalled();
+      expect(confirm).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('Updated source'),
+      );
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('works without an interactive terminal', async () => {
+      process.stdin.isTTY = false;
+      process.stdout.isTTY = false;
+      const { fetchSources, updateSource } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      const { input, confirm, select } = await import('@inquirer/prompts');
+      vi.mocked(updateSource).mockResolvedValue({
+        ...mappedSource,
+        fieldMapping: null,
+      });
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123', '--clear-field-mapping']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: null,
+      });
+      expect(input).not.toHaveBeenCalled();
+      expect(confirm).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('does not send a no-op PATCH when the source has no stored mapping', async () => {
+      const { fetchSources, updateSource } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, fieldMapping: null },
+      ]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123', '--clear-field-mapping']);
+
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        'Nothing to update: field mapping is already empty.',
+      );
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('treats an empty stored mapping object as already empty', async () => {
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, fieldMapping: {} },
+      ]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123', '--clear-field-mapping']);
+
+      expect(updateSource).not.toHaveBeenCalled();
+    });
+
+    it('sends the clear when the list response omits fieldMapping entirely', async () => {
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
+      const { fieldMapping: _omitted, ...sourceWithoutMapping } = webhookSource;
+      vi.mocked(fetchSources).mockResolvedValue([
+        sourceWithoutMapping as unknown as Source,
+      ]);
+      vi.mocked(updateSource).mockResolvedValue(webhookSource);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123', '--clear-field-mapping']);
+
+      expect(updateSource).toHaveBeenCalledWith('abc-123', {
+        fieldMapping: null,
+      });
+    });
+
+    it('reports a failed update', async () => {
+      const { fetchSources, updateSource } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+      vi.mocked(updateSource).mockResolvedValue(null);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', 'abc-123', '--clear-field-mapping']);
+
+      expect(console.error).toHaveBeenCalledWith('Failed to update source.');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('exits non-zero when the uuid matches no source', async () => {
+      const { fetchSources, updateSource } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', 'nope', '--clear-field-mapping']);
+
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Source not found'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('requires a uuid instead of opening the picker', async () => {
+      const { fetchSources, updateSource } =
+        await import('#src/libs/sources.js');
+      const { select } = await import('@inquirer/prompts');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', '--clear-field-mapping']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
+      expect(updateSource).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--clear-field-mapping requires a uuid'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('is rejected on `test` even with a uuid', async () => {
+      const { fetchSources } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['test', 'abc-123', '--clear-field-mapping']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '--clear-field-mapping is only supported by `sources update`',
+        ),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it.each([
+      ['--yes', '--yes is only supported by'],
+      ['--json', '--json is only supported by'],
+      ['--payload={}', '--payload is only supported by'],
+    ])(
+      'rejects combining it with %s',
+      async (extraFlag, expectedMessage) => {
+        const { updateSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+        await runSourcesCommand([
+          'update',
+          'abc-123',
+          '--clear-field-mapping',
+          extraFlag,
+        ]);
+
+        expect(updateSource).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining(expectedMessage),
+        );
+        expect(process.exitCode).toBe(1);
+      },
+    );
+
+    it('reports the missing uuid, not the interactive guard, on a non-TTY run', async () => {
+      process.stdin.isTTY = false;
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['update', '--clear-field-mapping']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--clear-field-mapping requires a uuid'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it.each(['list', 'create', 'delete', 'rotate-secret'])(
+      'is rejected on `%s`',
+      async (subcommand) => {
+        const { fetchSources, updateSource } =
+          await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+        await runSourcesCommand([subcommand, '--clear-field-mapping']);
+
+        expect(fetchSources).not.toHaveBeenCalled();
+        expect(updateSource).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining(
+            '--clear-field-mapping is only supported by `sources update`',
+          ),
+        );
+        expect(process.exitCode).toBe(1);
+      },
+    );
+  });
+
   describe('delete', () => {
     it('deletes directly by uuid when one is provided and confirmed', async () => {
       const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
