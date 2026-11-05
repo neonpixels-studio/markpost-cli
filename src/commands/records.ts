@@ -1,8 +1,11 @@
 import { parseArgs } from 'node:util';
+import { confirm } from '@inquirer/prompts';
 import chalk from 'chalk';
 import {
+  deleteRecords,
   ERROR_STATUS,
   fetchAllRecords,
+  MAX_DELETE_BATCH_SIZE,
   PENDING_STATUS,
   RecordListFilters,
   updateRecord,
@@ -14,22 +17,34 @@ import {
 } from '#src/libs/api.js';
 import { checkConfig } from '#src/libs/config.js';
 import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
+import {
+  isInteractiveTerminal,
+  sanitizeForTerminal,
+} from '#src/libs/terminal.js';
 import {
   failWithSubcommandUsage,
+  failWithUsage,
   parseOrFailWithUsage,
 } from '#src/libs/usage.js';
-import { hasJsonFlag, printJson } from '#src/libs/output.js';
+import {
+  hasJsonFlag,
+  JSON_ERROR_FETCH_FAILED,
+  printJson,
+  printJsonError,
+} from '#src/libs/output.js';
 import { Record } from '#src/types/records.types.js';
 
 const LIST_SUBCOMMAND = 'list';
 const UPDATE_SUBCOMMAND = 'update';
+const DELETE_SUBCOMMAND = 'delete';
 
-export const USAGE = `Usage: markpost records <list|update> [options]
+export const USAGE = `Usage: markpost records <list|update|delete> [options]
 
-  list           List records, optionally filtered by source, status, or search text
-  update <uuid>  Edit an existing record's title and/or content — requeues it to
-                 pending (for resync) if the record was already synced
+  list              List records, optionally filtered by source, status, or search text
+  update <uuid>     Edit an existing record's title and/or content — requeues it to
+                    pending (for resync) if the record was already synced
+  delete <uuid...>  Delete one or more records from the server. Asks to confirm
+                    first (this cannot be undone); pass --yes to skip the prompt
 
 List options:
   --source <type>    Filter by source type (markpost reports the valid types if the value is rejected)
@@ -41,7 +56,12 @@ Update options (at least one of --title/--content is required; neither may be
 blank — pass a non-empty value):
   --title <text>    New title for the record
   --content <text>  New content for the record
-  --json            Print the updated record as JSON instead of formatted text`;
+  --json            Print the updated record as JSON instead of formatted text
+
+Delete options:
+  --yes             Skip the confirmation prompt (required when not running in a
+                    terminal, and with --json)
+  --json            Print the deleted count as JSON instead of formatted text`;
 
 export const runRecordsCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
@@ -51,6 +71,11 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
 
   if (subcommand === UPDATE_SUBCOMMAND) {
     await runUpdateCommand(args, json);
+    return;
+  }
+
+  if (subcommand === DELETE_SUBCOMMAND) {
+    await runDeleteCommand(args, json);
     return;
   }
 
@@ -423,6 +448,303 @@ const runUpdateCommand = async (
     // classified, actionable message with a non-zero exit rather than the
     // generic "Failed to update record" a null return produces. Sanitize —
     // the message can be server-derived.
+    failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
+  }
+};
+
+// markpost validates every uuid in a bulk DELETE against this shape
+// (server/utils/uuid.ts) and rejects the WHOLE request with a 422 if any one
+// fails, so the CLI checks first and sends nothing rather than fail a chunk.
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const MAX_INVALID_UUIDS_SHOWN = 5;
+
+// Argv is untrusted (xargs over a file, say): sanitize before echoing it, and
+// cap the list so a large bad input doesn't flood stderr.
+const describeInvalidUuids = (invalid: string[]): string => {
+  const shown = invalid
+    .slice(0, MAX_INVALID_UUIDS_SHOWN)
+    .map((uuid) => `"${sanitizeForTerminal(uuid)}"`)
+    .join(', ');
+  const hidden = invalid.length - MAX_INVALID_UUIDS_SHOWN;
+  const more = hidden > 0 ? ` and ${hidden} more` : '';
+
+  return `Not a valid record uuid: ${shown}${more}. Nothing was deleted.`;
+};
+
+type DeleteRecordsArgs = {
+  uuids: string[];
+  skipConfirm: boolean;
+};
+
+// Lowercases before deduping so the same record typed in two cases counts
+// once; markpost generates lowercase uuids.
+const dedupeUuids = (uuids: string[]): string[] => [
+  ...new Set(uuids.map((uuid) => uuid.toLowerCase())),
+];
+
+// positionals[0] is the `delete` subcommand itself, mirroring parseUpdateArgs.
+const parseDeleteArgs = (args: string[]): DeleteRecordsArgs => {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      yes: { type: 'boolean' },
+      json: { type: 'boolean' },
+    },
+  });
+
+  const [, ...rawUuids] = positionals;
+
+  if (rawUuids.length === 0) {
+    throw new Error(
+      'No uuid given. Usage: markpost records delete <uuid...> [--yes]',
+    );
+  }
+
+  const invalid = rawUuids.filter((uuid) => !UUID_PATTERN.test(uuid));
+
+  if (invalid.length > 0) {
+    throw new Error(describeInvalidUuids(invalid));
+  }
+
+  return { uuids: dedupeUuids(rawUuids), skipConfirm: Boolean(values.yes) };
+};
+
+// The prompt reads from and renders to a TTY, so a redirected run would hang
+// (or exit 0 without deleting). Refuse up front, matching `sources delete`.
+const nonInteractiveRefusal = (
+  skipConfirm: boolean,
+  json: boolean,
+): string | null => {
+  if (skipConfirm) {
+    return null;
+  }
+
+  // The prompt renders on stdout, which --json reserves for the JSON payload.
+  if (json) {
+    return `\`records ${DELETE_SUBCOMMAND} --json\` needs --yes: the confirmation prompt would corrupt the JSON on stdout.`;
+  }
+
+  if (isInteractiveTerminal()) {
+    return null;
+  }
+
+  return `\`records ${DELETE_SUBCOMMAND}\` needs an interactive terminal to confirm; pass --yes (\`markpost records ${DELETE_SUBCOMMAND} <uuid...> --yes\`) to delete without a prompt.`;
+};
+
+const confirmRecordDeletion = (count: number): Promise<boolean> =>
+  confirm({
+    message: `Delete ${count} record(s)? This cannot be undone.`,
+    default: false,
+  });
+
+type ChunkFailure = { chunk: number; reason: string };
+
+type DeleteRun = {
+  deleted: number;
+  totalChunks: number;
+  failures: ChunkFailure[];
+};
+
+const chunkUuids = (uuids: string[]): string[][] => {
+  const chunks: string[][] = [];
+
+  for (let start = 0; start < uuids.length; start += MAX_DELETE_BATCH_SIZE) {
+    chunks.push(uuids.slice(start, start + MAX_DELETE_BATCH_SIZE));
+  }
+
+  return chunks;
+};
+
+const NOT_ATTEMPTED_REASON = 'not attempted after an earlier systemic failure';
+
+type ChunkOutcome = {
+  deleted: number;
+  failureReason: string | null;
+  // A thrown systemic failure (auth/5xx/timeout) would recur on every later
+  // chunk, so the run stops; a plain failure leaves later chunks to try.
+  systemic: boolean;
+};
+
+const attemptChunk = async (chunk: string[]): Promise<ChunkOutcome> => {
+  try {
+    const { meta } = await deleteRecords(chunk);
+
+    if (meta) {
+      return { deleted: meta.deleted, failureReason: null, systemic: false };
+    }
+
+    return {
+      deleted: 0,
+      failureReason: 'the request failed',
+      systemic: false,
+    };
+  } catch (error) {
+    return {
+      deleted: 0,
+      failureReason: sanitizeForTerminal(describeApiError(error)),
+      systemic: true,
+    };
+  }
+};
+
+const notAttemptedFailures = (
+  fromChunk: number,
+  totalChunks: number,
+): ChunkFailure[] =>
+  Array.from({ length: totalChunks - fromChunk + 1 }, (_, offset) => ({
+    chunk: fromChunk + offset,
+    reason: NOT_ATTEMPTED_REASON,
+  }));
+
+// Folds a chunk's outcome into the run; returns true when the run must stop.
+const recordChunkOutcome = (
+  run: DeleteRun,
+  chunkNumber: number,
+  outcome: ChunkOutcome,
+): boolean => {
+  run.deleted += outcome.deleted;
+
+  if (outcome.failureReason !== null) {
+    run.failures.push({ chunk: chunkNumber, reason: outcome.failureReason });
+  }
+
+  if (!outcome.systemic) {
+    return false;
+  }
+
+  run.failures.push(...notAttemptedFailures(chunkNumber + 1, run.totalChunks));
+  return true;
+};
+
+// Sends one chunk at a time through the shared deleteRecords lib (one chunk is
+// a single request, so the lib's own chunking is a no-op here) because it only
+// reports a whole-run `null` on failure; going chunk by chunk is what lets us
+// name WHICH chunk failed.
+const deleteInChunks = async (uuids: string[]): Promise<DeleteRun> => {
+  const chunks = chunkUuids(uuids);
+  const run: DeleteRun = {
+    deleted: 0,
+    totalChunks: chunks.length,
+    failures: [],
+  };
+
+  for (const [index, chunk] of chunks.entries()) {
+    const outcome = await attemptChunk(chunk);
+
+    if (recordChunkOutcome(run, index + 1, outcome)) {
+      return run;
+    }
+  }
+
+  return run;
+};
+
+const describeChunkFailures = (run: DeleteRun): string =>
+  run.failures
+    .map(
+      ({ chunk, reason }) => `chunk ${chunk} of ${run.totalChunks} (${reason})`,
+    )
+    .join('; ');
+
+const reportDeleteFailure = (
+  run: DeleteRun,
+  requested: number,
+  json: boolean,
+): void => {
+  const message = `Deleted ${run.deleted} of ${requested} requested record(s). Failed: ${describeChunkFailures(run)}. Each chunk holds up to ${MAX_DELETE_BATCH_SIZE} uuids; re-run to retry (already-deleted uuids are harmless to resend).`;
+
+  if (!json) {
+    failWithMessage(message);
+    return;
+  }
+
+  process.exitCode = 1;
+  printJsonError(JSON_ERROR_FETCH_FAILED, message, {
+    deleted: run.deleted,
+    requested,
+    failedChunks: run.failures,
+  });
+};
+
+// markpost's DELETE /api/records returns `{ meta: { deleted } }`, the count of
+// rows actually removed, so it can be lower than `requested` when a uuid does
+// not exist or belongs to someone else; that is reported, not treated as an error.
+const reportDeleteSuccess = (
+  deleted: number,
+  requested: number,
+  json: boolean,
+): void => {
+  if (json) {
+    printJson({ deleted, requested });
+    return;
+  }
+
+  console.log(chalk.greenBright(`Deleted ${deleted} record(s).`));
+
+  if (deleted < requested) {
+    console.log(
+      chalk.yellow(
+        `${requested - deleted} of ${requested} requested uuid(s) matched no record.`,
+      ),
+    );
+  }
+};
+
+const deleteRecordsAndReport = async (
+  { uuids, skipConfirm }: DeleteRecordsArgs,
+  json: boolean,
+): Promise<void> => {
+  const confirmed = skipConfirm || (await confirmRecordDeletion(uuids.length));
+
+  if (!confirmed) {
+    console.log('Deletion cancelled.');
+    return;
+  }
+
+  const run = await deleteInChunks(uuids);
+
+  if (run.failures.length > 0) {
+    reportDeleteFailure(run, uuids.length, json);
+    return;
+  }
+
+  reportDeleteSuccess(run.deleted, uuids.length, json);
+};
+
+// `delete <uuid...>` is the explicit counterpart to the sync's auto-delete:
+// removing stray records without the web UI.
+const runDeleteCommand = async (
+  args: string[],
+  json: boolean,
+): Promise<void> => {
+  const parsed = parseOrFailWithUsage(() => parseDeleteArgs(args), USAGE, json);
+
+  if (!parsed) {
+    return;
+  }
+
+  const refusal = nonInteractiveRefusal(parsed.skipConfirm, json);
+
+  if (refusal) {
+    failWithUsage(refusal, USAGE, json);
+    return;
+  }
+
+  try {
+    if (!(await checkConfig(json))) {
+      return;
+    }
+
+    await deleteRecordsAndReport(parsed, json);
+  } catch (error) {
+    // A deliberate Ctrl+C at the prompt is a user abort, not a failure.
+    if (error instanceof Error && error.name === 'ExitPromptError') {
+      return;
+    }
+
     failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
   }
 };
