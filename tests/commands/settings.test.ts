@@ -390,4 +390,161 @@ describe('settings set', () => {
     );
     expect(process.exitCode).toBe(1);
   });
+
+  describe('get --json', () => {
+    const printedJson = () => {
+      const [[output]] = vi.mocked(console.log).mock.calls;
+      return JSON.parse(String(output));
+    };
+    const errorJson = () => {
+      const [[output]] = vi.mocked(console.error).mock.calls;
+      return JSON.parse(String(output));
+    };
+
+    it('prints the settings with the contract attribute names as parseable JSON', async () => {
+      const { fetchSettings } = await import('#src/libs/settings.js');
+      vi.mocked(fetchSettings).mockResolvedValue({
+        ok: true,
+        settings: mockSettings,
+      });
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['get', '--json']);
+
+      expect(console.log).toHaveBeenCalledTimes(1);
+      expect(printedJson()).toEqual({
+        autoSync: true,
+        autoDelete: false,
+        frontmatter: true,
+        conflictStrategy: 'overwrite',
+      });
+    });
+
+    it('prints markpost defaults as JSON (no prose) when no settings row is saved', async () => {
+      const { fetchSettings } = await import('#src/libs/settings.js');
+      vi.mocked(fetchSettings).mockResolvedValue({ ok: true, settings: null });
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['get', '--json']);
+
+      expect(printedJson()).toEqual({
+        autoSync: true,
+        autoDelete: true,
+        frontmatter: true,
+        conflictStrategy: 'suffix',
+      });
+    });
+
+    it('does not leak fields outside the settings contract the CLI models', async () => {
+      const { fetchSettings } = await import('#src/libs/settings.js');
+      vi.mocked(fetchSettings).mockResolvedValue({
+        ok: true,
+        settings: mockSettings,
+      });
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['get', '--json']);
+
+      expect(Object.keys(printedJson()).sort()).toEqual([
+        'autoDelete',
+        'autoSync',
+        'conflictStrategy',
+        'frontmatter',
+      ]);
+    });
+
+    it('passes --json to the config check so a missing value fails as JSON, not a prompt', async () => {
+      const { checkConfig } = await import('#src/libs/config.js');
+      const { fetchSettings } = await import('#src/libs/settings.js');
+      vi.mocked(checkConfig).mockResolvedValueOnce(false);
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['get', '--json']);
+
+      expect(checkConfig).toHaveBeenCalledWith(true);
+      expect(fetchSettings).not.toHaveBeenCalled();
+    });
+
+    it('fails as a JSON error on stderr with empty stdout when the read fails', async () => {
+      const { fetchSettings } = await import('#src/libs/settings.js');
+      vi.mocked(fetchSettings).mockResolvedValue({ ok: false });
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['get', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      const [[errorOutput]] = vi.mocked(console.error).mock.calls;
+      expect(JSON.parse(String(errorOutput)).error).toBe('fetch_failed');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('still rejects stray positionals alongside --json', async () => {
+      const { fetchSettings } = await import('#src/libs/settings.js');
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['get', 'autoSync', '--json']);
+
+      expect(fetchSettings).not.toHaveBeenCalled();
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson().error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --json on set without calling the API', async () => {
+      const { updateSettings } = await import('#src/libs/settings.js');
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['set', 'autoSync=true', '--json']);
+
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson().error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('accepts --json before the subcommand', async () => {
+      const { fetchSettings } = await import('#src/libs/settings.js');
+      vi.mocked(fetchSettings).mockResolvedValue({
+        ok: true,
+        settings: mockSettings,
+      });
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['--json', 'get']);
+
+      expect(printedJson().conflictStrategy).toBe('overwrite');
+    });
+
+    it('reports an unknown subcommand as a JSON usage error', async () => {
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['bogus', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson().error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('reports a missing subcommand as a JSON usage error', async () => {
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson().error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('reports a thrown handler error as a JSON error on stderr', async () => {
+      const { fetchSettings } = await import('#src/libs/settings.js');
+      vi.mocked(fetchSettings).mockRejectedValue(new Error('boom'));
+      const { runSettingsCommand } = await import('#src/commands/settings.js');
+
+      await runSettingsCommand(['get', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson()).toMatchObject({ error: 'fetch_failed', message: 'boom' });
+      expect(process.exitCode).toBe(1);
+    });
+  });
 });
