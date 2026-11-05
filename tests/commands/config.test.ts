@@ -325,4 +325,152 @@ describe('runConfigCommand', () => {
     expect(mockSetConfigValue).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
+
+  describe('get --json', () => {
+    const printedJson = () => {
+      const [[output]] = vi.mocked(console.log).mock.calls;
+      return JSON.parse(String(output));
+    };
+    const errorJson = () => {
+      const [[output]] = vi.mocked(console.error).mock.calls;
+      return JSON.parse(String(output));
+    };
+
+    it('prints every key as one parseable JSON object', async () => {
+      storeAllValues();
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['get', '--json']);
+
+      expect(console.log).toHaveBeenCalledTimes(1);
+      expect(printedJson()).toEqual({
+        apiToken: 'sk_a****wxyz',
+        outputDirectory: STORED_DIRECTORY,
+      });
+    });
+
+    it('never prints the token in full, only the human-output mask', async () => {
+      storeAllValues();
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['get', '--json']);
+
+      const everything = [
+        ...vi.mocked(console.log).mock.calls,
+        ...vi.mocked(console.error).mock.calls,
+      ]
+        .flat()
+        .map(String)
+        .join('\n');
+      expect(everything).not.toContain(LONG_TOKEN);
+    });
+
+    it('fully masks a short token', async () => {
+      mockGetConfigValue.mockReturnValue(SHORT_TOKEN);
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['get', 'apiToken', '--json']);
+
+      expect(printedJson()).toEqual({ apiToken: '****' });
+    });
+
+    it('prints only the requested key, wherever --json sits', async () => {
+      storeAllValues();
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['--json', 'get', 'outputDirectory']);
+
+      expect(printedJson()).toEqual({ outputDirectory: STORED_DIRECTORY });
+    });
+
+    it('uses null for unset values', async () => {
+      mockGetConfigValue.mockReturnValue(undefined);
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['get', '--json']);
+
+      expect(printedJson()).toEqual({ apiToken: null, outputDirectory: null });
+    });
+
+    it('reports an unknown key as a JSON usage error on stderr with nothing on stdout', async () => {
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['get', 'bogus', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      const [[errorOutput]] = vi.mocked(console.error).mock.calls;
+      expect(JSON.parse(String(errorOutput)).error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('reports a store read failure as a JSON error without leaking the token', async () => {
+      mockGetConfigValue.mockImplementation(() => {
+        throw new Error('disk gone');
+      });
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['get', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      const [[errorOutput]] = vi.mocked(console.error).mock.calls;
+      expect(JSON.parse(String(errorOutput)).error).toBe('fetch_failed');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --json on set without storing "--json" as a value', async () => {
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['set', 'apiToken', '--json']);
+
+      expect(mockSetConfigValue).not.toHaveBeenCalled();
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson().error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --json on path', async () => {
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['path', '--json']);
+
+      expect(mockGetConfigPath).not.toHaveBeenCalled();
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson().error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('reports an unknown or missing subcommand as a JSON usage error', async () => {
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['bogus', '--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson().error).toBe('usage');
+      expect(errorJson().message).toContain('Unknown subcommand');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('reports a missing subcommand as a JSON usage error', async () => {
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['--json']);
+
+      expect(console.log).not.toHaveBeenCalled();
+      expect(errorJson().error).toBe('usage');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('does not echo a corrupt-config parse error that embeds the token', async () => {
+      mockGetConfigValue.mockImplementation(() => {
+        throw new SyntaxError(`"${LONG_TOKEN}" is not valid JSON`);
+      });
+      const runConfigCommand = await importCommand();
+
+      await runConfigCommand(['get', '--json']);
+
+      const stderr = vi.mocked(console.error).mock.calls.flat().join('\n');
+      expect(stderr).not.toContain(LONG_TOKEN);
+      expect(errorJson().error).toBe('fetch_failed');
+    });
+  });
 });

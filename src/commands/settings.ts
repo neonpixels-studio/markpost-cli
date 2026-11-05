@@ -8,6 +8,8 @@ import {
 } from '#src/libs/settings.js';
 import { checkConfig } from '#src/libs/config.js';
 import { failWithSubcommandUsage, failWithUsage } from '#src/libs/usage.js';
+import { failWithMessage, messageFromError } from '#src/libs/errors.js';
+import { hasJsonFlag, printJson, withoutJsonFlag } from '#src/libs/output.js';
 import {
   CONFLICT_STRATEGIES,
   ConflictStrategy,
@@ -47,9 +49,13 @@ const SETTABLE_KEYS_USAGE = [
   `    ${CONFLICT_STRATEGY_KEY.padEnd(KEY_LABEL_WIDTH)}${CONFLICT_STRATEGIES.join('|')}`,
 ].join('\n');
 
-export const USAGE = `Usage: markpost settings <get|set> [key=value ...]
+const GET_SUBCOMMAND = 'get';
+const JSON_ONLY_ON_GET_MESSAGE = '--json is only supported by `settings get`.';
 
-  get              Print the current server-side sync settings
+export const USAGE = `Usage: markpost settings <get|set> [key=value ...] [--json]
+
+  get [--json]     Print the current server-side sync settings; --json prints
+                   machine-readable output
   set <key=value>  Update one or more settings, e.g.
                    markpost settings set autoDelete=false conflictStrategy=overwrite
 
@@ -208,9 +214,28 @@ const printSettings = (settings: ResolvedSyncSettings): void => {
   console.log(`  conflictStrategy: ${settings.conflictStrategy}`);
 };
 
-const getSettings = async (rest: string[]): Promise<void> => {
+// Keys mirror markpost's settings contract attribute names (`frontmatter`,
+// not the CLI-internal `includeFrontmatter`) so a script reads the same field
+// names the API and `settings set` use.
+type SettingsJson = {
+  autoSync: boolean;
+  autoDelete: boolean;
+  frontmatter: boolean;
+  conflictStrategy: ConflictStrategy;
+};
+
+const serializeSettingsForJson = (
+  settings: ResolvedSyncSettings,
+): SettingsJson => ({
+  autoSync: settings.autoSync,
+  autoDelete: settings.autoDelete,
+  frontmatter: settings.includeFrontmatter,
+  conflictStrategy: settings.conflictStrategy,
+});
+
+const getSettings = async (rest: string[], json: boolean): Promise<void> => {
   if (rest.length > 0) {
-    failWithUsage('`settings get` takes no arguments.', USAGE);
+    failWithUsage('`settings get` takes no arguments.', USAGE, json);
     return;
   }
 
@@ -220,8 +245,12 @@ const getSettings = async (rest: string[]): Promise<void> => {
   // explicit `settings get` must fail loud — reporting made-up defaults as the
   // server's current settings would mislead the user about what's stored.
   if (!result.ok) {
-    console.error(chalk.redBright('Could not read settings from the server.'));
-    process.exitCode = 1;
+    failWithMessage('Could not read settings from the server.', json);
+    return;
+  }
+
+  if (json) {
+    printJson(serializeSettingsForJson(resolveSyncSettings(result)));
     return;
   }
 
@@ -272,29 +301,45 @@ const setSettings = async (rest: string[]): Promise<void> => {
 // Membership check and handler come from the same Map, so a valid subcommand
 // always has a handler. A Map (not an object) keeps a subcommand named
 // "toString" from resolving to a prototype member.
-const SETTINGS_HANDLERS = new Map<string, (rest: string[]) => Promise<void>>([
-  ['get', (rest) => getSettings(rest)],
+const SETTINGS_HANDLERS = new Map<
+  string,
+  (rest: string[], json: boolean) => Promise<void>
+>([
+  [GET_SUBCOMMAND, (rest, json) => getSettings(rest, json)],
   ['set', (rest) => setSettings(rest)],
 ]);
 
 export const runSettingsCommand = async (args: string[]): Promise<void> => {
-  const [subcommand, ...rest] = args;
+  const json = hasJsonFlag(args);
+  const [subcommand, ...rest] = withoutJsonFlag(args);
   const handler = SETTINGS_HANDLERS.get(subcommand);
 
   // Validate before the config check so a bad subcommand fails on usage alone,
   // without needing a configured account (mirrors `sources`).
   if (!handler) {
-    failWithSubcommandUsage(subcommand, USAGE);
+    failWithSubcommandUsage(subcommand, USAGE, json);
+    return;
+  }
+
+  // `set` has no JSON rendering, so reject the flag rather than let a script
+  // piping `set --json` silently get human text.
+  if (json && subcommand !== GET_SUBCOMMAND) {
+    failWithUsage(JSON_ONLY_ON_GET_MESSAGE, USAGE, json);
     return;
   }
 
   try {
-    if (!(await checkConfig())) {
+    if (!(await checkConfig(json))) {
       return;
     }
 
-    await handler(rest);
+    await handler(rest, json);
   } catch (error) {
+    if (json) {
+      failWithMessage(messageFromError(error), json);
+      return;
+    }
+
     console.error(chalk.redBright(error));
     process.exitCode = 1;
   }

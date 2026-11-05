@@ -577,6 +577,34 @@ const fieldMappingPromptMessage = (
   return `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — ${skipHint}`;
 };
 
+// Keys stored on the source that this CLI version has no prompt for (e.g. one
+// added upstream after this release). markpost's PATCH replaces fieldMapping
+// wholesale, so omitting them would silently delete them. Values are passed
+// through untouched: markpost only types the recognized keys (as strings), so
+// an unknown key's value is whatever JSON the server stored.
+const unknownFieldMappingEntries = (
+  current: FieldMappingConfig | null,
+): [string, unknown][] => {
+  const knownKeys: readonly string[] = FIELD_MAPPING_KEYS;
+
+  return Object.entries(current ?? {}).filter(
+    ([key]) => !knownKeys.includes(key),
+  );
+};
+
+const announcePreservedFieldMappingKeys = (
+  unknownEntries: [string, unknown][],
+): void => {
+  if (unknownEntries.length === 0) {
+    return;
+  }
+
+  const keys = unknownEntries.map(([key]) => sanitizeForTerminal(key));
+  console.log(
+    `Preserved fields not editable in this CLI version: ${keys.join(', ')}`,
+  );
+};
+
 // One prompt per key markpost's field-mapping contract recognizes (see
 // FIELD_MAPPING_KEYS in src/types/sources.types.ts), in the same order
 // markpost's own FieldMappingModal.vue presents them. Answers are collected
@@ -584,10 +612,13 @@ const fieldMappingPromptMessage = (
 // blank answer is dropped without nesting an `if` inside the `for` — matching
 // the server's own normalization (server/utils/fieldMappingValidation.ts's
 // normalizeAndValidate), which likewise drops anything blank rather than
-// storing it.
+// storing it. Stored keys the CLI has no prompt for are carried through as-is.
 const collectFieldMapping = async (
   current: FieldMappingConfig | null = null,
 ): Promise<FieldMappingConfig> => {
+  const unknownEntries = unknownFieldMappingEntries(current);
+  announcePreservedFieldMappingKeys(unknownEntries);
+
   const answers: [FieldMappingKey, string][] = [];
 
   for (const key of FIELD_MAPPING_KEYS) {
@@ -601,9 +632,10 @@ const collectFieldMapping = async (
     answers.push([key, resolveFieldMappingAnswer(answer, current?.[key])]);
   }
 
-  return Object.fromEntries(
-    answers.filter(([, value]) => value.length > 0),
-  ) as FieldMappingConfig;
+  return Object.fromEntries([
+    ...answers.filter(([, value]) => value.length > 0),
+    ...unknownEntries,
+  ]) as FieldMappingConfig;
 };
 
 // Re-accepting every prefilled default yields the stored mapping verbatim;
@@ -620,7 +652,8 @@ const isSameFieldMapping = (
 // so it stays behind an explicit opt-in rather than always asking six more
 // questions up front. Returns undefined (do not send) when declined, when every
 // answer came back blank, or when the answers equal the stored mapping; null
-// (clear) when every stored key was removed with the sentinel; otherwise the
+// (clear) when every stored key was removed with the sentinel and no stored
+// key outside FIELD_MAPPING_KEYS remains (those are preserved); otherwise the
 // replacement mapping. markpost's PATCH/POST handlers treat a supplied
 // fieldMapping as the complete replacement for whatever is stored (there is
 // no per-key merge; see server/api/sources/[uuid].patch.ts and
@@ -650,8 +683,9 @@ const promptFieldMapping = async (
     return undefined;
   }
 
-  // Every stored key was removed with the clear sentinel: send an explicit
-  // `null` (markpost's "clear the mapping" value) rather than dropping it.
+  // Every stored key was removed with the clear sentinel (and none are
+  // preserved unknown keys): send an explicit `null`
+  // (markpost's "clear the mapping" value) rather than dropping it.
   return Object.keys(fieldMapping).length === 0 ? null : fieldMapping;
 };
 
