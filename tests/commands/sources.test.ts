@@ -1260,6 +1260,177 @@ describe('runSourcesCommand', () => {
       });
     });
 
+    describe('unknown stored field-mapping keys', () => {
+      const unknownKeysSource: Source = {
+        ...webhookSource,
+        fieldMapping: {
+          title: 'data.subject',
+          content: 'data.body',
+          futureKey: 'data.future',
+          nestedFuture: { depth: ['x', 1] },
+        } as Source['fieldMapping'],
+      };
+
+      const answerPrompts = async (answers: string[]) => {
+        const { fetchSources, updateSource } =
+          await import('#src/libs/sources.js');
+        const { input, confirm } = await import('@inquirer/prompts');
+        vi.mocked(fetchSources).mockResolvedValue([unknownKeysSource]);
+        vi.mocked(confirm).mockResolvedValue(true);
+        vi.mocked(input).mockResolvedValueOnce(unknownKeysSource.routeFolder);
+        answers.forEach((answer) => {
+          vi.mocked(input).mockResolvedValueOnce(answer);
+        });
+        vi.mocked(updateSource).mockResolvedValue(unknownKeysSource);
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
+        await runSourcesCommand(['update', 'abc-123']);
+
+        return updateSource;
+      };
+
+      it('carries unknown keys through unchanged when a known key is edited, and says so once', async () => {
+        const updateSource = await answerPrompts([
+          'data.newtitle',
+          'data.body',
+          '',
+          '',
+          '',
+          '',
+        ]);
+
+        expect(updateSource).toHaveBeenCalledWith('abc-123', {
+          fieldMapping: {
+            title: 'data.newtitle',
+            content: 'data.body',
+            futureKey: 'data.future',
+            nestedFuture: { depth: ['x', 1] },
+          },
+        });
+        const preservedMessages = vi
+          .mocked(console.log)
+          .mock.calls.filter(([message]) =>
+            String(message).includes('Preserved fields not editable'),
+          );
+        expect(preservedMessages).toHaveLength(1);
+        expect(preservedMessages[0][0]).toContain('futureKey, nestedFuture');
+      });
+
+      it('still clears a known key with the sentinel while keeping unknown keys', async () => {
+        const updateSource = await answerPrompts([
+          'data.subject',
+          '-',
+          '',
+          '',
+          '',
+          '',
+        ]);
+
+        expect(updateSource).toHaveBeenCalledWith('abc-123', {
+          fieldMapping: {
+            title: 'data.subject',
+            futureKey: 'data.future',
+            nestedFuture: { depth: ['x', 1] },
+          },
+        });
+      });
+
+      it('keeps unknown keys when every known key is cleared (never sends null)', async () => {
+        const updateSource = await answerPrompts(['-', '-', '', '', '', '']);
+
+        expect(updateSource).toHaveBeenCalledWith('abc-123', {
+          fieldMapping: {
+            futureKey: 'data.future',
+            nestedFuture: { depth: ['x', 1] },
+          },
+        });
+      });
+
+      it('sanitizes terminal control characters in unknown key names in the notice', async () => {
+        const control = String.fromCharCode(0x1b);
+        const { fetchSources } = await import('#src/libs/sources.js');
+        const { input, confirm } = await import('@inquirer/prompts');
+        vi.mocked(fetchSources).mockResolvedValue([
+          {
+            ...webhookSource,
+            fieldMapping: {
+              [`evil${control}[31mkey`]: 'x',
+            } as Source['fieldMapping'],
+          },
+        ]);
+        vi.mocked(confirm).mockResolvedValue(true);
+        vi.mocked(input)
+          .mockResolvedValueOnce(webhookSource.routeFolder)
+          .mockResolvedValue('');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+        await runSourcesCommand(['update', 'abc-123']);
+
+        const notice = vi
+          .mocked(console.log)
+          .mock.calls.map(([message]) => String(message))
+          .find((message) => message.includes('Preserved fields'));
+        expect(notice).toBeDefined();
+        expect(notice).not.toContain(control);
+        expect(notice).toContain('evil');
+        expect(notice).toContain('key');
+      });
+
+      it('sends nothing when every default is re-accepted, whatever the stored key order', async () => {
+        const { fetchSources, updateSource } =
+          await import('#src/libs/sources.js');
+        const { input, confirm } = await import('@inquirer/prompts');
+        vi.mocked(fetchSources).mockResolvedValue([
+          {
+            ...webhookSource,
+            fieldMapping: {
+              futureKey: 'data.future',
+              title: 'data.subject',
+            } as Source['fieldMapping'],
+          },
+        ]);
+        vi.mocked(confirm).mockResolvedValue(true);
+        vi.mocked(input)
+          .mockResolvedValueOnce(webhookSource.routeFolder)
+          .mockResolvedValueOnce('data.subject')
+          .mockResolvedValue('');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+        await runSourcesCommand(['update', 'abc-123']);
+
+        expect(updateSource).not.toHaveBeenCalled();
+      });
+
+      it('prints no notice when the stored mapping has only known keys', async () => {
+        const { fetchSources } = await import('#src/libs/sources.js');
+        const { input, confirm } = await import('@inquirer/prompts');
+        vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
+        vi.mocked(confirm).mockResolvedValue(true);
+        vi.mocked(input)
+          .mockResolvedValueOnce(mappedSource.routeFolder)
+          .mockResolvedValue('');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+        await runSourcesCommand(['update', 'abc-123']);
+
+        expect(console.log).not.toHaveBeenCalledWith(
+          expect.stringContaining('Preserved fields'),
+        );
+      });
+
+      it('sends nothing on re-accept when a preserved value is a nested object', async () => {
+        const updateSource = await answerPrompts([
+          'data.subject',
+          'data.body',
+          '',
+          '',
+          '',
+          '',
+        ]);
+
+        expect(updateSource).not.toHaveBeenCalled();
+      });
+    });
+
     it('sanitizes a hostile stored value passed as a prompt default and keeps the blank-to-skip hint for unset keys', async () => {
       const control = String.fromCharCode(0x1b);
       const { fetchSources } = await import('#src/libs/sources.js');
