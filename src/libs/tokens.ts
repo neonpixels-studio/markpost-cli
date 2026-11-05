@@ -12,6 +12,8 @@ import {
   CreateTokenInput,
   Token,
   TokenListApiResponse,
+  TokenResource,
+  UpdateTokenScopesInput,
 } from '#src/types/tokens.types.js';
 
 const JSON_API_CONTENT_TYPE = 'application/vnd.api+json';
@@ -55,6 +57,39 @@ export const createToken = async (
     // server-echoed content), so it's sanitized before landing in a log
     // label the same way every printed field is on the command layer.
     logApiFailure(`createToken["${sanitizeForTerminal(input.name)}"]`, error);
+
+    return null;
+  }
+};
+
+// Replaces a token's scopes via markpost's PATCH /api/tokens/{id}. The secret
+// is not rotated, so whatever uses the token keeps working. Returns the
+// updated token, or null on failure (logged), like `createToken`.
+export const updateTokenScopes = async (
+  id: string,
+  input: UpdateTokenScopesInput,
+): Promise<Token | null> => {
+  try {
+    const body = (await authedRequest(
+      `${TOKENS_PATH}/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': JSON_API_CONTENT_TYPE,
+        },
+        body: JSON.stringify({
+          data: {
+            type: 'api_tokens',
+            id,
+            attributes: input,
+          },
+        }),
+      },
+    )) as ApiResponse<TokenResource | null>;
+
+    return unwrapResourceAttributes(body);
+  } catch (error) {
+    logApiFailure(`updateTokenScopes["${sanitizeForTerminal(id)}"]`, error);
 
     return null;
   }

@@ -1,0 +1,10 @@
+{
+  "sourceRepo": "https://github.com/neonpixels-studio/markpost.git",
+  "sourceFiles": [
+    {
+      "path": "shared/utils/scopes.ts",
+      "sourceCommit": "502a561187568de90fb453567b3c1bbe680bdd33"
+    }
+  ],
+  "syncedAt": "2026-11-04T15:05:56.354Z"
+}

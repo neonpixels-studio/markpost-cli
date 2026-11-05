@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createToken, fetchTokens, revokeToken } from '#src/libs/tokens.js';
+import {
+  createToken,
+  fetchTokens,
+  revokeToken,
+  updateTokenScopes,
+} from '#src/libs/tokens.js';
 import { ApiTimeoutError } from '#src/libs/api.js';
 import { logErrorMessage } from '#src/libs/errors.js';
 import { Token } from '#src/types/tokens.types.js';
@@ -214,6 +219,22 @@ describe('createToken', () => {
     );
   });
 
+  it('includes scopes in the request body when given', async () => {
+    mockFetch({ data: { attributes: mintedToken } });
+    await createToken({ name: 'CI token', scopes: ['records:read'] });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/tokens',
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            type: 'api_tokens',
+            attributes: { name: 'CI token', scopes: ['records:read'] },
+          },
+        }),
+      }),
+    );
+  });
+
   it('returns the token attributes, including the revealed secret, on success', async () => {
     mockFetch({ data: { attributes: mintedToken } });
     expect(await createToken({ name: 'CI token' })).toEqual(mintedToken);
@@ -330,5 +351,75 @@ describe('revokeToken', () => {
   it('returns false on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await revokeToken('tok-abc-123')).toBe(false);
+  });
+});
+
+describe('updateTokenScopes', () => {
+  const updated = { ...mockToken, scopes: ['records:read'] };
+
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('PATCHes /api/tokens/{id} with a JSON:API scopes body', async () => {
+    mockFetch({ data: { attributes: updated } });
+    await updateTokenScopes('tok-abc-123', { scopes: ['records:read'] });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/tokens/tok-abc-123',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: 'Bearer test-token',
+        },
+        body: JSON.stringify({
+          data: {
+            type: 'api_tokens',
+            id: 'tok-abc-123',
+            attributes: { scopes: ['records:read'] },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('url-encodes the id', async () => {
+    mockFetch({ data: { attributes: updated } });
+    await updateTokenScopes('a/b', { scopes: ['records:read'] });
+    expect(vi.mocked(global.fetch).mock.calls[0][0]).toBe(
+      'https://example.com/api/tokens/a%2Fb',
+    );
+  });
+
+  it('returns the updated token attributes', async () => {
+    mockFetch({ data: { attributes: updated } });
+    expect(
+      await updateTokenScopes('tok-abc-123', { scopes: ['records:read'] }),
+    ).toEqual(updated);
+  });
+
+  it('returns null and logs error details when the API rejects the update', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [{ title: 'Not Found', detail: 'Token not found' }],
+        },
+      },
+      false,
+    );
+    expect(
+      await updateTokenScopes('tok-abc-123', { scopes: ['records:read'] }),
+    ).toBeNull();
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'updateTokenScopes["tok-abc-123"]',
+      'Not Found: Token not found',
+    );
+  });
+
+  it('rejects with ApiTimeoutError instead of returning null', async () => {
+    mockFetchTimeout();
+    await expect(
+      updateTokenScopes('tok-abc-123', { scopes: ['records:read'] }),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 });
