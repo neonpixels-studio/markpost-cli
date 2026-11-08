@@ -46,6 +46,10 @@ const assertSafeBaseUrl = (baseUrl: string): void => {
     return;
   }
 
+  if (protocol !== HTTP_PROTOCOL) {
+    throw new InvalidBaseUrlError(`unsupported protocol "${protocol}".`);
+  }
+
   throw new InvalidBaseUrlError(
     `"${protocol}//${hostname}" would send the token unencrypted.`,
   );

@@ -59,7 +59,9 @@ describe('getBaseUrl', () => {
     'http://localhost:8888',
     'http://127.0.0.1:8888',
     'http://[::1]:8888',
-  ])('allows cleartext http for loopback host %s', (url) => {
+    'HTTP://LOCALHOST:8888',
+    'https://staging.example.com',
+  ])('allows BASE_URL %s', (url) => {
     process.env.BASE_URL = url;
     expect(getBaseUrl()).toBe(url);
   });
