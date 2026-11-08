@@ -1,6 +1,12 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
 import { fetchAllEvents } from '#src/libs/events.js';
+import { fetchEventExport } from '#src/libs/export.js';
+import {
+  parseExportArgs,
+  reportIncompleteExport,
+  writeToOutputFile,
+} from '#src/libs/export-command.js';
 import { describeApiError } from '#src/libs/api.js';
 import { checkConfig } from '#src/libs/config.js';
 import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
@@ -10,14 +16,28 @@ import {
   parseOrFailWithUsage,
 } from '#src/libs/usage.js';
 import { hasJsonFlag, printJson } from '#src/libs/output.js';
-import { Event, EVENT_KINDS, EventKind } from '#src/types/events.types.js';
+import {
+  EVENT_KINDS,
+  EventExportRow,
+  EventKind,
+} from '#src/types/events.types.js';
 
-export const USAGE = `Usage: markpost events list [options]
+export const USAGE = `Usage: markpost events <list|export> [options]
 
-  list  List the ingestion activity log (ok/dim/warn/err entries), newest first
+  list    List the ingestion activity log (ok/dim/warn/err entries), newest first
+  export  Export the whole activity log (inside markpost's retention window),
+          newest first, via markpost's dedicated export endpoint. Needs a token
+          with the events:read scope. markpost caps the export at its row
+          limit; a capped export (or one where the server returned a malformed
+          row) still writes/prints the rows it did get, but warns and exits
+          non-zero so a script can detect an incomplete export.
 
 Options:
-  --json  Print the events as JSON instead of formatted text`;
+  --json        Print the events as JSON instead of formatted text
+  --out <path>  (export) Write the export as JSON to <path> instead of
+                printing to stdout (creates parent directories as needed)
+  --force       (export) Overwrite <path> if it already exists (--out only)
+                With export, --json cannot be combined with --out.`;
 
 export const runEventsCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
@@ -27,6 +47,11 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
 
   // Validate before the config check so a bad subcommand fails on usage
   // alone, without needing a configured account.
+  if (subcommand === 'export') {
+    await runEventsExport(args.slice(1), json);
+    return;
+  }
+
   if (subcommand !== 'list') {
     failWithSubcommandUsage(subcommand, USAGE, json);
     return;
@@ -114,7 +139,7 @@ const colorizeKind = (kind: unknown): string => {
 // sourceId/recordUuid print only when present — an event isn't always tied
 // to a source (e.g. a system-level entry) or a record (an error before one
 // was created).
-const printEvent = (event: Event): void => {
+const printEvent = (event: EventExportRow): void => {
   console.log(`${colorizeKind(event.kind)}  ${sanitizeForTerminal(event.ts)}`);
   console.log(`  ${sanitizeForTerminal(event.message)}`);
 
@@ -169,4 +194,65 @@ const listEvents = async (json: boolean): Promise<void> => {
   }
 
   events.forEach(printEvent);
+};
+
+// Mirrors runExportCommand in export.ts (the records backup), reusing its
+// flag parsing and incomplete-export reporting from libs/export-command.ts.
+const runEventsExport = async (
+  exportArgs: string[],
+  json: boolean,
+): Promise<void> => {
+  const parsed = parseOrFailWithUsage(
+    () => parseExportArgs(exportArgs, 'events export'),
+    USAGE,
+    json,
+  );
+
+  if (!parsed) {
+    return;
+  }
+
+  try {
+    if (!(await checkConfig(json))) {
+      return;
+    }
+
+    await exportEvents(parsed.outputPath, parsed.force, json);
+  } catch (error) {
+    failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
+  }
+};
+
+const exportEvents = async (
+  outputPath: string | undefined,
+  force: boolean,
+  json: boolean,
+): Promise<void> => {
+  const result = await fetchEventExport(json);
+
+  // Thrown before any write, so a failed fetch can never touch (or clobber) a
+  // previous export file.
+  if (!result.ok) {
+    throw new Error('Failed to fetch the events export from the server.');
+  }
+
+  const { rows, truncated, skippedCount } = result;
+  reportIncompleteExport(truncated, skippedCount, json);
+
+  if (outputPath) {
+    writeToOutputFile(outputPath, rows, force, skippedCount, 'event');
+    return;
+  }
+
+  if (json) {
+    printJson(rows);
+    return;
+  }
+
+  if (rows.length === 0) {
+    console.log('No events to export.');
+    return;
+  }
+
+  rows.forEach(printEvent);
 };

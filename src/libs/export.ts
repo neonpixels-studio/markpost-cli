@@ -9,6 +9,7 @@ import {
 } from '#src/libs/api.js';
 import { logErrorMessage } from '#src/libs/errors.js';
 import { expandHomeDirectory } from '#src/libs/paths.js';
+import { EventExportRow } from '#src/types/events.types.js';
 import { RecordExportRow } from '#src/types/records.types.js';
 
 // Mirrors markpost's shared/utils/export.ts `EXPORT_TRUNCATED_HEADER` — the
@@ -36,10 +37,10 @@ const isExportTruncated = (headers: Headers): boolean => {
   return header.toLowerCase() === EXPORT_TRUNCATED_HEADER_TRUE;
 };
 
-export type RecordExportResult =
+export type ExportResult<Row> =
   | {
       ok: true;
-      rows: RecordExportRow[];
+      rows: Row[];
       truncated: boolean;
       // Count of rows the server returned that failed the shape check below
       // and were dropped. Surfaced (not just logged) so the caller can warn
@@ -48,6 +49,9 @@ export type RecordExportResult =
       skippedCount: number;
     }
   | { ok: false };
+
+export type RecordExportResult = ExportResult<RecordExportRow>;
+export type EventExportResult = ExportResult<EventExportRow>;
 
 // A row missing one of these still passes `typeof === 'object'`, so each is
 // checked individually rather than trusting a bare `Array.isArray` + cast.
@@ -79,35 +83,53 @@ const isRecordExportRow = (value: unknown): value is RecordExportRow => {
   );
 };
 
-// Fetches every record in the account (all statuses) via markpost's dedicated
-// backup endpoint (GET /api/records/export). Unlike `records list` and the
-// sync — which only ever return pending or paginated/filtered records — this
-// is a full-account dump, capped at markpost's export row limit and flagged
-// via `EXPORT_TRUNCATED_HEADER` when it hits that cap. The response body is
-// the bare row array with no JSON:API envelope (see
-// server/api/records/export.get.ts), so it's read directly rather than
-// through `unwrapResourceCollection`.
+// Event export rows: markpost's `serializeExportRow` in
+// server/api/events/export.get.ts. `userId` is deliberately absent, unlike
+// the paginated `Event` shape.
+const isEventExportRow = (value: unknown): value is EventExportRow => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.ts === 'string' &&
+    typeof candidate.kind === 'string' &&
+    typeof candidate.message === 'string' &&
+    isNullableString(candidate.recordUuid) &&
+    isNullableString(candidate.sourceId)
+  );
+};
+
+// Fetches an export endpoint's bare row array (no JSON:API envelope, see
+// server/api/records/export.get.ts and server/api/events/export.get.ts) and
+// validates each row. Both export endpoints share the same contract: a
+// full-account dump capped at markpost's export row limit and flagged via
+// `EXPORT_TRUNCATED_HEADER` when it hits that cap.
 //
 // `json` suppresses every plain-text diagnostic below (the malformed-row skip
-// count and both `logApiFailure` calls) — mirroring `fetchPaginatedRecords`'s
+// count and both `logApiFailure` calls) - mirroring `fetchPaginatedRecords`'s
 // own `json` parameter in records.ts: under `--json`, stderr must carry only
 // the unified `{ error, message }`/`partial_read` object the command layer
 // writes once the read settles (see the JSON failure contract in the
 // README), not this function's own prose line ahead of it. A systemic
-// failure still throws unconditionally either way — that path is handled by
+// failure still throws unconditionally either way - that path is handled by
 // the command's outer catch, which already respects `--json`.
-export const fetchRecordExport = async (
-  json = false,
-): Promise<RecordExportResult> => {
+const fetchExport = async <Row>(
+  path: string,
+  label: string,
+  isRow: (value: unknown) => value is Row,
+  json: boolean,
+): Promise<ExportResult<Row>> => {
   try {
-    const { body, headers } = await authedRequestWithHeaders(
-      '/api/records/export',
-    );
+    const { body, headers } = await authedRequestWithHeaders(path);
 
     if (!Array.isArray(body)) {
       if (!json) {
         logApiFailure(
-          'fetchRecordExport',
+          label,
           new Error(
             'Unexpected response shape: expected an array of export rows.',
           ),
@@ -117,14 +139,11 @@ export const fetchRecordExport = async (
       return { ok: false };
     }
 
-    const validRows = body.filter(isRecordExportRow);
+    const validRows = body.filter(isRow);
     const skippedCount = body.length - validRows.length;
 
     if (skippedCount > 0 && !json) {
-      logErrorMessage(
-        'fetchRecordExport',
-        `Skipped ${skippedCount} malformed export row(s)`,
-      );
+      logErrorMessage(label, `Skipped ${skippedCount} malformed export row(s)`);
     }
 
     return {
@@ -137,18 +156,36 @@ export const fetchRecordExport = async (
     // Auth (401/403) and 5xx failures doom the whole export, not just this
     // request, so surface them to the caller to fail-fast rather than
     // reporting the generic "Failed to fetch the export" a null return
-    // produces — mirroring fetchRecord/fetchAllRecords.
+    // produces - mirroring fetchRecord/fetchAllRecords.
     if (isSystemicApiFailure(error)) {
       throw error;
     }
 
     if (!json) {
-      logApiFailure('fetchRecordExport', error);
+      logApiFailure(label, error);
     }
 
     return { ok: false };
   }
 };
+
+// Fetches every record in the account (all statuses) via markpost's dedicated
+// backup endpoint (GET /api/records/export). Unlike `records list` and the
+// sync - which only ever return pending or paginated/filtered records - this
+// is a full-account dump.
+export const fetchRecordExport = (json = false): Promise<RecordExportResult> =>
+  fetchExport(
+    '/api/records/export',
+    'fetchRecordExport',
+    isRecordExportRow,
+    json,
+  );
+
+// Fetches the whole activity log (inside markpost's retention window) via
+// GET /api/events/export, newest first. Requires the `events:read` scope,
+// which the server enforces (a missing scope surfaces as a systemic 403).
+export const fetchEventExport = (json = false): Promise<EventExportResult> =>
+  fetchExport('/api/events/export', 'fetchEventExport', isEventExportRow, json);
 
 // A full-account export holds every record's private title/content — as
 // sensitive as the API token itself — so the file is owner-readable only,
@@ -179,7 +216,7 @@ export class ExportFileExistsError extends Error {
 // `force` is overwriting a file some other process left world-readable.
 export const writeExportFile = (
   outputPath: string,
-  rows: RecordExportRow[],
+  rows: readonly unknown[],
   force = false,
 ): string => {
   const resolvedPath = expandHomeDirectory(outputPath, homedir);
