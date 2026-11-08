@@ -52,6 +52,10 @@ import {
   USAGE as CONFIG_USAGE,
 } from '#src/commands/config.js';
 import {
+  runDoctorCommand,
+  USAGE as DOCTOR_USAGE,
+} from '#src/commands/doctor.js';
+import {
   runSettingsCommand,
   USAGE as SETTINGS_USAGE,
 } from '#src/commands/settings.js';
@@ -231,6 +235,7 @@ const COMMANDS = new Map<string, Command>([
   ['export', { run: runExportCommand, usage: EXPORT_USAGE }],
   ['config', { run: runConfigCommand, usage: CONFIG_USAGE }],
   ['settings', { run: runSettingsCommand, usage: SETTINGS_USAGE }],
+  ['doctor', { run: runDoctorCommand, usage: DOCTOR_USAGE }],
 ]);
 
 // The sync is the one destructive command, so it rejects unexpected arguments
