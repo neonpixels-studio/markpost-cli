@@ -65,6 +65,9 @@ export type Source = {
   fieldMapping: FieldMappingConfig | null;
   lastHitAt: string | null;
   recordCount: number;
+  // Paused sources stop ingesting; mirrors markpost's sourceSerializer
+  // `paused` attribute (server/utils/response.ts).
+  paused: boolean;
 };
 
 // Only markpost's create response reveals the one-time generated signing

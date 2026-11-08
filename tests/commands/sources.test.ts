@@ -50,6 +50,7 @@ const webhookSource: Source = {
   fieldMapping: null,
   lastHitAt: null,
   recordCount: 3,
+  paused: false,
 };
 
 const emailSource: Source = {
@@ -63,6 +64,7 @@ const emailSource: Source = {
   fieldMapping: null,
   lastHitAt: '2024-02-01T00:00:00Z',
   recordCount: 1,
+  paused: false,
 };
 
 const mappedSource: Source = {
@@ -85,6 +87,7 @@ const githubSource: CreatedSource = {
   fieldMapping: null,
   lastHitAt: null,
   recordCount: 0,
+  paused: false,
 };
 
 // A manual-secret provider (stripe): markpost issues the secret, so rotation
@@ -100,6 +103,7 @@ const stripeSource: Source = {
   fieldMapping: null,
   lastHitAt: null,
   recordCount: 0,
+  paused: false,
 };
 
 // Collapses every argument of every console.log AND console.error call into
@@ -332,6 +336,71 @@ describe('runSourcesCommand', () => {
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('3 [2J'),
       );
+    });
+
+    it('flags only the paused source in the human output', async () => {
+      const { fetchSources } = await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, paused: true },
+        emailSource,
+      ]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      const lines = vi
+        .mocked(console.log)
+        .mock.calls.map(([line]) => String(line));
+      const noticeIndexes = lines.flatMap((line, index) =>
+        line.includes('status:    paused (not ingesting)') ? [index] : [],
+      );
+      const webhookIndex = lines.findIndex((line) =>
+        line.includes('Webhook Source'),
+      );
+      const emailIndex = lines.findIndex((line) =>
+        line.includes('Email Source'),
+      );
+      expect(webhookIndex).toBeGreaterThanOrEqual(0);
+      expect(emailIndex).toBeGreaterThan(webhookIndex);
+      expect(noticeIndexes).toHaveLength(1);
+      expect(noticeIndexes[0]).toBeGreaterThan(webhookIndex);
+      expect(noticeIndexes[0]).toBeLessThan(emailIndex);
+    });
+
+    it('does not flag a source whose paused is a truthy non-boolean', async () => {
+      const { fetchSources } = await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...emailSource, paused: 'false' as unknown as boolean },
+      ]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      expect(loggedText()).not.toContain('paused');
+    });
+
+    it('includes paused in --json output, false when the response omits it or is not a boolean', async () => {
+      const { fetchSources } = await import('#src/libs/sources.js');
+      const legacySource: Partial<Source> = { ...emailSource };
+      delete legacySource.paused;
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...webhookSource, paused: true },
+        emailSource,
+        legacySource as Source,
+        { ...emailSource, paused: 'false' as unknown as boolean },
+      ]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['list', '--json']);
+
+      const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
+      const parsed = JSON.parse(output);
+      expect(parsed.map((source: Source) => source.paused)).toEqual([
+        true,
+        false,
+        false,
+        false,
+      ]);
     });
 
     it('prints the sources as a parseable JSON array with computed endpoints when --json is passed', async () => {
