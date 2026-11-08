@@ -474,6 +474,14 @@ const printFieldMapping = (
 // so it goes through the sanitizer too (which coerces non-strings). The
 // 'never hit' fallback is a local literal, so only the untrusted lastHitAt
 // branch is sanitized.
+const printPausedNotice = (paused: boolean): void => {
+  if (paused !== true) {
+    return;
+  }
+
+  console.log(chalk.yellowBright('  status:    paused (not ingesting)'));
+};
+
 const printSource = (source: Source): void => {
   console.log(chalk.bold(sanitizeForTerminal(source.name)));
   console.log(`  uuid:      ${sanitizeForTerminal(source.uuid)}`);
@@ -489,6 +497,7 @@ const printSource = (source: Source): void => {
   console.log(
     `  last hit:  ${source.lastHitAt ? sanitizeForTerminal(source.lastHitAt) : 'never hit'}`,
   );
+  printPausedNotice(source.paused);
 };
 
 // The JSON view of a source: the Source contract fields plus the computed
@@ -518,6 +527,7 @@ const serializeSourceForJson = (
   fieldMapping: source.fieldMapping ?? null,
   lastHitAt: source.lastHitAt,
   recordCount: source.recordCount,
+  paused: source.paused,
 });
 
 const listSources = async (json: boolean): Promise<void> => {
