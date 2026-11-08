@@ -466,10 +466,12 @@ const printFieldMapping = (
   });
 };
 
-// Strict boolean check, shared with the JSON view's `=== true`, so both views
-// treat a missing or non-boolean `paused` as active.
-const printPausedNotice = (paused: boolean): void => {
-  if (paused !== true) {
+// Strict check: a missing or non-boolean `paused` from the untrusted response
+// counts as active in both the human and JSON views.
+const isPaused = (source: Source): boolean => source.paused === true;
+
+const printPausedNotice = (source: Source): void => {
+  if (!isPaused(source)) {
     return;
   }
 
@@ -499,7 +501,7 @@ const printSource = (source: Source): void => {
   console.log(
     `  last hit:  ${source.lastHitAt ? sanitizeForTerminal(source.lastHitAt) : 'never hit'}`,
   );
-  printPausedNotice(source.paused);
+  printPausedNotice(source);
 };
 
 // The JSON view of a source: the Source contract fields plus the computed
@@ -529,7 +531,7 @@ const serializeSourceForJson = (
   fieldMapping: source.fieldMapping ?? null,
   lastHitAt: source.lastHitAt,
   recordCount: source.recordCount,
-  paused: source.paused === true,
+  paused: isPaused(source),
 });
 
 const listSources = async (json: boolean): Promise<void> => {

@@ -360,18 +360,33 @@ describe('runSourcesCommand', () => {
       const emailIndex = lines.findIndex((line) =>
         line.includes('Email Source'),
       );
+      expect(webhookIndex).toBeGreaterThanOrEqual(0);
+      expect(emailIndex).toBeGreaterThan(webhookIndex);
       expect(noticeIndexes).toHaveLength(1);
       expect(noticeIndexes[0]).toBeGreaterThan(webhookIndex);
       expect(noticeIndexes[0]).toBeLessThan(emailIndex);
     });
 
-    it('includes paused in --json output, false when the response omits it', async () => {
+    it('does not flag a source whose paused is a truthy non-boolean', async () => {
+      const { fetchSources } = await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([
+        { ...emailSource, paused: 'false' as unknown as boolean },
+      ]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['list']);
+
+      expect(loggedText()).not.toContain('paused');
+    });
+
+    it('includes paused in --json output, false when the response omits it or is not a boolean', async () => {
       const { fetchSources } = await import('#src/libs/sources.js');
       const { paused: _omitted, ...legacySource } = emailSource;
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, paused: true },
         emailSource,
         legacySource as Source,
+        { ...emailSource, paused: 'false' as unknown as boolean },
       ]);
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
@@ -381,6 +396,7 @@ describe('runSourcesCommand', () => {
       const parsed = JSON.parse(output);
       expect(parsed.map((source: Source) => source.paused)).toEqual([
         true,
+        false,
         false,
         false,
       ]);
