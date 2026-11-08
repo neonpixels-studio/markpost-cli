@@ -115,6 +115,10 @@ describe('runEventsCommand export', () => {
     expect(console.log).toHaveBeenCalledWith('OK  2024-01-01T00:00:00.000Z');
     expect(console.log).toHaveBeenCalledWith('  Ingested record from webhook');
     expect(console.log).toHaveBeenCalledWith('  record: rec-1');
+    expect(console.log).toHaveBeenCalledWith('  source: src-1');
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).not.toMatch(
+      /(record|source): null/,
+    );
     expect(console.log).toHaveBeenCalledWith('ERR  2024-01-02T00:00:00.000Z');
   });
 
