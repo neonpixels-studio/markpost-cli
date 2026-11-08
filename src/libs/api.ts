@@ -6,8 +6,64 @@ import {
 } from '#src/types/api.types.js';
 import { logErrorMessage, messageFromError } from '#src/libs/errors.js';
 
+const DEFAULT_BASE_URL = 'https://markpost.io';
+const HTTPS_PROTOCOL = 'https:';
+const HTTP_PROTOCOL = 'http:';
+// `URL.hostname` keeps the brackets on an IPv6 literal.
+const LOOPBACK_HOSTNAMES: readonly string[] = [
+  'localhost',
+  '127.0.0.1',
+  '[::1]',
+];
+
+// Thrown when BASE_URL would send the bearer token somewhere unsafe (cleartext
+// to a non-loopback host) or can't be parsed at all.
+export class InvalidBaseUrlError extends Error {
+  constructor(reason: string) {
+    super(
+      `Refusing to use BASE_URL: ${reason} The API token was not sent. Use an https:// URL, or http:// only for localhost, 127.0.0.1, or [::1].`,
+    );
+    this.name = 'InvalidBaseUrlError';
+  }
+}
+
+const parseBaseUrl = (baseUrl: string): URL => {
+  try {
+    return new URL(baseUrl);
+  } catch {
+    throw new InvalidBaseUrlError('it is not a valid URL.');
+  }
+};
+
+export const assertSafeBaseUrl = (baseUrl: string): void => {
+  const { protocol, hostname } = parseBaseUrl(baseUrl);
+
+  if (protocol === HTTPS_PROTOCOL) {
+    return;
+  }
+
+  if (protocol === HTTP_PROTOCOL && LOOPBACK_HOSTNAMES.includes(hostname)) {
+    return;
+  }
+
+  if (protocol !== HTTP_PROTOCOL) {
+    throw new InvalidBaseUrlError(`unsupported protocol "${protocol}".`);
+  }
+
+  throw new InvalidBaseUrlError(
+    `"${protocol}//${hostname}" would send the token unencrypted.`,
+  );
+};
+
+export const getConfiguredBaseUrl = (): string =>
+  process.env.BASE_URL ?? DEFAULT_BASE_URL;
+
 export const getBaseUrl = () => {
-  return process.env.BASE_URL ?? 'https://markpost.io';
+  const baseUrl = getConfiguredBaseUrl();
+
+  assertSafeBaseUrl(baseUrl);
+
+  return baseUrl;
 };
 
 export const getApiToken = (): string | undefined => {
@@ -95,8 +151,13 @@ export const apiFetch = async (
 // loud (non-zero exit) rather than reporting "nothing to fetch". Call this
 // first in those catches — it re-throws a timeout and returns for every
 // other error, letting the caller fall through to its conservative fallback.
+// An unsafe BASE_URL escapes the same way: it is a config error that would
+// otherwise be logged once per call while the run still exits 0.
 export const rethrowIfTimeout = (error: unknown): void => {
-  if (error instanceof ApiTimeoutError) {
+  if (
+    error instanceof ApiTimeoutError ||
+    error instanceof InvalidBaseUrlError
+  ) {
     throw error;
   }
 };

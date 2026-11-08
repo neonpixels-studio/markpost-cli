@@ -6,7 +6,8 @@ import {
   ApiRequestError,
   authedRequest,
   getApiToken,
-  getBaseUrl,
+  assertSafeBaseUrl,
+  getConfiguredBaseUrl,
 } from '#src/libs/api.js';
 import { getConfigValue } from '#src/libs/config.js';
 import { messageFromError } from '#src/libs/errors.js';
@@ -21,7 +22,6 @@ export const CHECK_REACHABLE = 'api-reachable';
 export const CHECK_TOKEN = 'token';
 export const CHECK_OUTPUT_DIRECTORY = 'output-directory';
 
-const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
 const HTTP_UNAUTHORIZED = 401;
 const HTTP_FORBIDDEN = 403;
 
@@ -79,22 +79,13 @@ export const checkConfigPresent = (
 };
 
 export const checkBaseUrl = (baseUrl: string): CheckResult => {
-  let parsed: URL;
-
   try {
-    parsed = new URL(baseUrl);
-  } catch {
-    return fail(CHECK_BASE_URL, 'BASE_URL is not a valid URL');
+    assertSafeBaseUrl(baseUrl);
+  } catch (error) {
+    return fail(CHECK_BASE_URL, messageFromError(error));
   }
 
-  if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) {
-    return fail(
-      CHECK_BASE_URL,
-      `BASE_URL must use http: or https:, got ${parsed.protocol}`,
-    );
-  }
-
-  return pass(CHECK_BASE_URL, parsed.origin);
+  return pass(CHECK_BASE_URL, new URL(baseUrl).origin);
 };
 
 // Any HTTP response, even a 4xx/5xx, proves the host answered; only a thrown
@@ -258,7 +249,7 @@ const runNetworkChecks = async (
 export const runDoctorChecks = async (): Promise<CheckResult[]> => {
   const apiToken = getApiToken();
   const outputDirectory = getConfiguredOutputDirectory();
-  const baseUrl = getBaseUrl();
+  const baseUrl = getConfiguredBaseUrl();
   const baseUrlResult = checkBaseUrl(baseUrl);
 
   return [
