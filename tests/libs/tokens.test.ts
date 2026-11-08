@@ -361,6 +361,24 @@ describe('updateTokenScopes', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
+  it('sends scopes: null in the PATCH body for full access', async () => {
+    mockFetch({ data: { attributes: { ...mockToken, scopes: null } } });
+    await updateTokenScopes('tok-abc-123', { scopes: null });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/tokens/tok-abc-123',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          data: {
+            type: 'api_tokens',
+            id: 'tok-abc-123',
+            attributes: { scopes: null },
+          },
+        }),
+      }),
+    );
+  });
+
   it('PATCHes /api/tokens/{id} with a JSON:API scopes body', async () => {
     mockFetch({ data: { attributes: updated } });
     await updateTokenScopes('tok-abc-123', { scopes: ['records:read'] });
