@@ -33,8 +33,20 @@ export const TOKEN_PROBE_PATH = '/api/records/stats';
 const pass = (name: string, detail: string): CheckResult => ({
   name,
   ok: true,
-  detail,
+  detail: sanitizeForTerminal(detail),
 });
+
+const skipped = (name: string, reason: string): CheckResult =>
+  fail(name, `skipped, ${reason}`);
+
+// Origin only, so credentials embedded in BASE_URL (user:pass@host) never print.
+const displayUrl = (baseUrl: string): string => {
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return '(invalid URL)';
+  }
+};
 
 const fail = (name: string, detail: string): CheckResult => ({
   name,
@@ -72,13 +84,13 @@ export const checkBaseUrl = (baseUrl: string): CheckResult => {
   try {
     parsed = new URL(baseUrl);
   } catch {
-    return fail(CHECK_BASE_URL, `${baseUrl} is not a valid URL`);
+    return fail(CHECK_BASE_URL, 'BASE_URL is not a valid URL');
   }
 
   if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) {
     return fail(
       CHECK_BASE_URL,
-      `${baseUrl} must use http: or https:, got ${parsed.protocol}`,
+      `BASE_URL must use http: or https:, got ${parsed.protocol}`,
     );
   }
 
@@ -97,6 +109,8 @@ export const probeReachability: ReachabilityProbe = async (baseUrl) => {
     signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS),
   });
 
+  await response.body?.cancel();
+
   return response.status;
 };
 
@@ -107,9 +121,15 @@ export const checkApiReachable = async (
   try {
     const status = await probe(baseUrl);
 
-    return pass(CHECK_REACHABLE, `${baseUrl} responded (HTTP ${status})`);
+    return pass(
+      CHECK_REACHABLE,
+      `${displayUrl(baseUrl)} responded (HTTP ${status})`,
+    );
   } catch (error) {
-    return fail(CHECK_REACHABLE, `${baseUrl}: ${messageFromError(error)}`);
+    return fail(
+      CHECK_REACHABLE,
+      `${displayUrl(baseUrl)}: ${messageFromError(error)}`,
+    );
   }
 };
 
@@ -149,6 +169,37 @@ export const checkTokenAccepted = async (
   }
 };
 
+const resolveDirectory = (configured: string): string | Error => {
+  try {
+    return expandHomeDirectory(configured, homedir);
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+};
+
+// Returns why the directory is unusable, or null when files can be created in
+// it (write plus search permission, both needed to create entries).
+const findDirectoryProblem = async (
+  directory: string,
+): Promise<string | null> => {
+  try {
+    const stats = await stat(directory);
+
+    if (!stats.isDirectory()) {
+      return `${directory} is not a directory`;
+    }
+
+    await access(directory, constants.W_OK | constants.X_OK);
+
+    return null;
+  } catch (error) {
+    const reason =
+      (error as NodeJS.ErrnoException).code ?? messageFromError(error);
+
+    return `${directory} is not usable (${reason})`;
+  }
+};
+
 export const checkOutputDirectory = async (
   configured: string | undefined,
 ): Promise<CheckResult> => {
@@ -156,45 +207,58 @@ export const checkOutputDirectory = async (
     return fail(CHECK_OUTPUT_DIRECTORY, 'not configured');
   }
 
-  let directory: string;
+  const directory = resolveDirectory(configured);
 
-  try {
-    directory = expandHomeDirectory(configured, homedir);
-  } catch (error) {
-    return fail(CHECK_OUTPUT_DIRECTORY, messageFromError(error));
+  if (directory instanceof Error) {
+    return fail(CHECK_OUTPUT_DIRECTORY, directory.message);
   }
 
-  try {
-    const stats = await stat(directory);
+  const problem = await findDirectoryProblem(directory);
 
-    if (!stats.isDirectory()) {
-      return fail(CHECK_OUTPUT_DIRECTORY, `${directory} is not a directory`);
-    }
-
-    await access(directory, constants.W_OK);
-  } catch (error) {
-    const reason =
-      (error as NodeJS.ErrnoException).code ?? messageFromError(error);
-
-    return fail(
-      CHECK_OUTPUT_DIRECTORY,
-      `${directory} is not usable (${reason})`,
-    );
+  if (problem) {
+    return fail(CHECK_OUTPUT_DIRECTORY, problem);
   }
 
   return pass(CHECK_OUTPUT_DIRECTORY, `${directory} exists and is writable`);
 };
 
+// Network checks only run when the URL parses, and the token check only when
+// the host answered, so one root cause shows as one failure plus skips.
 export const runDoctorChecks = async (): Promise<CheckResult[]> => {
   const apiToken = getApiToken();
   const outputDirectory = getConfiguredOutputDirectory();
   const baseUrl = getBaseUrl();
+  const configResult = checkConfigPresent(apiToken, outputDirectory);
+  const baseUrlResult = checkBaseUrl(baseUrl);
+  const outputResult = await checkOutputDirectory(outputDirectory);
+
+  if (!baseUrlResult.ok) {
+    return [
+      configResult,
+      baseUrlResult,
+      skipped(CHECK_REACHABLE, 'BASE_URL is invalid'),
+      skipped(CHECK_TOKEN, 'BASE_URL is invalid'),
+      outputResult,
+    ];
+  }
+
+  const reachableResult = await checkApiReachable(baseUrl);
+
+  if (!reachableResult.ok) {
+    return [
+      configResult,
+      baseUrlResult,
+      reachableResult,
+      skipped(CHECK_TOKEN, 'API is unreachable'),
+      outputResult,
+    ];
+  }
 
   return [
-    checkConfigPresent(apiToken, outputDirectory),
-    checkBaseUrl(baseUrl),
-    await checkApiReachable(baseUrl),
+    configResult,
+    baseUrlResult,
+    reachableResult,
     await checkTokenAccepted(apiToken),
-    await checkOutputDirectory(outputDirectory),
+    outputResult,
   ];
 };

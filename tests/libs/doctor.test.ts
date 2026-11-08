@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +10,11 @@ vi.mock('conf', () => ({
 }));
 
 import { ApiRequestError } from '#src/libs/api.js';
+import * as apiModule from '#src/libs/api.js';
 import {
+  CHECK_REACHABLE,
+  CHECK_TOKEN,
+  runDoctorChecks,
   checkApiReachable,
   checkBaseUrl,
   checkConfigPresent,
@@ -52,6 +56,15 @@ describe('checkBaseUrl', () => {
 });
 
 describe('checkApiReachable', () => {
+  it('does not print credentials embedded in the URL', async () => {
+    const result = await checkApiReachable(
+      'https://user:hunter2@markpost.io',
+      vi.fn().mockResolvedValue(200),
+    );
+
+    expect(result.detail).not.toContain('hunter2');
+  });
+
   it('passes on any HTTP status, including errors', async () => {
     const result = await checkApiReachable(
       'https://markpost.io',
@@ -148,6 +161,29 @@ describe('checkOutputDirectory', () => {
     expect(result.detail).toContain('ENOENT');
   });
 
+  it.skipIf(process.getuid?.() === 0)(
+    'fails when the directory is not writable',
+    async () => {
+      await chmod(directory, 0o500);
+
+      const result = await checkOutputDirectory(directory);
+
+      await chmod(directory, 0o700);
+      expect(result.ok).toBe(false);
+      expect(result.detail).toContain('EACCES');
+    },
+  );
+
+  it('strips terminal escapes from a passing path', async () => {
+    const escapedDirectory = path.join(directory, 'evil\u001b[31m');
+    await mkdir(escapedDirectory);
+
+    const result = await checkOutputDirectory(escapedDirectory);
+
+    expect(result.ok).toBe(true);
+    expect(result.detail).not.toContain('\u001b');
+  });
+
   it('fails when the path is a file', async () => {
     const filePath = path.join(directory, 'file.txt');
     await writeFile(filePath, 'x');
@@ -156,5 +192,40 @@ describe('checkOutputDirectory', () => {
 
     expect(result.ok).toBe(false);
     expect(result.detail).toContain('not a directory');
+  });
+});
+
+describe('runDoctorChecks', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('skips the network checks when BASE_URL is invalid', async () => {
+    vi.stubEnv('BASE_URL', 'not a url');
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const results = await runDoctorChecks();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(results.find((r) => r.name === CHECK_REACHABLE)?.ok).toBe(false);
+    expect(results.find((r) => r.name === CHECK_TOKEN)?.detail).toContain(
+      'skipped',
+    );
+  });
+
+  it('skips the token check when the API is unreachable', async () => {
+    vi.stubEnv('BASE_URL', 'https://markpost.test');
+    vi.stubEnv('API_TOKEN', SECRET_TOKEN);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ENOTFOUND')));
+    const authedSpy = vi.spyOn(apiModule, 'authedRequest');
+
+    const results = await runDoctorChecks();
+
+    expect(authedSpy).not.toHaveBeenCalled();
+    expect(results.find((r) => r.name === CHECK_TOKEN)?.detail).toContain(
+      'unreachable',
+    );
   });
 });
