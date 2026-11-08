@@ -58,9 +58,7 @@ function exportedTypeNames(sourceText: string): string[] {
   return names;
 }
 
-function isExported(
-  node: ts.TypeAliasDeclaration | ts.InterfaceDeclaration,
-): boolean {
+function isExported(node: ts.TypeAliasDeclaration | ts.InterfaceDeclaration): boolean {
   return (
     node.modifiers?.some(
       (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,

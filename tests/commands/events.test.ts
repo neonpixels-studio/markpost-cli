@@ -427,8 +427,7 @@ describe('runEventsCommand', () => {
     // failWithMessage and now goes through failWithUsage, so the usage block
     // must print alongside the message.
     it('prints the usage block, not bare prose, for an unknown flag without --json', async () => {
-      const { runEventsCommand, USAGE } =
-        await import('#src/commands/events.js');
+      const { runEventsCommand, USAGE } = await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--bogus']);
 

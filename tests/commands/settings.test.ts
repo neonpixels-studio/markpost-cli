@@ -9,7 +9,8 @@ vi.mock('#src/libs/settings.js', async (importOriginal) => {
   // Keep the real `resolveSyncSettings` (pure normalizer the command reuses to
   // print) and only stub the two network seams, so the tests exercise the real
   // print path against mocked API responses.
-  const actual = await importOriginal<typeof import('#src/libs/settings.js')>();
+  const actual =
+    await importOriginal<typeof import('#src/libs/settings.js')>();
 
   return {
     ...actual,
@@ -41,7 +42,10 @@ const mockSettings: UserSettings = {
 // assertion can't be dodged by output landing in a later call or the other
 // stream.
 const loggedText = (): string =>
-  [...vi.mocked(console.log).mock.calls, ...vi.mocked(console.error).mock.calls]
+  [
+    ...vi.mocked(console.log).mock.calls,
+    ...vi.mocked(console.error).mock.calls,
+  ]
     .flat()
     .map((value) => String(value))
     .join('\n');
@@ -539,10 +543,7 @@ describe('settings set', () => {
       await runSettingsCommand(['get', '--json']);
 
       expect(console.log).not.toHaveBeenCalled();
-      expect(errorJson()).toMatchObject({
-        error: 'fetch_failed',
-        message: 'boom',
-      });
+      expect(errorJson()).toMatchObject({ error: 'fetch_failed', message: 'boom' });
       expect(process.exitCode).toBe(1);
     });
   });

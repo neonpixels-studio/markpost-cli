@@ -15,11 +15,11 @@
 // See tests/types/vendor/markpost-settings-contract.manifest.json for the
 // exact commits this was synced from.
 
-export const CONFLICT_STRATEGIES = ['suffix', 'overwrite', 'skip'] as const;
+export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;
 
 export const USER_SETTINGS_DEFAULTS = {
   autoSync: true,
   autoDelete: true,
   frontmatter: true,
-  conflictStrategy: 'suffix',
+  conflictStrategy: "suffix",
 } as const;

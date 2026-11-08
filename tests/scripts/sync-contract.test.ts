@@ -99,9 +99,9 @@ describe('parseFromPathArg', () => {
   // exactly the "wrong checkout gets vendored" risk this parser guards
   // against everywhere else.
   it('throws when --from is given twice, even across both forms', () => {
-    expect(() => parseFromPathArg(['--from=/a', '--from', '/b'])).toThrow(
-      '--from may only be given once',
-    );
+    expect(() =>
+      parseFromPathArg(['--from=/a', '--from', '/b']),
+    ).toThrow('--from may only be given once');
   });
 });
 

@@ -228,9 +228,7 @@ describe('buildRecordDocument', () => {
       frontmatter: { ...frontmatter, tags: ['ci', 42, 'deploy'] },
     } as unknown as Record;
 
-    expect(buildRecordDocument(mixedTagsRecord)).toContain(
-      'tags: [ci, deploy]',
-    );
+    expect(buildRecordDocument(mixedTagsRecord)).toContain('tags: [ci, deploy]');
   });
 
   it('treats a non-object frontmatter value as no metadata', () => {
@@ -268,8 +266,7 @@ describe('stripFrontmatterDocument', () => {
   });
 
   it('preserves a body that itself contains blank lines and a horizontal rule', () => {
-    const body =
-      'First paragraph.\n\nSecond paragraph.\n\n---\n\nAfter a rule.';
+    const body = 'First paragraph.\n\nSecond paragraph.\n\n---\n\nAfter a rule.';
     const document = assembleMarkdownDocument({
       title: 'My Note',
       body,

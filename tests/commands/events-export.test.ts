@@ -80,6 +80,9 @@ describe('runEventsCommand export', () => {
     await runEventsCommand(['export']);
 
     expect(checkConfig).toHaveBeenCalledWith(false);
+    expect(vi.mocked(checkConfig).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(fetchEventExport).mock.invocationCallOrder[0],
+    );
   });
 
   it('never fetches when checkConfig resolves false', async () => {

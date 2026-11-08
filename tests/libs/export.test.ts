@@ -474,6 +474,16 @@ describe('fetchEventExport', () => {
     mockFetch({ data: [] }, { truncatedHeader: 'false' });
 
     await expect(fetchEventExport(true)).resolves.toEqual({ ok: false });
+    expect(logErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('suppresses the skipped-row diagnostic under json while still counting', async () => {
+    mockFetch([eventExportRow, null], { truncatedHeader: 'false' });
+
+    await expect(fetchEventExport(true)).resolves.toMatchObject({
+      skippedCount: 1,
+    });
+    expect(logErrorMessage).not.toHaveBeenCalled();
   });
 
   it('rethrows a systemic auth failure (e.g. missing events:read scope)', async () => {

@@ -19,9 +19,7 @@ const CARRIAGE_RETURN = String.fromCharCode(0x0d);
 
 describe('sanitizeForTerminal', () => {
   it('leaves ordinary printable text untouched', () => {
-    expect(sanitizeForTerminal('Meeting notes 2024')).toBe(
-      'Meeting notes 2024',
-    );
+    expect(sanitizeForTerminal('Meeting notes 2024')).toBe('Meeting notes 2024');
   });
 
   it('replaces an ANSI escape (ESC) with a space', () => {

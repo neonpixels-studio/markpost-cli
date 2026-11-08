@@ -22,22 +22,22 @@
 // import this so the two can never drift apart. Nuxt auto-resolves `shared/`
 // for both the app and server layers — import via `#shared`, never a
 // relative path.
-export const SHARED_SECRET_HEADER = 'x-markpost-secret';
+export const SHARED_SECRET_HEADER = "x-markpost-secret";
 
 // The providers verified via that header (as opposed to GitHub/Stripe, which
 // sign with a real HMAC). Defined here rather than only in
 // server/utils/signatureVerifier.ts so app/components/SourceCard.vue can
 // import the same list — a server file pulls in node:crypto, which breaks
 // the client bundle.
-export const SHARED_SECRET_PROVIDER_IDS = ['zapier', 'shortcuts'] as const;
+export const SHARED_SECRET_PROVIDER_IDS = ["zapier", "shortcuts"] as const;
 
 // Provider identities that sign with a real HMAC (verified individually in
 // server/utils/signatureVerifier.ts). Declared here, not in the verifier, so
 // this file is the single source of every provider id — the verifier imports
 // and re-exports these, so its HMAC dispatch and the lists below can never name
 // a different string for the same provider.
-export const GITHUB_PROVIDER = 'github';
-export const STRIPE_PROVIDER = 'stripe';
+export const GITHUB_PROVIDER = "github";
+export const STRIPE_PROVIDER = "stripe";
 
 // Providers whose secret markpost generates itself and reveals exactly once
 // (GitHub's HMAC secret plus the shared-secret providers). Client-safe (no

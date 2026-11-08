@@ -11,9 +11,10 @@ vi.mock('#src/libs/records.js', async () => {
   // while keeping every other export undefined, so a command that starts
   // calling an unmocked function still fails loudly here instead of quietly
   // running the real implementation.
-  const { ERROR_STATUS, PENDING_STATUS } = await vi.importActual<
-    typeof import('#src/libs/records.js')
-  >('#src/libs/records.js');
+  const { ERROR_STATUS, PENDING_STATUS } =
+    await vi.importActual<typeof import('#src/libs/records.js')>(
+      '#src/libs/records.js',
+    );
 
   return {
     ERROR_STATUS,
@@ -977,12 +978,7 @@ describe('runRecordsCommand', () => {
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--title',
-        'Updated Title',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
       expect(updateRecord).toHaveBeenCalledWith(
         'abc-123',
@@ -996,12 +992,7 @@ describe('runRecordsCommand', () => {
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--content',
-        'New content',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--content', 'New content']);
 
       expect(updateRecord).toHaveBeenCalledWith(
         'abc-123',
@@ -1050,12 +1041,7 @@ describe('runRecordsCommand', () => {
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--title',
-        'Updated Title',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('Updated "Updated Title"'),
@@ -1078,12 +1064,7 @@ describe('runRecordsCommand', () => {
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--title',
-        'Updated Title',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining(
@@ -1102,12 +1083,7 @@ describe('runRecordsCommand', () => {
       });
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--title',
-        'Updated Title',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
       expect(console.log).not.toHaveBeenCalledWith(
         expect.stringContaining('write it to disk'),
@@ -1166,12 +1142,7 @@ describe('runRecordsCommand', () => {
       vi.mocked(updateRecord).mockResolvedValue(null);
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--title',
-        'Updated Title',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to update record "abc-123".'),
@@ -1187,12 +1158,7 @@ describe('runRecordsCommand', () => {
       );
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--title',
-        'Updated Title',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
       expect(console.error).toHaveBeenCalledWith(
         expect.stringContaining('Authentication failed (HTTP 401)'),
@@ -1206,19 +1172,14 @@ describe('runRecordsCommand', () => {
       vi.mocked(updateRecord).mockResolvedValue(updatedRecord);
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--title',
-        'Updated Title',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
       expect(checkConfig).toHaveBeenCalledWith(false);
       // Assert actual ordering (not just that both were called) — checkConfig
       // gates the destructive call, so it must run first.
-      expect(vi.mocked(checkConfig).mock.invocationCallOrder[0]).toBeLessThan(
-        vi.mocked(updateRecord).mock.invocationCallOrder[0],
-      );
+      expect(
+        vi.mocked(checkConfig).mock.invocationCallOrder[0],
+      ).toBeLessThan(vi.mocked(updateRecord).mock.invocationCallOrder[0]);
     });
 
     it('never calls updateRecord when checkConfig resolves false', async () => {
@@ -1227,12 +1188,7 @@ describe('runRecordsCommand', () => {
       const { updateRecord } = await import('#src/libs/records.js');
       const { runRecordsCommand } = await import('#src/commands/records.js');
 
-      await runRecordsCommand([
-        'update',
-        'abc-123',
-        '--title',
-        'Updated Title',
-      ]);
+      await runRecordsCommand(['update', 'abc-123', '--title', 'Updated Title']);
 
       expect(updateRecord).not.toHaveBeenCalled();
     });

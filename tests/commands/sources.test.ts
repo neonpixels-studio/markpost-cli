@@ -449,8 +449,7 @@ describe('runSourcesCommand', () => {
     // fires a DELETE for a source named "--json" nor silently ignores the flag.
     it('rejects --json on delete rather than treating it as a uuid or ignoring it', async () => {
       const { checkConfig } = await import('#src/libs/config.js');
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['delete', '--json']);
@@ -482,8 +481,7 @@ describe('runSourcesCommand', () => {
 
     it('rejects --json on update before prompting or calling the API', async () => {
       const { checkConfig } = await import('#src/libs/config.js');
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', '--json']);
@@ -854,8 +852,7 @@ describe('runSourcesCommand', () => {
 
   describe('update', () => {
     it('updates directly by uuid when one is provided', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, select } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce('00-fixed/');
@@ -880,8 +877,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('prompts to pick a source when no uuid is given', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, select } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(select).mockResolvedValue('abc-123');
@@ -903,8 +899,7 @@ describe('runSourcesCommand', () => {
       // The select label is composed from the untrusted source name, so a name
       // carrying an escape must be stripped before it reaches the picker.
       const control = String.fromCharCode(0x1b);
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, select } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, name: `Evil${control}Source` },
@@ -924,8 +919,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports not-found when the uuid does not match any source', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
@@ -938,8 +932,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports an error and does not call updateSource when the route folder is cleared', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce('   ');
@@ -957,8 +950,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('does not call updateSource when the prefilled value is accepted unchanged', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce(webhookSource.routeFolder);
@@ -973,8 +965,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('does nothing when there are no sources to update and no uuid is given', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
@@ -988,8 +979,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('never prints a providerSecret carried on an updated source', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([githubSource]);
       vi.mocked(input).mockResolvedValueOnce('00-fixed/');
@@ -1005,8 +995,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports an error when the update fails', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(input).mockResolvedValueOnce('00-fixed/');
@@ -1023,8 +1012,7 @@ describe('runSourcesCommand', () => {
     // loud instead of hanging — same guard shape as delete's non-TTY cases.
     it('fails loudly on a non-TTY stdin update with no uuid instead of opening the picker', async () => {
       process.stdin.isTTY = false;
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
@@ -1043,8 +1031,7 @@ describe('runSourcesCommand', () => {
     // `update` piped to a file must be rejected the same way.
     it('fails loudly on a redirected-stdout update with no uuid instead of opening the picker', async () => {
       process.stdout.isTTY = false;
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
@@ -1064,8 +1051,7 @@ describe('runSourcesCommand', () => {
     // direct-uuid path instead of the picker.
     it('fails loudly on a non-TTY update with an explicit uuid instead of hanging on the route-folder prompt', async () => {
       process.stdin.isTTY = false;
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input } = await import('@inquirer/prompts');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
@@ -1086,8 +1072,7 @@ describe('runSourcesCommand', () => {
     // folder left unchanged must still send an update, carrying only the
     // fieldMapping key.
     it('sends fieldMapping alone when only the field-mapping opt-in is accepted', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1117,8 +1102,7 @@ describe('runSourcesCommand', () => {
     // Field mapping must be reachable from the picker path too, not just the
     // explicit-uuid path exercised above.
     it('sends fieldMapping when the opt-in is accepted via the interactive picker', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, select, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(select).mockResolvedValue('abc-123');
@@ -1144,8 +1128,7 @@ describe('runSourcesCommand', () => {
     // Both an actual route-folder change and an accepted field-mapping
     // opt-in must land in the same PATCH call.
     it('sends both routeFolder and fieldMapping when both are changed', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1172,8 +1155,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('prefills each field-mapping prompt with the stored value', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1208,8 +1190,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('does not send an update when every prefilled field-mapping value is re-accepted', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1229,8 +1210,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('removes a stored field-mapping key when the clear sentinel is entered', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1258,8 +1238,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('sends fieldMapping null when every stored key is removed with the clear sentinel', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([mappedSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1479,8 +1458,7 @@ describe('runSourcesCommand', () => {
 
     it('does not send an update when a hostile stored value is re-accepted as its sanitized default', async () => {
       const control = String.fromCharCode(0x1b);
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       const hostileTitle = `data.${control}[31msubject`;
       vi.mocked(fetchSources).mockResolvedValue([
@@ -1502,8 +1480,7 @@ describe('runSourcesCommand', () => {
     // a real route-folder change, so the payload is proven to carry
     // routeFolder alone with no fieldMapping key.
     it('sends routeFolder alone when the field-mapping opt-in is explicitly declined', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(false);
@@ -1527,8 +1504,7 @@ describe('runSourcesCommand', () => {
     // so sending `{}` here would clear it. A real route-folder change still
     // goes through; only fieldMapping is omitted.
     it('omits fieldMapping (does not send an empty object) when every field is left blank', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1557,8 +1533,7 @@ describe('runSourcesCommand', () => {
     // full no-op, exactly like declining outright — no call to updateSource,
     // same as the existing 'accepted unchanged' case above.
     it('makes no update call when the route folder is unchanged and every field-mapping field is left blank', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { input, confirm } = await import('@inquirer/prompts');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(confirm).mockResolvedValue(true);
@@ -1649,8 +1624,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('treats an empty stored mapping object as already empty', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, fieldMapping: {} },
       ]);
@@ -1662,8 +1636,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('sends the clear when the list response omits fieldMapping entirely', async () => {
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { fieldMapping: _omitted, ...sourceWithoutMapping } = webhookSource;
       vi.mocked(fetchSources).mockResolvedValue([
         sourceWithoutMapping as unknown as Source,
@@ -1742,23 +1715,26 @@ describe('runSourcesCommand', () => {
       ['--yes', '--yes is only supported by'],
       ['--json', '--json is only supported by'],
       ['--payload={}', '--payload is only supported by'],
-    ])('rejects combining it with %s', async (extraFlag, expectedMessage) => {
-      const { updateSource } = await import('#src/libs/sources.js');
-      const { runSourcesCommand } = await import('#src/commands/sources.js');
+    ])(
+      'rejects combining it with %s',
+      async (extraFlag, expectedMessage) => {
+        const { updateSource } = await import('#src/libs/sources.js');
+        const { runSourcesCommand } = await import('#src/commands/sources.js');
 
-      await runSourcesCommand([
-        'update',
-        'abc-123',
-        '--clear-field-mapping',
-        extraFlag,
-      ]);
+        await runSourcesCommand([
+          'update',
+          'abc-123',
+          '--clear-field-mapping',
+          extraFlag,
+        ]);
 
-      expect(updateSource).not.toHaveBeenCalled();
-      expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining(expectedMessage),
-      );
-      expect(process.exitCode).toBe(1);
-    });
+        expect(updateSource).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+          expect.stringContaining(expectedMessage),
+        );
+        expect(process.exitCode).toBe(1);
+      },
+    );
 
     it('reports the missing uuid, not the interactive guard, on a non-TTY run', async () => {
       process.stdin.isTTY = false;
@@ -1795,8 +1771,7 @@ describe('runSourcesCommand', () => {
 
   describe('delete', () => {
     it('deletes directly by uuid when one is provided and confirmed', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { select, confirm } = await import('@inquirer/prompts');
@@ -1811,8 +1786,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('prompts to pick a source when no uuid is given, then confirms', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { select, confirm } = await import('@inquirer/prompts');
@@ -1829,8 +1803,7 @@ describe('runSourcesCommand', () => {
     // picker and honor the selection — not open the picker and then silently
     // discard the pick on the `!targetUuid` guard (the `??`-vs-`||` trap).
     it('falls through to the picker for an empty-string uuid and deletes the pick', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { select, confirm } = await import('@inquirer/prompts');
@@ -1847,8 +1820,7 @@ describe('runSourcesCommand', () => {
     // The confirmation is the whole point of the feature: a "no" answer must
     // abort before any DELETE reaches the server.
     it('aborts without deleting when the confirmation is declined', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       const { confirm } = await import('@inquirer/prompts');
       vi.mocked(confirm).mockResolvedValue(false);
@@ -1865,8 +1837,7 @@ describe('runSourcesCommand', () => {
     // The confirm message must name the source being deleted so the user knows
     // what they're destroying, and warn that it's irreversible.
     it('shows the uuid and an irreversible-warning in the confirmation prompt', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
@@ -1890,8 +1861,7 @@ describe('runSourcesCommand', () => {
     // but wrong copy-pasted uuid shows its real name for the user to catch,
     // rather than echoing back the string they typed.
     it('names the looked-up source on the direct-uuid path', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
@@ -1909,8 +1879,7 @@ describe('runSourcesCommand', () => {
     // transport error into []) must still confirm on the bare uuid — and flag
     // the miss so it isn't mistaken for a matched source — never block delete.
     it('flags the miss in the label when the source lookup finds nothing', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
@@ -1930,8 +1899,7 @@ describe('runSourcesCommand', () => {
     // change. It falls back to the bare uuid, says the name is unavailable (not
     // that the source is missing), and still confirms + deletes.
     it('still confirms and deletes when the label lookup times out', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       const timeoutError = Object.assign(new Error('timed out'), {
         name: 'ApiTimeoutError',
       });
@@ -1957,8 +1925,7 @@ describe('runSourcesCommand', () => {
     // before it reaches the confirm prompt, same as every other printed field.
     it('sanitizes the uuid in the confirmation prompt', async () => {
       const control = String.fromCharCode(0x1b);
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, uuid: `abc${control}123` },
       ]);
@@ -1979,8 +1946,7 @@ describe('runSourcesCommand', () => {
     // The scripting escape hatch: --yes deletes straight away with no prompt
     // and no label lookup (the short-circuit must skip fetchSources entirely).
     it('skips the confirmation and the label lookup when --yes is passed', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { confirm } = await import('@inquirer/prompts');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
@@ -1995,8 +1961,7 @@ describe('runSourcesCommand', () => {
     // A Ctrl+C at the confirmation is a deliberate abort: it must delete
     // nothing, exit 0, and stay quiet — never fall through to the DELETE.
     it('aborts cleanly without deleting when the confirmation is Ctrl+C-ed', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       const { confirm } = await import('@inquirer/prompts');
       const exitPromptError = Object.assign(new Error('User force closed'), {
@@ -2015,8 +1980,7 @@ describe('runSourcesCommand', () => {
     // The interactive confirmation names the picked source so the user can
     // recognize it, not just the opaque uuid they never typed.
     it('names the picked source in the confirmation prompt', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue({ deleted: 1 });
       const { select, confirm } = await import('@inquirer/prompts');
@@ -2067,8 +2031,7 @@ describe('runSourcesCommand', () => {
 
     it('rejects --yes on update before dispatching', async () => {
       const { checkConfig } = await import('#src/libs/config.js');
-      const { fetchSources, updateSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, updateSource } = await import('#src/libs/sources.js');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
       await runSourcesCommand(['update', '--yes']);
@@ -2082,8 +2045,7 @@ describe('runSourcesCommand', () => {
     // --yes promises a non-interactive delete, so with no uuid it must fail
     // rather than open the picker a script can't answer.
     it('rejects --yes without a uuid instead of opening the picker', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       const { select } = await import('@inquirer/prompts');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
 
@@ -2151,8 +2113,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('does nothing when there are no sources to pick from', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([]);
       const { confirm } = await import('@inquirer/prompts');
       const { runSourcesCommand } = await import('#src/commands/sources.js');
@@ -2165,8 +2126,7 @@ describe('runSourcesCommand', () => {
     });
 
     it('reports an error when deletion fails', async () => {
-      const { fetchSources, deleteSource } =
-        await import('#src/libs/sources.js');
+      const { fetchSources, deleteSource } = await import('#src/libs/sources.js');
       vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
       vi.mocked(deleteSource).mockResolvedValue(null);
       const { confirm } = await import('@inquirer/prompts');
@@ -2932,8 +2892,7 @@ describe('runSourcesCommand', () => {
         'rejects %s payload (valid JSON, not an object) with a usage error',
         async (_description, rawPayload) => {
           const { testSource } = await import('#src/libs/sources.js');
-          const { runSourcesCommand } =
-            await import('#src/commands/sources.js');
+          const { runSourcesCommand } = await import('#src/commands/sources.js');
 
           await runSourcesCommand(['test', 'abc-123', '--payload', rawPayload]);
 
