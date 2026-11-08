@@ -536,6 +536,27 @@ describe('runTokensCommand', () => {
       expect(process.exitCode).toBeUndefined();
     });
 
+    it('prints scopes: null as JSON for --full-access --json', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      vi.mocked(updateTokenScopes).mockResolvedValue({
+        ...scopedToken,
+        scopes: null,
+      });
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand([
+        'update',
+        'tok-def-456',
+        '--full-access',
+        '--json',
+      ]);
+
+      const printed = JSON.parse(
+        String(vi.mocked(console.log).mock.calls[0][0]),
+      );
+      expect(printed.scopes).toBeNull();
+    });
+
     it('rejects --full-access combined with --scopes', async () => {
       const { updateTokenScopes } = await import('#src/libs/tokens.js');
       const { runTokensCommand } = await import('#src/commands/tokens.js');
@@ -598,7 +619,7 @@ describe('runTokensCommand', () => {
 
       expect(updateTokenScopes).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('requires --scopes'),
+        expect.stringContaining('requires --scopes <a,b> or --full-access'),
       );
       expect(process.exitCode).toBe(1);
     });
