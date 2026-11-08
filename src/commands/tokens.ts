@@ -21,6 +21,10 @@ import {
   parseOrFailWithUsage,
 } from '#src/libs/usage.js';
 import { hasJsonFlag, printJson } from '#src/libs/output.js';
+import {
+  findLostCommandScopes,
+  formatLostScopesWarning,
+} from '#src/libs/token-scopes.js';
 import { CreateTokenInput, Token } from '#src/types/tokens.types.js';
 import type { ScopeName } from '#src/types/vendor/markpost-scopes.generated.js';
 
@@ -29,7 +33,8 @@ export const USAGE = `Usage: markpost tokens <list|create|update|revoke> [id] [-
   list                                             List all API tokens (pass --json for machine-readable output)
   create --name <name> [--expires-in-days <days>] [--scopes <a,b>]
                                                    Mint a new API token; the raw secret is shown once and cannot be retrieved again. Omit --scopes for a full-access token
-  update <id> (--scopes <a,b> | --full-access)     Replace an existing token's scopes, or restore full access, without rotating its secret (pass --json for machine-readable output)
+  update <id> (--scopes <a,b> | --full-access) [--yes]
+                                                   Replace an existing token's scopes, or restore full access, without rotating its secret (pass --json for machine-readable output). When it narrows the token this CLI is configured with, asks to confirm first; pass --yes to skip the prompt (for scripts)
   revoke <id>                                      Revoke an API token by id. Asks to confirm first (revoking is irreversible); pass --yes to skip the prompt (for scripts)`;
 
 const LIST_SUBCOMMAND = 'list';
@@ -60,6 +65,7 @@ const hasYesFlag = (args: string[]): boolean => {
 };
 
 const JSON_SUBCOMMANDS = new Set([LIST_SUBCOMMAND, UPDATE_SUBCOMMAND]);
+const YES_SUBCOMMANDS = new Set([UPDATE_SUBCOMMAND, REVOKE_SUBCOMMAND]);
 
 const TOKEN_SECRET_NOTICE =
   'API token (shown once — copy it now, it cannot be retrieved later):';
@@ -282,6 +288,7 @@ const parseUpdateArgs = (rest: string[]) =>
       scopes: { type: 'string' },
       'full-access': { type: 'boolean' },
       json: { type: 'boolean' },
+      yes: { type: 'boolean' },
     },
   });
 
@@ -342,9 +349,83 @@ const resolveUpdateInvocation = (
   return { id, scopes: parsedScopes.scopes };
 };
 
+// Best-effort, like the revoke lookup: a failed list fetch must not block an
+// update that would otherwise succeed, so it resolves to null (no warning).
+// The configured-token check needs the token's current scopes and prefix,
+// which only the list carries.
+const lookupConfiguredTokenForUpdate = async (
+  id: string,
+): Promise<Token | null> => {
+  const token = await lookupTokenById(id).catch(() => null);
+
+  return token && isConfiguredToken(token) ? token : null;
+};
+
+// The warning to show when this update would strip scopes the CLI's own
+// commands need from the token it is configured with, or null when it is
+// safe. `null` scopes (full access) can never lose anything.
+const narrowingWarningFor = async (
+  invocation: UpdateTokenInvocation,
+): Promise<string | null> => {
+  if (invocation.scopes === null) {
+    return null;
+  }
+
+  // Scopes that still cover everything the CLI needs can never lose anything
+  // for any token, so skip the list request.
+  if (findLostCommandScopes(null, invocation.scopes).length === 0) {
+    return null;
+  }
+
+  const configured = await lookupConfiguredTokenForUpdate(invocation.id);
+
+  if (!configured) {
+    return null;
+  }
+
+  const lost = findLostCommandScopes(configured.scopes, invocation.scopes);
+
+  return lost.length > 0 ? formatLostScopesWarning(invocation.id, lost) : null;
+};
+
+const NARROWING_NEEDS_CONFIRMATION =
+  'Refusing to narrow the configured token without confirmation; pass --yes (`markpost tokens update <id> --scopes <a,b> --yes`) to proceed.';
+
+// Prints the warning to stderr, then: --yes proceeds, an interactive terminal
+// gets a confirm prompt (default no), anything else refuses rather than hang
+// on a prompt nobody can answer. JSON mode never reaches this (it stays
+// non-interactive and carries the warning as a field instead).
+const confirmNarrowing = async (
+  warning: string,
+  skipConfirm: boolean,
+): Promise<boolean> => {
+  console.error(chalk.yellowBright(warning));
+
+  if (skipConfirm) {
+    return true;
+  }
+
+  if (!isInteractiveTerminal()) {
+    failWithMessage(NARROWING_NEEDS_CONFIRMATION);
+    return false;
+  }
+
+  const confirmed = await confirm({
+    message: 'Update the token anyway?',
+    default: false,
+  });
+
+  if (!confirmed) {
+    console.log('Update cancelled.');
+  }
+
+  return confirmed;
+};
+
 const updateTokenCommand = async (
   rest: string[],
   json: boolean,
+  skipConfirm: boolean,
 ): Promise<void> => {
   const parsed = parseOrFailWithUsage(() => parseUpdateArgs(rest), USAGE, json);
 
@@ -358,6 +439,12 @@ const updateTokenCommand = async (
     return;
   }
 
+  const warning = await narrowingWarningFor(invocation);
+
+  if (warning && !json && !(await confirmNarrowing(warning, skipConfirm))) {
+    return;
+  }
+
   const updated = await updateTokenScopes(invocation.id, {
     scopes: invocation.scopes,
   });
@@ -368,7 +455,11 @@ const updateTokenCommand = async (
   }
 
   if (json) {
-    printJson(serializeTokenForJson(updated));
+    printJson(
+      warning
+        ? { ...serializeTokenForJson(updated), warning }
+        : serializeTokenForJson(updated),
+    );
     return;
   }
 
@@ -530,15 +621,19 @@ const revokeTokenCommand = async (
 // always has a handler — mirrors settings.ts/sources.ts. A Map (not an
 // object) keeps a subcommand named "toString" from resolving to a prototype
 // member. Every handler takes the same `(rest, json, skipConfirm)` shape even
-// though only `list` reads `json` and only `revoke` reads `skipConfirm`, so
-// dispatch below is a single call with no per-subcommand branch.
+// though only `list` and `update` read `json` and only `update` and `revoke`
+// read `skipConfirm`, so dispatch below is a single call with no
+// per-subcommand branch.
 const TOKENS_HANDLERS = new Map<
   string,
   (rest: string[], json: boolean, skipConfirm: boolean) => Promise<void>
 >([
   [LIST_SUBCOMMAND, (rest, json) => listTokensCommand(rest, json)],
   [CREATE_SUBCOMMAND, (rest) => createTokenCommand(rest)],
-  [UPDATE_SUBCOMMAND, (rest, json) => updateTokenCommand(rest, json)],
+  [
+    UPDATE_SUBCOMMAND,
+    (rest, json, skipConfirm) => updateTokenCommand(rest, json, skipConfirm),
+  ],
   [
     REVOKE_SUBCOMMAND,
     (rest, _json, skipConfirm) => revokeTokenCommand(rest, skipConfirm),
@@ -587,10 +682,11 @@ const usageErrorFor = (
     return `--json is only supported by ${supported}.`;
   }
 
-  // --yes only skips the revoke confirmation; reject it elsewhere so a
-  // misplaced flag fails loudly instead of appearing to take effect.
-  if (skipConfirm && subcommand !== REVOKE_SUBCOMMAND) {
-    return `--yes is only supported by \`tokens ${REVOKE_SUBCOMMAND}\`.`;
+  // --yes only skips the revoke and narrowing-update confirmations; reject it
+  // elsewhere so a misplaced flag fails loudly instead of appearing to take
+  // effect.
+  if (skipConfirm && !YES_SUBCOMMANDS.has(subcommand)) {
+    return `--yes is only supported by \`tokens ${UPDATE_SUBCOMMAND}\` and \`tokens ${REVOKE_SUBCOMMAND}\`.`;
   }
 
   // --yes promises a non-interactive revoke, so it needs an explicit id —

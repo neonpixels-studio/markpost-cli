@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { COMMAND_REQUIRED_SCOPES } from '#src/libs/token-scopes.js';
 import { CreatedToken, Token } from '#src/types/tokens.types.js';
 
 vi.mock('#src/libs/config.js', () => ({
@@ -61,6 +62,9 @@ const loggedText = (): string =>
     .flat()
     .map((value) => String(value))
     .join('\n');
+
+const errorText = (): string =>
+  vi.mocked(console.error).mock.calls.flat().join('\n');
 
 describe('runTokensCommand', () => {
   // `tokens revoke` now refuses to prompt without an interactive terminal
@@ -515,6 +519,208 @@ describe('runTokensCommand', () => {
         expect.stringContaining('records:read'),
       );
       expect(process.exitCode).toBeUndefined();
+    });
+
+    describe('narrowing the configured token', () => {
+      const CONFIGURED_SECRET = 'mp_live_ab12_rest_of_secret';
+      const WARNING_TEXT = 'drop scopes its commands need';
+
+      const setUpConfiguredToken = async (scopes: string[] | null) => {
+        const { getApiToken } = await import('#src/libs/api.js');
+        const { fetchTokens, updateTokenScopes } =
+          await import('#src/libs/tokens.js');
+        vi.mocked(getApiToken).mockReturnValue(CONFIGURED_SECRET);
+        vi.mocked(fetchTokens).mockResolvedValue([{ ...mockToken, scopes }]);
+        vi.mocked(updateTokenScopes).mockResolvedValue({
+          ...mockToken,
+          scopes: ['records:read'],
+        });
+        const { confirm } = await import('@inquirer/prompts');
+        const { runTokensCommand } = await import('#src/commands/tokens.js');
+        return { updateTokenScopes, confirm, runTokensCommand };
+      };
+
+      const NARROW_ARGS = ['update', 'tok-abc-123', '--scopes', 'records:read'];
+
+      it('warns and asks to confirm, updating once confirmed', async () => {
+        const { updateTokenScopes, confirm, runTokensCommand } =
+          await setUpConfiguredToken(null);
+        vi.mocked(confirm).mockResolvedValue(true);
+
+        await runTokensCommand(NARROW_ARGS);
+
+        expect(confirm).toHaveBeenCalled();
+        expect(errorText()).toContain(WARNING_TEXT);
+        expect(errorText()).toContain('sync (records:write, settings:read)');
+        expect(updateTokenScopes).toHaveBeenCalled();
+      });
+
+      it('never prints the raw configured secret', async () => {
+        const { confirm, runTokensCommand } = await setUpConfiguredToken(null);
+        vi.mocked(confirm).mockResolvedValue(true);
+
+        await runTokensCommand(NARROW_ARGS);
+
+        expect(loggedText()).not.toContain(CONFIGURED_SECRET);
+        expect(errorText()).not.toContain(CONFIGURED_SECRET);
+      });
+
+      it('cancels without updating when the prompt is declined', async () => {
+        const { updateTokenScopes, confirm, runTokensCommand } =
+          await setUpConfiguredToken(null);
+        vi.mocked(confirm).mockResolvedValue(false);
+
+        await runTokensCommand(NARROW_ARGS);
+
+        expect(updateTokenScopes).not.toHaveBeenCalled();
+        expect(console.log).toHaveBeenCalledWith('Update cancelled.');
+      });
+
+      it('with --yes warns on stderr but skips the prompt', async () => {
+        const { updateTokenScopes, confirm, runTokensCommand } =
+          await setUpConfiguredToken(null);
+
+        await runTokensCommand([...NARROW_ARGS, '--yes']);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(errorText()).toContain(WARNING_TEXT);
+        expect(updateTokenScopes).toHaveBeenCalled();
+      });
+
+      it('proceeds with --yes on a non-interactive terminal', async () => {
+        const { updateTokenScopes, confirm, runTokensCommand } =
+          await setUpConfiguredToken(null);
+        process.stdin.isTTY = false;
+
+        await runTokensCommand([...NARROW_ARGS, '--yes']);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(updateTokenScopes).toHaveBeenCalled();
+        expect(process.exitCode).toBeUndefined();
+      });
+
+      it('refuses without --yes on a non-interactive terminal', async () => {
+        const { updateTokenScopes, confirm, runTokensCommand } =
+          await setUpConfiguredToken(null);
+        process.stdin.isTTY = false;
+
+        await runTokensCommand(NARROW_ARGS);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(updateTokenScopes).not.toHaveBeenCalled();
+        expect(errorText()).toContain(
+          'Refusing to narrow the configured token',
+        );
+        expect(process.exitCode).toBe(1);
+      });
+
+      it('stays non-interactive in --json mode and adds a warning field', async () => {
+        const { updateTokenScopes, confirm, runTokensCommand } =
+          await setUpConfiguredToken(null);
+
+        await runTokensCommand([...NARROW_ARGS, '--json']);
+
+        const printed = JSON.parse(
+          String(vi.mocked(console.log).mock.calls[0][0]),
+        );
+        expect(confirm).not.toHaveBeenCalled();
+        expect(updateTokenScopes).toHaveBeenCalled();
+        expect(printed.warning).toContain(WARNING_TEXT);
+      });
+
+      it('omits the warning field in --json mode when nothing is lost', async () => {
+        const { runTokensCommand } = await setUpConfiguredToken(null);
+        const { fetchTokens } = await import('#src/libs/tokens.js');
+        vi.mocked(fetchTokens).mockClear();
+
+        await runTokensCommand([
+          'update',
+          'tok-abc-123',
+          '--scopes',
+          [...new Set(Object.values(COMMAND_REQUIRED_SCOPES).flat())].join(','),
+          '--json',
+        ]);
+
+        const printed = JSON.parse(
+          String(vi.mocked(console.log).mock.calls[0][0]),
+        );
+        expect(printed).not.toHaveProperty('warning');
+        expect(fetchTokens).not.toHaveBeenCalled();
+      });
+
+      it('accepts --yes without prompting or warning when nothing is lost', async () => {
+        const { confirm, updateTokenScopes, runTokensCommand } =
+          await setUpConfiguredToken(null);
+
+        await runTokensCommand([
+          'update',
+          'tok-abc-123',
+          '--scopes',
+          [...new Set(Object.values(COMMAND_REQUIRED_SCOPES).flat())].join(','),
+          '--yes',
+        ]);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(errorText()).toBe('');
+        expect(updateTokenScopes).toHaveBeenCalled();
+      });
+
+      it('does not warn for scopes the token never held', async () => {
+        const { confirm, updateTokenScopes, runTokensCommand } =
+          await setUpConfiguredToken(['records:read']);
+
+        await runTokensCommand(NARROW_ARGS);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(updateTokenScopes).toHaveBeenCalled();
+        expect(errorText()).toBe('');
+      });
+
+      it('does not warn when updating a token that is not the configured one', async () => {
+        const { getApiToken } = await import('#src/libs/api.js');
+        const { confirm, updateTokenScopes, runTokensCommand } =
+          await setUpConfiguredToken(null);
+        vi.mocked(getApiToken).mockReturnValue('mp_live_zz99_other_secret');
+
+        await runTokensCommand(NARROW_ARGS);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(updateTokenScopes).toHaveBeenCalled();
+        expect(errorText()).toBe('');
+      });
+
+      it('does not warn or prompt for --full-access on the configured token', async () => {
+        const { fetchTokens } = await import('#src/libs/tokens.js');
+        const { confirm, updateTokenScopes, runTokensCommand } =
+          await setUpConfiguredToken(['records:read']);
+        vi.mocked(updateTokenScopes).mockResolvedValue({
+          ...mockToken,
+          scopes: null,
+        });
+
+        await runTokensCommand(['update', 'tok-abc-123', '--full-access']);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(fetchTokens).not.toHaveBeenCalled();
+        expect(errorText()).toBe('');
+        expect(updateTokenScopes).toHaveBeenCalledWith('tok-abc-123', {
+          scopes: null,
+        });
+      });
+
+      it('still updates when the token list cannot be loaded', async () => {
+        const { fetchTokens } = await import('#src/libs/tokens.js');
+        const { confirm, updateTokenScopes, runTokensCommand } =
+          await setUpConfiguredToken(null);
+        vi.mocked(fetchTokens).mockRejectedValue(new Error('403'));
+
+        await runTokensCommand(NARROW_ARGS);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(updateTokenScopes).toHaveBeenCalled();
+        expect(process.exitCode).toBeUndefined();
+        expect(errorText()).toBe('');
+      });
     });
 
     it('restores full access with --full-access by sending scopes: null', async () => {
@@ -1198,7 +1404,9 @@ describe('runTokensCommand', () => {
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchTokens).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('--yes is only supported by `tokens revoke`.'),
+        expect.stringContaining(
+          '--yes is only supported by `tokens update` and `tokens revoke`.',
+        ),
       );
       expect(process.exitCode).toBe(1);
     });
