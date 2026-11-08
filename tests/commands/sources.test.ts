@@ -381,7 +381,8 @@ describe('runSourcesCommand', () => {
 
     it('includes paused in --json output, false when the response omits it or is not a boolean', async () => {
       const { fetchSources } = await import('#src/libs/sources.js');
-      const { paused: _omitted, ...legacySource } = emailSource;
+      const legacySource: Partial<Source> = { ...emailSource };
+      delete legacySource.paused;
       vi.mocked(fetchSources).mockResolvedValue([
         { ...webhookSource, paused: true },
         emailSource,
