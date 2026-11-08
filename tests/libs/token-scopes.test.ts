@@ -40,9 +40,13 @@ describe('findLostCommandScopes', () => {
     );
     const lost = findLostCommandScopes(['records:read'], ['events:read']);
 
-    expect(lost.every(({ scopes }) => scopes.join() === 'records:read')).toBe(
-      true,
-    );
+    expect(lost.map(({ command }) => command)).toEqual([
+      'sync',
+      'get',
+      'records',
+      'export',
+    ]);
+    lost.forEach(({ scopes }) => expect(scopes).toEqual(['records:read']));
   });
 
   it('never loses anything when the new scopes are full access', () => {

@@ -348,6 +348,12 @@ const narrowingWarningFor = async (
     return null;
   }
 
+  // Scopes that still cover everything the CLI needs can never lose anything
+  // for any token, so skip the list request.
+  if (findLostCommandScopes(null, invocation.scopes).length === 0) {
+    return null;
+  }
+
   const configured = await lookupConfiguredTokenForUpdate(invocation.id);
 
   if (!configured) {
@@ -592,7 +598,8 @@ const revokeTokenCommand = async (
 // always has a handler — mirrors settings.ts/sources.ts. A Map (not an
 // object) keeps a subcommand named "toString" from resolving to a prototype
 // member. Every handler takes the same `(rest, json, skipConfirm)` shape even
-// though only `list` reads `json` and only `revoke` reads `skipConfirm`, so
+// though only `list` and `update` read `json` and only `update` and `revoke`
+// read `skipConfirm`, so
 // dispatch below is a single call with no per-subcommand branch.
 const TOKENS_HANDLERS = new Map<
   string,

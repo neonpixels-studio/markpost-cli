@@ -616,6 +616,8 @@ describe('runTokensCommand', () => {
 
       it('omits the warning field in --json mode when nothing is lost', async () => {
         const { runTokensCommand } = await setUpConfiguredToken(null);
+        const { fetchTokens } = await import('#src/libs/tokens.js');
+        vi.mocked(fetchTokens).mockClear();
 
         await runTokensCommand([
           'update',
@@ -629,6 +631,7 @@ describe('runTokensCommand', () => {
           String(vi.mocked(console.log).mock.calls[0][0]),
         );
         expect(printed).not.toHaveProperty('warning');
+        expect(fetchTokens).not.toHaveBeenCalled();
       });
 
       it('does not warn for scopes the token never held', async () => {
