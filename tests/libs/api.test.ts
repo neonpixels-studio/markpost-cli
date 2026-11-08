@@ -42,6 +42,11 @@ describe('getBaseUrl', () => {
   const original = process.env.BASE_URL;
 
   afterEach(() => {
+    if (original === undefined) {
+      delete process.env.BASE_URL;
+      return;
+    }
+
     process.env.BASE_URL = original;
   });
 
@@ -77,6 +82,15 @@ describe('getBaseUrl', () => {
   ])('refuses unsafe or malformed BASE_URL %j', (url) => {
     process.env.BASE_URL = url;
     expect(() => getBaseUrl()).toThrow(InvalidBaseUrlError);
+  });
+
+  it.each([
+    ['ftp://localhost', /unsupported protocol "ftp:"/],
+    ['http://example.com', /unencrypted/],
+    ['not a url', /not a valid URL/],
+  ])('explains why %s is refused', (url, message) => {
+    process.env.BASE_URL = url;
+    expect(() => getBaseUrl()).toThrow(message);
   });
 
   it('lets an invalid BASE_URL escape logApiFailure instead of being swallowed', () => {
