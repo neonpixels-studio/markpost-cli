@@ -562,6 +562,7 @@ describe('runTokensCommand', () => {
         await runTokensCommand(NARROW_ARGS);
 
         expect(loggedText()).not.toContain(CONFIGURED_SECRET);
+        expect(errorText()).not.toContain(CONFIGURED_SECRET);
       });
 
       it('cancels without updating when the prompt is declined', async () => {
@@ -584,6 +585,18 @@ describe('runTokensCommand', () => {
         expect(confirm).not.toHaveBeenCalled();
         expect(errorText()).toContain(WARNING_TEXT);
         expect(updateTokenScopes).toHaveBeenCalled();
+      });
+
+      it('proceeds with --yes on a non-interactive terminal', async () => {
+        const { updateTokenScopes, confirm, runTokensCommand } =
+          await setUpConfiguredToken(null);
+        process.stdin.isTTY = false;
+
+        await runTokensCommand([...NARROW_ARGS, '--yes']);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(updateTokenScopes).toHaveBeenCalled();
+        expect(process.exitCode).toBeUndefined();
       });
 
       it('refuses without --yes on a non-interactive terminal', async () => {
@@ -660,6 +673,7 @@ describe('runTokensCommand', () => {
 
         expect(confirm).not.toHaveBeenCalled();
         expect(updateTokenScopes).toHaveBeenCalled();
+        expect(errorText()).toBe('');
       });
 
       it('does not warn when updating a token that is not the configured one', async () => {
@@ -672,6 +686,7 @@ describe('runTokensCommand', () => {
 
         expect(confirm).not.toHaveBeenCalled();
         expect(updateTokenScopes).toHaveBeenCalled();
+        expect(errorText()).toBe('');
       });
 
       it('still updates when the token list cannot be loaded', async () => {
@@ -685,6 +700,7 @@ describe('runTokensCommand', () => {
         expect(confirm).not.toHaveBeenCalled();
         expect(updateTokenScopes).toHaveBeenCalled();
         expect(process.exitCode).toBeUndefined();
+        expect(errorText()).toBe('');
       });
     });
 
