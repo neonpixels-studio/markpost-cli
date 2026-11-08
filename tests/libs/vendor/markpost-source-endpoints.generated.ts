@@ -17,6 +17,6 @@
 
 /* eslint-disable */
 
-export const WEBHOOK_INGEST_BASE = "https://ingest.markpost.io/v1/hooks";
+export const WEBHOOK_INGEST_BASE = 'https://ingest.markpost.io/v1/hooks';
 
-export const EMAIL_DOMAIN = "in.markpost.io";
+export const EMAIL_DOMAIN = 'in.markpost.io';

@@ -33,11 +33,11 @@ export const USAGE = `Usage: markpost events <list|export> [options]
           non-zero so a script can detect an incomplete export.
 
 Options:
-  --json        Print the events as JSON instead of formatted text
+  --json        Print the events as JSON instead of formatted text (export:
+                cannot be combined with --out)
   --out <path>  (export) Write the export as JSON to <path> instead of
                 printing to stdout (creates parent directories as needed)
-  --force       (export) Overwrite <path> if it already exists (--out only)
-                With export, --json cannot be combined with --out.`;
+  --force       (export) Overwrite <path> if it already exists (--out only)`;
 
 export const runEventsCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in

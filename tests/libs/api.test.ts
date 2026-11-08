@@ -22,7 +22,11 @@ import {
   unwrapResourceCollection,
 } from '#src/libs/api.js';
 import { logErrorMessage } from '#src/libs/errors.js';
-import { ApiError, ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
+import {
+  ApiError,
+  ApiResourceObject,
+  ApiResponse,
+} from '#src/types/api.types.js';
 
 vi.mock('#src/libs/config.js', () => ({
   getConfigValue: vi.fn(),

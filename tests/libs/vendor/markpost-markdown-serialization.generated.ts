@@ -41,26 +41,26 @@ function quoteYamlScalar(value: string): string {
   if (!needsQuoting) {
     return value;
   }
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
 }
 
 function serializeTagsLine(tags: string[]): string {
   if (tags.length === 0) {
-    return "tags: []";
+    return 'tags: []';
   }
-  const quotedTags = tags.map((tag) => quoteYamlScalar(tag)).join(", ");
+  const quotedTags = tags.map((tag) => quoteYamlScalar(tag)).join(', ');
   return `tags: [${quotedTags}]`;
 }
 
 export function serializeFrontmatter(frontmatter: FrontmatterObject): string {
   return [
-    "---",
+    '---',
     `title: ${quoteYamlScalar(frontmatter.title)}`,
     `source: ${quoteYamlScalar(frontmatter.source)}`,
     `created: ${frontmatter.created}`,
     serializeTagsLine(frontmatter.tags),
-    "---",
-  ].join("\n");
+    '---',
+  ].join('\n');
 }
 
 export function assembleMarkdownDocument(parsedPayload: ParsedPayload): string {

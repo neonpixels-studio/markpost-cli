@@ -228,6 +228,26 @@ describe('runEventsCommand export', () => {
       expect(writeExportFile).toHaveBeenCalledWith('/tmp/e.json', [], true);
     });
 
+    it('still writes the rows, warns and exits non-zero for a truncated export', async () => {
+      const { fetchEventExport, writeExportFile, runEventsCommand } =
+        await loadModules();
+      vi.mocked(fetchEventExport).mockResolvedValue({
+        ...completeExport([firstRow]),
+        truncated: true,
+      });
+      vi.mocked(writeExportFile).mockReturnValue('/tmp/e.json');
+
+      await runEventsCommand(['export', '--out', '/tmp/e.json']);
+
+      expect(writeExportFile).toHaveBeenCalledWith(
+        '/tmp/e.json',
+        [firstRow],
+        false,
+      );
+      expect(stderrText()).toContain('truncated');
+      expect(process.exitCode).toBe(1);
+    });
+
     it('never writes when the fetch fails', async () => {
       const { fetchEventExport, writeExportFile, runEventsCommand } =
         await loadModules();

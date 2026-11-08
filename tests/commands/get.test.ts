@@ -13,10 +13,9 @@ vi.mock('#src/libs/records.js', async () => {
   // while keeping every other export undefined, so a command that starts
   // calling an unmocked function still fails loudly here instead of quietly
   // running the real implementation.
-  const { ERROR_STATUS } =
-    await vi.importActual<typeof import('#src/libs/records.js')>(
-      '#src/libs/records.js',
-    );
+  const { ERROR_STATUS } = await vi.importActual<
+    typeof import('#src/libs/records.js')
+  >('#src/libs/records.js');
 
   return { ERROR_STATUS, fetchRecord: vi.fn() };
 });

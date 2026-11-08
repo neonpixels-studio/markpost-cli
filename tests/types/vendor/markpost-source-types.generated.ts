@@ -25,12 +25,12 @@
 // "rss" source, so creating one would silently never ingest a single record.
 // See https://github.com/neonpixels-studio/markpost/issues/116.
 export const SOURCE_TYPES = [
-  "webhook",
-  "email",
-  "stripe",
-  "github",
-  "zapier",
-  "shortcuts",
+  'webhook',
+  'email',
+  'stripe',
+  'github',
+  'zapier',
+  'shortcuts',
 ] as const;
 
 export type SourceType = (typeof SOURCE_TYPES)[number];

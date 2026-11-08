@@ -65,7 +65,8 @@ function mockFetch(
   {
     ok = true,
     truncatedHeader,
-  }: { ok?: boolean; truncatedHeader?: string } = {},
+    status = ok ? 200 : 401,
+  }: { ok?: boolean; truncatedHeader?: string; status?: number } = {},
 ) {
   const headers = new Headers();
 
@@ -75,7 +76,7 @@ function mockFetch(
 
   global.fetch = vi.fn().mockResolvedValue({
     ok,
-    status: ok ? 200 : 401,
+    status,
     headers,
     json: () => Promise.resolve(responseBody),
   });
@@ -476,8 +477,10 @@ describe('fetchEventExport', () => {
   });
 
   it('rethrows a systemic auth failure (e.g. missing events:read scope)', async () => {
-    mockFetch({}, { ok: false });
+    mockFetch({}, { ok: false, status: 403 });
 
-    await expect(fetchEventExport()).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(fetchEventExport()).rejects.toMatchObject({
+      statusCode: 403,
+    });
   });
 });

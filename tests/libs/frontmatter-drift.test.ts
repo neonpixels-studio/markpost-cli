@@ -27,7 +27,10 @@ import {
 import manifest from './vendor/markpost-markdown-serialization.manifest.json' with { type: 'json' };
 
 const VENDOR_SLICE_PATH = fileURLToPath(
-  new URL('./vendor/markpost-markdown-serialization.generated.ts', import.meta.url),
+  new URL(
+    './vendor/markpost-markdown-serialization.generated.ts',
+    import.meta.url,
+  ),
 );
 
 // The CLI's `Frontmatter` and markpost's `FrontmatterObject` are structurally
@@ -81,7 +84,7 @@ const SERIALIZATION_CASES: SerializationCase[] = [
     name: 'each YAML metacharacter forces quoting',
     frontmatter: {
       title: 'chars #[]{}&!|>%@`, and more',
-      source: "single ' and double \" quote",
+      source: 'single \' and double " quote',
       created: BASE_CREATED,
       tags: ['a,b', 'a]b', 'c#d'],
     },
