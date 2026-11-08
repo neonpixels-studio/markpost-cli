@@ -53,6 +53,18 @@ describe('checkBaseUrl', () => {
   it('fails for a non-http protocol', () => {
     expect(checkBaseUrl('ftp://markpost.io').ok).toBe(false);
   });
+
+  it('refuses http for a non-loopback host', () => {
+    const result = checkBaseUrl('http://markpost.io');
+
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('unencrypted');
+  });
+
+  it('allows http for loopback hosts', () => {
+    expect(checkBaseUrl('http://localhost:3000').ok).toBe(true);
+    expect(checkBaseUrl('http://127.0.0.1:3000').ok).toBe(true);
+  });
 });
 
 describe('checkApiReachable', () => {

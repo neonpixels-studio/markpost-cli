@@ -15,7 +15,7 @@ import {
   MAX_MARK_SYNCED_BATCH_SIZE,
   updateRecord,
 } from '#src/libs/records.js';
-import { ApiTimeoutError } from '#src/libs/api.js';
+import { ApiTimeoutError, InvalidBaseUrlError } from '#src/libs/api.js';
 import { ApiDeleteMeta } from '#src/types/api.types.js';
 import { Record } from '#src/types/records.types.js';
 
@@ -88,6 +88,20 @@ describe('fetchAllRecords', () => {
   it('returns { ok: false } when the initial fetch fails', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await fetchAllRecords()).toEqual({ ok: false });
+  });
+
+  it('rejects with InvalidBaseUrlError in --json mode instead of a generic failure', async () => {
+    vi.stubEnv('BASE_URL', 'http://example.com');
+    global.fetch = vi.fn();
+
+    try {
+      await expect(fetchAllRecords({}, true)).rejects.toThrow(
+        InvalidBaseUrlError,
+      );
+      expect(global.fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   // markpost answers an invalid filter[source] with a 400; that must surface as

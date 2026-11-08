@@ -13,11 +13,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   EXPORT_TRUNCATED_HEADER,
   ExportFileExistsError,
+  fetchEventExport,
   fetchRecordExport,
   writeExportFile,
 } from '#src/libs/export.js';
 import { ApiRequestError, ApiTimeoutError } from '#src/libs/api.js';
 import { logErrorMessage } from '#src/libs/errors.js';
+import { EventExportRow } from '#src/types/events.types.js';
 import { RecordExportRow } from '#src/types/records.types.js';
 
 // #src/libs/api.js imports #src/libs/config.js, which constructs a real
@@ -63,7 +65,8 @@ function mockFetch(
   {
     ok = true,
     truncatedHeader,
-  }: { ok?: boolean; truncatedHeader?: string } = {},
+    status = ok ? 200 : 401,
+  }: { ok?: boolean; truncatedHeader?: string; status?: number } = {},
 ) {
   const headers = new Headers();
 
@@ -73,7 +76,7 @@ function mockFetch(
 
   global.fetch = vi.fn().mockResolvedValue({
     ok,
-    status: ok ? 200 : 401,
+    status,
     headers,
     json: () => Promise.resolve(responseBody),
   });
@@ -393,5 +396,101 @@ describe('writeExportFile', () => {
     ]);
 
     vi.unstubAllEnvs();
+  });
+});
+
+const eventExportRow: EventExportRow = {
+  id: 'evt-1',
+  ts: '2024-01-01T00:00:00.000Z',
+  kind: 'ok',
+  message: 'Ingested record from webhook',
+  recordUuid: 'rec-1',
+  sourceId: null,
+};
+
+describe('fetchEventExport', () => {
+  beforeEach(() => {
+    vi.mocked(logErrorMessage).mockClear();
+  });
+
+  it('requests GET /api/events/export and returns every row', async () => {
+    mockFetch([eventExportRow], { truncatedHeader: 'false' });
+
+    await expect(fetchEventExport()).resolves.toEqual({
+      ok: true,
+      rows: [eventExportRow],
+      truncated: false,
+      skippedCount: 0,
+    });
+    expect(vi.mocked(global.fetch).mock.calls[0][0]).toBe(
+      'https://example.com/api/events/export',
+    );
+  });
+
+  it('returns truncated:true when the header says "true"', async () => {
+    mockFetch([eventExportRow], { truncatedHeader: 'true' });
+
+    await expect(fetchEventExport()).resolves.toMatchObject({
+      ok: true,
+      truncated: true,
+    });
+  });
+
+  it('fails closed to truncated:true when the header is absent', async () => {
+    mockFetch([eventExportRow]);
+
+    await expect(fetchEventExport()).resolves.toMatchObject({
+      truncated: true,
+    });
+  });
+
+  it('drops rows missing event fields and counts them', async () => {
+    mockFetch([eventExportRow, null, { id: 'no-ts-or-kind' }], {
+      truncatedHeader: 'false',
+    });
+
+    await expect(fetchEventExport()).resolves.toEqual({
+      ok: true,
+      rows: [eventExportRow],
+      truncated: false,
+      skippedCount: 2,
+    });
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'fetchEventExport',
+      'Skipped 2 malformed export row(s)',
+    );
+  });
+
+  it('does not accept a record export row as an event row', async () => {
+    mockFetch([exportRow], { truncatedHeader: 'false' });
+
+    await expect(fetchEventExport()).resolves.toMatchObject({
+      rows: [],
+      skippedCount: 1,
+    });
+  });
+
+  it('returns ok:false when the body is not an array', async () => {
+    mockFetch({ data: [] }, { truncatedHeader: 'false' });
+
+    await expect(fetchEventExport(true)).resolves.toEqual({ ok: false });
+    expect(logErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('suppresses the skipped-row diagnostic under json while still counting', async () => {
+    mockFetch([eventExportRow, null], { truncatedHeader: 'false' });
+
+    await expect(fetchEventExport(true)).resolves.toMatchObject({
+      skippedCount: 1,
+    });
+    expect(logErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('rethrows a systemic auth failure (e.g. missing events:read scope)', async () => {
+    mockFetch({}, { ok: false, status: 403 });
+
+    await expect(fetchEventExport()).rejects.toMatchObject({
+      statusCode: 403,
+    });
   });
 });

@@ -9,6 +9,7 @@ import {
   rethrowIfTimeout,
   unwrapResourceAttributes,
   unwrapResourceCollection,
+  InvalidBaseUrlError,
 } from '#src/libs/api.js';
 import { logErrorMessage } from '#src/libs/errors.js';
 import {
@@ -363,6 +364,12 @@ export const fetchPaginatedRecords = async (
     // fetchAllRecords can't tell apart from a genuinely empty result and would
     // report as a silent "No new records" success (issue #89).
     if (isSystemicApiFailure(error)) {
+      throw error;
+    }
+
+    // Config error, not a per-page failure: surface it in --json mode too so
+    // the reason isn't collapsed into the generic failure message.
+    if (error instanceof InvalidBaseUrlError) {
       throw error;
     }
 

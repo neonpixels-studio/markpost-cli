@@ -21,6 +21,19 @@ export type Event = {
   sourceId: string | null;
 };
 
+// Mirrors the rows GET /api/events/export returns (`serializeExportRow` in
+// markpost's server/api/events/export.get.ts): a bare array, no JSON:API
+// envelope, and no `userId` unlike `Event`. Copied by hand like
+// `RecordExportRow`.
+export type EventExportRow = {
+  id: string;
+  ts: string;
+  kind: string;
+  message: string;
+  recordUuid: string | null;
+  sourceId: string | null;
+};
+
 export type PaginatedEventsMeta = {
   total: number;
   size: number;
