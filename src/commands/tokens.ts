@@ -33,7 +33,8 @@ export const USAGE = `Usage: markpost tokens <list|create|update|revoke> [id] [-
   list                                             List all API tokens (pass --json for machine-readable output)
   create --name <name> [--expires-in-days <days>] [--scopes <a,b>]
                                                    Mint a new API token; the raw secret is shown once and cannot be retrieved again. Omit --scopes for a full-access token
-  update <id> --scopes <a,b> [--yes]               Replace an existing token's scopes without rotating its secret (pass --json for machine-readable output). When it narrows the token this CLI is configured with, asks to confirm first; pass --yes to skip the prompt (for scripts)
+  update <id> (--scopes <a,b> | --full-access) [--yes]
+                                                   Replace an existing token's scopes, or restore full access, without rotating its secret (pass --json for machine-readable output). When it narrows the token this CLI is configured with, asks to confirm first; pass --yes to skip the prompt (for scripts)
   revoke <id>                                      Revoke an API token by id. Asks to confirm first (revoking is irreversible); pass --yes to skip the prompt (for scripts)`;
 
 const LIST_SUBCOMMAND = 'list';
@@ -285,12 +286,15 @@ const parseUpdateArgs = (rest: string[]) =>
     allowPositionals: true,
     options: {
       scopes: { type: 'string' },
+      'full-access': { type: 'boolean' },
       json: { type: 'boolean' },
       yes: { type: 'boolean' },
     },
   });
 
-type UpdateTokenInvocation = { id: string; scopes: ScopeName[] };
+// `scopes: null` is markpost's explicit full-access value on PATCH
+// /api/tokens/{id}; an omitted key is rejected server-side.
+type UpdateTokenInvocation = { id: string; scopes: ScopeName[] | null };
 
 // Validates everything about a `tokens update` invocation that can be checked
 // without a request. Reports the first problem as a usage error and returns
@@ -311,8 +315,27 @@ const resolveUpdateInvocation = (
     return null;
   }
 
+  const fullAccess = parsed.values['full-access'] === true;
+
+  if (fullAccess && parsed.values.scopes !== undefined) {
+    failWithUsage(
+      '`tokens update` takes either --scopes <a,b> or --full-access, not both.',
+      USAGE,
+      json,
+    );
+    return null;
+  }
+
+  if (fullAccess) {
+    return { id, scopes: null };
+  }
+
   if (parsed.values.scopes === undefined) {
-    failWithUsage('`tokens update` requires --scopes <a,b>.', USAGE, json);
+    failWithUsage(
+      '`tokens update` requires --scopes <a,b> or --full-access.',
+      USAGE,
+      json,
+    );
     return null;
   }
 

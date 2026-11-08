@@ -45,10 +45,10 @@ export type CreateTokenInput = {
 };
 
 // Mirrors PATCH /api/tokens/{id} (server/api/tokens/[id].patch.ts). The
-// handler requires `scopes` to be present; the CLI only ever sends a
-// non-empty list (the handler also accepts null for full access).
+// handler requires `scopes` to be present: a list of scopes, or null for
+// full access (`tokens update --full-access`).
 export type UpdateTokenScopesInput = {
-  scopes: ScopeName[];
+  scopes: ScopeName[] | null;
 };
 
 // The JSON:API resource object markpost's `tokenSerializer` produces:
