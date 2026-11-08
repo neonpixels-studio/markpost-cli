@@ -362,7 +362,7 @@ const narrowingWarningFor = async (
 
   const lost = findLostCommandScopes(configured.scopes, invocation.scopes);
 
-  return lost.length > 0 ? formatLostScopesWarning(lost) : null;
+  return lost.length > 0 ? formatLostScopesWarning(invocation.id, lost) : null;
 };
 
 const NARROWING_NEEDS_CONFIRMATION =
@@ -599,8 +599,8 @@ const revokeTokenCommand = async (
 // object) keeps a subcommand named "toString" from resolving to a prototype
 // member. Every handler takes the same `(rest, json, skipConfirm)` shape even
 // though only `list` and `update` read `json` and only `update` and `revoke`
-// read `skipConfirm`, so
-// dispatch below is a single call with no per-subcommand branch.
+// read `skipConfirm`, so dispatch below is a single call with no
+// per-subcommand branch.
 const TOKENS_HANDLERS = new Map<
   string,
   (rest: string[], json: boolean, skipConfirm: boolean) => Promise<void>

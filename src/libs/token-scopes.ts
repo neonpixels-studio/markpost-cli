@@ -25,8 +25,10 @@ export type LostCommandScopes = {
 };
 
 // A null scopes list is markpost's full-access value: every scope is held.
-const holdsScope = (scopes: readonly string[] | null, scope: string): boolean =>
-  scopes === null || scopes.includes(scope);
+const holdsScope = (
+  scopes: readonly string[] | null,
+  scope: ScopeName,
+): boolean => scopes === null || scopes.includes(scope);
 
 // Per command, the required scopes the token holds today but would lose with
 // the new list. Scopes it never held are not reported: the update did not
@@ -45,10 +47,13 @@ export const findLostCommandScopes = (
     }))
     .filter((lost) => lost.scopes.length > 0);
 
-export const formatLostScopesWarning = (lost: LostCommandScopes[]): string => {
+export const formatLostScopesWarning = (
+  id: string,
+  lost: LostCommandScopes[],
+): string => {
   const details = lost
     .map(({ command, scopes }) => `${command} (${scopes.join(', ')})`)
     .join('; ');
 
-  return `WARNING: this is the token this CLI is currently configured with, and the new scopes drop scopes its commands need, so they will fail with 403 errors: ${details}. Restore access with \`markpost tokens update <id> --scopes <a,b>\` from another token, or set a new token with \`markpost config set apiToken <token>\`.`;
+  return `WARNING: this is the token this CLI is currently configured with, and the new scopes drop scopes its commands need, so they will fail with 403 errors: ${details}. To undo it, set a full-access token with \`markpost config set apiToken <token>\`, then run \`markpost tokens update ${id} --scopes <a,b>\`.`;
 };

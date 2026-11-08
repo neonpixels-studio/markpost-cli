@@ -56,10 +56,11 @@ describe('findLostCommandScopes', () => {
 
 describe('formatLostScopesWarning', () => {
   it('names each command with its lost scopes', () => {
-    const warning = formatLostScopesWarning([
+    const warning = formatLostScopesWarning('tok-1', [
       { command: 'push', scopes: ['records:write'] },
     ]);
 
     expect(warning).toContain('push (records:write)');
+    expect(warning).toContain('markpost tokens update tok-1 --scopes');
   });
 });

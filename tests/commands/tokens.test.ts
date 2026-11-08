@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { COMMAND_REQUIRED_SCOPES } from '#src/libs/token-scopes.js';
 import { CreatedToken, Token } from '#src/types/tokens.types.js';
 
 vi.mock('#src/libs/config.js', () => ({
@@ -61,6 +62,9 @@ const loggedText = (): string =>
     .flat()
     .map((value) => String(value))
     .join('\n');
+
+const errorText = (): string =>
+  vi.mocked(console.error).mock.calls.flat().join('\n');
 
 describe('runTokensCommand', () => {
   // `tokens revoke` now refuses to prompt without an interactive terminal
@@ -546,12 +550,8 @@ describe('runTokensCommand', () => {
         await runTokensCommand(NARROW_ARGS);
 
         expect(confirm).toHaveBeenCalled();
-        expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
-          WARNING_TEXT,
-        );
-        expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
-          'sync (records:write, settings:read)',
-        );
+        expect(errorText()).toContain(WARNING_TEXT);
+        expect(errorText()).toContain('sync (records:write, settings:read)');
         expect(updateTokenScopes).toHaveBeenCalled();
       });
 
@@ -582,9 +582,7 @@ describe('runTokensCommand', () => {
         await runTokensCommand([...NARROW_ARGS, '--yes']);
 
         expect(confirm).not.toHaveBeenCalled();
-        expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
-          WARNING_TEXT,
-        );
+        expect(errorText()).toContain(WARNING_TEXT);
         expect(updateTokenScopes).toHaveBeenCalled();
       });
 
@@ -597,6 +595,9 @@ describe('runTokensCommand', () => {
 
         expect(confirm).not.toHaveBeenCalled();
         expect(updateTokenScopes).not.toHaveBeenCalled();
+        expect(errorText()).toContain(
+          'Refusing to narrow the configured token',
+        );
         expect(process.exitCode).toBe(1);
       });
 
@@ -623,7 +624,7 @@ describe('runTokensCommand', () => {
           'update',
           'tok-abc-123',
           '--scopes',
-          'records:read,records:write,settings:read,settings:write,sources:read,sources:write,events:read,tokens:read,tokens:write',
+          [...new Set(Object.values(COMMAND_REQUIRED_SCOPES).flat())].join(','),
           '--json',
         ]);
 
@@ -632,6 +633,23 @@ describe('runTokensCommand', () => {
         );
         expect(printed).not.toHaveProperty('warning');
         expect(fetchTokens).not.toHaveBeenCalled();
+      });
+
+      it('accepts --yes without prompting or warning when nothing is lost', async () => {
+        const { confirm, updateTokenScopes, runTokensCommand } =
+          await setUpConfiguredToken(null);
+
+        await runTokensCommand([
+          'update',
+          'tok-abc-123',
+          '--scopes',
+          [...new Set(Object.values(COMMAND_REQUIRED_SCOPES).flat())].join(','),
+          '--yes',
+        ]);
+
+        expect(confirm).not.toHaveBeenCalled();
+        expect(errorText()).toBe('');
+        expect(updateTokenScopes).toHaveBeenCalled();
       });
 
       it('does not warn for scopes the token never held', async () => {
@@ -666,6 +684,7 @@ describe('runTokensCommand', () => {
 
         expect(confirm).not.toHaveBeenCalled();
         expect(updateTokenScopes).toHaveBeenCalled();
+        expect(process.exitCode).toBeUndefined();
       });
     });
 
