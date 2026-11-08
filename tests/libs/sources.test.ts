@@ -59,6 +59,7 @@ const mockSource: Source = {
   fieldMapping: null,
   lastHitAt: null,
   recordCount: 0,
+  paused: false,
 };
 
 const mockMeta: ApiDeleteMeta = { deleted: 1 };
