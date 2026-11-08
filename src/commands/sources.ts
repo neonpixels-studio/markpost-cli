@@ -466,14 +466,8 @@ const printFieldMapping = (
   });
 };
 
-// Every field here comes from the untrusted API response, so each is stripped
-// of control/ANSI escapes before printing (see terminal.ts): name, uuid, type,
-// endpoint (built from endpointSlug), routeFolder, recordCount, and lastHitAt.
-// recordCount is typed as a number but the type is only a compile-time claim
-// over parsed JSON — a hostile server could return a string carrying an escape,
-// so it goes through the sanitizer too (which coerces non-strings). The
-// 'never hit' fallback is a local literal, so only the untrusted lastHitAt
-// branch is sanitized.
+// Strict boolean check, shared with the JSON view's `=== true`, so both views
+// treat a missing or non-boolean `paused` as active.
 const printPausedNotice = (paused: boolean): void => {
   if (paused !== true) {
     return;
@@ -482,6 +476,14 @@ const printPausedNotice = (paused: boolean): void => {
   console.log(chalk.yellowBright('  status:    paused (not ingesting)'));
 };
 
+// Every field here comes from the untrusted API response, so each is stripped
+// of control/ANSI escapes before printing (see terminal.ts): name, uuid, type,
+// endpoint (built from endpointSlug), routeFolder, recordCount, and lastHitAt.
+// recordCount is typed as a number but the type is only a compile-time claim
+// over parsed JSON — a hostile server could return a string carrying an escape,
+// so it goes through the sanitizer too (which coerces non-strings). The
+// 'never hit' fallback is a local literal, so only the untrusted lastHitAt
+// branch is sanitized.
 const printSource = (source: Source): void => {
   console.log(chalk.bold(sanitizeForTerminal(source.name)));
   console.log(`  uuid:      ${sanitizeForTerminal(source.uuid)}`);
@@ -527,7 +529,7 @@ const serializeSourceForJson = (
   fieldMapping: source.fieldMapping ?? null,
   lastHitAt: source.lastHitAt,
   recordCount: source.recordCount,
-  paused: source.paused,
+  paused: source.paused === true,
 });
 
 const listSources = async (json: boolean): Promise<void> => {
