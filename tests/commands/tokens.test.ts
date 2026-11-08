@@ -517,6 +517,44 @@ describe('runTokensCommand', () => {
       expect(process.exitCode).toBeUndefined();
     });
 
+    it('restores full access with --full-access by sending scopes: null', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      vi.mocked(updateTokenScopes).mockResolvedValue({
+        ...scopedToken,
+        scopes: null,
+      });
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand(['update', 'tok-def-456', '--full-access']);
+
+      expect(updateTokenScopes).toHaveBeenCalledWith('tok-def-456', {
+        scopes: null,
+      });
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('full access'),
+      );
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('rejects --full-access combined with --scopes', async () => {
+      const { updateTokenScopes } = await import('#src/libs/tokens.js');
+      const { runTokensCommand } = await import('#src/commands/tokens.js');
+
+      await runTokensCommand([
+        'update',
+        'tok-1',
+        '--full-access',
+        '--scopes',
+        'records:read',
+      ]);
+
+      expect(updateTokenScopes).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('either --scopes <a,b> or --full-access'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
     it('prints the updated token as JSON with --json', async () => {
       const { updateTokenScopes } = await import('#src/libs/tokens.js');
       vi.mocked(updateTokenScopes).mockResolvedValue({
