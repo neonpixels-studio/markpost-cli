@@ -35,7 +35,7 @@ const parseBaseUrl = (baseUrl: string): URL => {
   }
 };
 
-const assertSafeBaseUrl = (baseUrl: string): void => {
+export const assertSafeBaseUrl = (baseUrl: string): void => {
   const { protocol, hostname } = parseBaseUrl(baseUrl);
 
   if (protocol === HTTPS_PROTOCOL) {
@@ -55,8 +55,11 @@ const assertSafeBaseUrl = (baseUrl: string): void => {
   );
 };
 
+export const getConfiguredBaseUrl = (): string =>
+  process.env.BASE_URL ?? DEFAULT_BASE_URL;
+
 export const getBaseUrl = () => {
-  const baseUrl = process.env.BASE_URL ?? DEFAULT_BASE_URL;
+  const baseUrl = getConfiguredBaseUrl();
 
   assertSafeBaseUrl(baseUrl);
 
