@@ -79,6 +79,12 @@ describe('getBaseUrl', () => {
     expect(() => getBaseUrl()).toThrow(InvalidBaseUrlError);
   });
 
+  it('lets an invalid BASE_URL escape logApiFailure instead of being swallowed', () => {
+    expect(() =>
+      logApiFailure('ctx', new InvalidBaseUrlError('bad')),
+    ).toThrow(InvalidBaseUrlError);
+  });
+
   it('never sends the bearer token when BASE_URL is unsafe', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);

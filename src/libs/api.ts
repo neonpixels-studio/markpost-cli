@@ -148,8 +148,13 @@ export const apiFetch = async (
 // loud (non-zero exit) rather than reporting "nothing to fetch". Call this
 // first in those catches — it re-throws a timeout and returns for every
 // other error, letting the caller fall through to its conservative fallback.
+// An unsafe BASE_URL escapes the same way: it is a config error that would
+// otherwise be logged once per call while the run still exits 0.
 export const rethrowIfTimeout = (error: unknown): void => {
-  if (error instanceof ApiTimeoutError) {
+  if (
+    error instanceof ApiTimeoutError ||
+    error instanceof InvalidBaseUrlError
+  ) {
     throw error;
   }
 };
