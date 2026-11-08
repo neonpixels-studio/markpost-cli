@@ -114,6 +114,16 @@ export const probeReachability: ReachabilityProbe = async (baseUrl) => {
   return response.status;
 };
 
+// fetch rejects with a generic "fetch failed" and puts the real reason
+// (ENOTFOUND, ECONNREFUSED, ...) on `cause`.
+const describeNetworkFailure = (error: unknown): string => {
+  const causeCode = (error as { cause?: NodeJS.ErrnoException })?.cause?.code;
+
+  return causeCode
+    ? `${messageFromError(error)} (${causeCode})`
+    : messageFromError(error);
+};
+
 export const checkApiReachable = async (
   baseUrl: string,
   probe: ReachabilityProbe = probeReachability,
@@ -128,7 +138,7 @@ export const checkApiReachable = async (
   } catch (error) {
     return fail(
       CHECK_REACHABLE,
-      `${displayUrl(baseUrl)}: ${messageFromError(error)}`,
+      `${displayUrl(baseUrl)}: ${describeNetworkFailure(error)}`,
     );
   }
 };
@@ -146,7 +156,7 @@ const describeTokenFailure = (error: unknown): string => {
   }
 
   if (error instanceof ApiRequestError && error.statusCode === HTTP_FORBIDDEN) {
-    return `token was accepted but is not allowed to read records (needs records:read): ${error.message}`;
+    return `token was accepted but the request was forbidden (missing records:read, plan limit, or sign-ups disabled): ${error.message}`;
   }
 
   return messageFromError(error);
@@ -224,41 +234,37 @@ export const checkOutputDirectory = async (
 
 // Network checks only run when the URL parses, and the token check only when
 // the host answered, so one root cause shows as one failure plus skips.
-export const runDoctorChecks = async (): Promise<CheckResult[]> => {
-  const apiToken = getApiToken();
-  const outputDirectory = getConfiguredOutputDirectory();
-  const baseUrl = getBaseUrl();
-  const configResult = checkConfigPresent(apiToken, outputDirectory);
-  const baseUrlResult = checkBaseUrl(baseUrl);
-  const outputResult = await checkOutputDirectory(outputDirectory);
-
+const runNetworkChecks = async (
+  baseUrlResult: CheckResult,
+  baseUrl: string,
+  apiToken: string | undefined,
+): Promise<CheckResult[]> => {
   if (!baseUrlResult.ok) {
     return [
-      configResult,
-      baseUrlResult,
       skipped(CHECK_REACHABLE, 'BASE_URL is invalid'),
       skipped(CHECK_TOKEN, 'BASE_URL is invalid'),
-      outputResult,
     ];
   }
 
   const reachableResult = await checkApiReachable(baseUrl);
 
   if (!reachableResult.ok) {
-    return [
-      configResult,
-      baseUrlResult,
-      reachableResult,
-      skipped(CHECK_TOKEN, 'API is unreachable'),
-      outputResult,
-    ];
+    return [reachableResult, skipped(CHECK_TOKEN, 'API is unreachable')];
   }
 
+  return [reachableResult, await checkTokenAccepted(apiToken)];
+};
+
+export const runDoctorChecks = async (): Promise<CheckResult[]> => {
+  const apiToken = getApiToken();
+  const outputDirectory = getConfiguredOutputDirectory();
+  const baseUrl = getBaseUrl();
+  const baseUrlResult = checkBaseUrl(baseUrl);
+
   return [
-    configResult,
+    checkConfigPresent(apiToken, outputDirectory),
     baseUrlResult,
-    reachableResult,
-    await checkTokenAccepted(apiToken),
-    outputResult,
+    ...(await runNetworkChecks(baseUrlResult, baseUrl, apiToken)),
+    await checkOutputDirectory(outputDirectory),
   ];
 };

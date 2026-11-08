@@ -78,7 +78,11 @@ describe('checkApiReachable', () => {
   it('fails when the probe throws', async () => {
     const result = await checkApiReachable(
       'https://markpost.io',
-      vi.fn().mockRejectedValue(new Error('getaddrinfo ENOTFOUND')),
+      vi.fn().mockRejectedValue(
+        Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('lookup'), { code: 'ENOTFOUND' }),
+        }),
+      ),
     );
 
     expect(result.ok).toBe(false);
@@ -199,33 +203,67 @@ describe('runDoctorChecks', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it('skips the network checks when BASE_URL is invalid', async () => {
     vi.stubEnv('BASE_URL', 'not a url');
+    vi.stubEnv('API_TOKEN', SECRET_TOKEN);
+    vi.stubEnv('OUTPUT_DIRECTORY', '');
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
 
     const results = await runDoctorChecks();
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(results.find((r) => r.name === CHECK_REACHABLE)?.ok).toBe(false);
-    expect(results.find((r) => r.name === CHECK_TOKEN)?.detail).toContain(
-      'skipped',
+    expect(results.find((result) => result.name === CHECK_REACHABLE)?.ok).toBe(
+      false,
     );
+    expect(
+      results.find((result) => result.name === CHECK_TOKEN)?.detail,
+    ).toContain('skipped');
+  });
+
+  it('runs every check in order when the API is healthy', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'markpost-doctor-'));
+    vi.stubEnv('BASE_URL', 'https://markpost.test');
+    vi.stubEnv('API_TOKEN', SECRET_TOKEN);
+    vi.stubEnv('OUTPUT_DIRECTORY', directory);
+    const fetchSpy = vi
+      .fn()
+      .mockImplementation(
+        async () => new Response('{"data":{}}', { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const results = await runDoctorChecks();
+    await rm(directory, { recursive: true, force: true });
+
+    expect(results.map((result) => result.name)).toEqual([
+      'config',
+      'base-url',
+      CHECK_REACHABLE,
+      CHECK_TOKEN,
+      'output-directory',
+    ]);
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1][0]).toContain('/api/records/stats');
+    expect(JSON.stringify(results)).not.toContain(SECRET_TOKEN);
   });
 
   it('skips the token check when the API is unreachable', async () => {
     vi.stubEnv('BASE_URL', 'https://markpost.test');
     vi.stubEnv('API_TOKEN', SECRET_TOKEN);
+    vi.stubEnv('OUTPUT_DIRECTORY', '');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ENOTFOUND')));
     const authedSpy = vi.spyOn(apiModule, 'authedRequest');
 
     const results = await runDoctorChecks();
 
     expect(authedSpy).not.toHaveBeenCalled();
-    expect(results.find((r) => r.name === CHECK_TOKEN)?.detail).toContain(
-      'unreachable',
-    );
+    expect(
+      results.find((result) => result.name === CHECK_TOKEN)?.detail,
+    ).toContain('unreachable');
   });
 });
