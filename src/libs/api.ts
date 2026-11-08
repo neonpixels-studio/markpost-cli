@@ -6,8 +6,57 @@ import {
 } from '#src/types/api.types.js';
 import { logErrorMessage, messageFromError } from '#src/libs/errors.js';
 
+const DEFAULT_BASE_URL = 'https://markpost.io';
+const HTTPS_PROTOCOL = 'https:';
+const HTTP_PROTOCOL = 'http:';
+// `URL.hostname` keeps the brackets on an IPv6 literal.
+const LOOPBACK_HOSTNAMES: readonly string[] = [
+  'localhost',
+  '127.0.0.1',
+  '[::1]',
+];
+
+// Thrown when BASE_URL would send the bearer token somewhere unsafe (cleartext
+// to a non-loopback host) or can't be parsed at all.
+export class InvalidBaseUrlError extends Error {
+  constructor(reason: string) {
+    super(
+      `Refusing to use BASE_URL: ${reason} The API token was not sent. Use an https:// URL, or http:// only for localhost, 127.0.0.1, or [::1].`,
+    );
+    this.name = 'InvalidBaseUrlError';
+  }
+}
+
+const parseBaseUrl = (baseUrl: string): URL => {
+  try {
+    return new URL(baseUrl);
+  } catch {
+    throw new InvalidBaseUrlError('it is not a valid URL.');
+  }
+};
+
+const assertSafeBaseUrl = (baseUrl: string): void => {
+  const { protocol, hostname } = parseBaseUrl(baseUrl);
+
+  if (protocol === HTTPS_PROTOCOL) {
+    return;
+  }
+
+  if (protocol === HTTP_PROTOCOL && LOOPBACK_HOSTNAMES.includes(hostname)) {
+    return;
+  }
+
+  throw new InvalidBaseUrlError(
+    `"${protocol}//${hostname}" would send the token unencrypted.`,
+  );
+};
+
 export const getBaseUrl = () => {
-  return process.env.BASE_URL ?? 'https://markpost.io';
+  const baseUrl = process.env.BASE_URL ?? DEFAULT_BASE_URL;
+
+  assertSafeBaseUrl(baseUrl);
+
+  return baseUrl;
 };
 
 export const getApiToken = (): string | undefined => {

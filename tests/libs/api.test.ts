@@ -13,6 +13,7 @@ import {
   formatErrorMessages,
   getApiToken,
   getBaseUrl,
+  InvalidBaseUrlError,
   isFatalRequestError,
   isPermanentApiFailure,
   isSystemicApiFailure,
@@ -22,7 +23,11 @@ import {
   unwrapResourceCollection,
 } from '#src/libs/api.js';
 import { logErrorMessage } from '#src/libs/errors.js';
-import { ApiError, ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
+import {
+  ApiError,
+  ApiResourceObject,
+  ApiResponse,
+} from '#src/types/api.types.js';
 
 vi.mock('#src/libs/config.js', () => ({
   getConfigValue: vi.fn(),
@@ -48,6 +53,39 @@ describe('getBaseUrl', () => {
   it('returns default URL when BASE_URL is not set', () => {
     delete process.env.BASE_URL;
     expect(getBaseUrl()).toBe('https://markpost.io');
+  });
+
+  it.each([
+    'http://localhost:8888',
+    'http://127.0.0.1:8888',
+    'http://[::1]:8888',
+  ])('allows cleartext http for loopback host %s', (url) => {
+    process.env.BASE_URL = url;
+    expect(getBaseUrl()).toBe(url);
+  });
+
+  it.each([
+    'http://example.com',
+    'http://localhost.evil.com',
+    'http://192.168.1.5:8888',
+    'ftp://localhost',
+    'not a url',
+    'localhost:8888/api',
+    '',
+  ])('refuses unsafe or malformed BASE_URL %j', (url) => {
+    process.env.BASE_URL = url;
+    expect(() => getBaseUrl()).toThrow(InvalidBaseUrlError);
+  });
+
+  it('never sends the bearer token when BASE_URL is unsafe', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    process.env.BASE_URL = 'http://example.com';
+
+    await expect(authedRequest('/api/x')).rejects.toThrow(InvalidBaseUrlError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 });
 
