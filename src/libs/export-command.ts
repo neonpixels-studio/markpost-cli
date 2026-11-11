@@ -34,10 +34,10 @@ export const parseExportArgs = (
     args,
     allowPositionals: true,
     options: {
+      ...extraOptions,
       out: { type: 'string' },
       force: { type: 'boolean' },
       json: { type: 'boolean' },
-      ...extraOptions,
     },
   });
 
