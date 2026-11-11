@@ -58,7 +58,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        node: ['22.13.0', '24']
+        # tests/engines.test.ts parses this inline array; keep the flow style.
+        node: ['22.17.0', '24']
         include:
           - os: windows-latest
             node: '24'

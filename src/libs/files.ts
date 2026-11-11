@@ -232,7 +232,7 @@ function collectFromPath(path: string, accumulator: WalkAccumulator): void {
   accumulator.files.push(path);
 }
 
-// Node 22's globSync throws ENOTDIR for a pattern whose path runs through a
+// Node 22 globSync throws ENOTDIR for a pattern whose path runs through a
 // regular file (`note.md/child.md`); Node 24 returns no matches. Normalise to
 // the Node 24 behaviour so the supported floor reports it as missing.
 const globMatches = (pattern: string): string[] => {
