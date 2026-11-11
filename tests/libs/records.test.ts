@@ -720,6 +720,39 @@ describe('fetchPaginatedRecords', () => {
     );
   });
 
+  it('sends each tag as a repeated, percent-encoded filter[tag] followed by sort', async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords(undefined, 100, {
+      tags: ['alpha', 'b c&d'],
+      sort: '-createdAt',
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records?page[size]=100&filter[tag]=alpha&filter[tag]=b%20c%26d&sort=-createdAt',
+      expect.anything(),
+    );
+  });
+
+  it('omits filter[tag] for an empty tag list and sort when unset', async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords(undefined, 100, { tags: [] });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records?page[size]=100',
+      expect.anything(),
+    );
+  });
+
+  it('keeps tags and sort on a cursored page', async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords('abc-123', 100, {
+      tags: ['a', 'b'],
+      sort: 'createdAt',
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[tag]=a&filter[tag]=b&sort=createdAt',
+      expect.anything(),
+    );
+  });
+
   it('keeps the cursor and filters together on a paged request', async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
     await fetchPaginatedRecords('abc-123', 100, { source: 'email' });

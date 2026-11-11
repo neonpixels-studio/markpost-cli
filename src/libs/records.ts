@@ -129,6 +129,10 @@ const extractAfterCursor = (
   return undefined;
 };
 
+// markpost's allowed `sort` values (server/utils/recordListQuery.ts).
+export const RECORD_SORTS = ['createdAt', '-createdAt'] as const;
+export type RecordSort = (typeof RECORD_SORTS)[number];
+
 // The list filters markpost's `GET /api/records` validates and applies (see
 // markpost `server/api/records/index.get.ts`): `filter[source]`,
 // `filter[status]`, and `filter[q]`. The CLI passes the raw values straight
@@ -136,11 +140,28 @@ const extractAfterCursor = (
 // invalid `filter[source]` is rejected server-side and surfaced); markpost
 // stays the single source of truth for which values are allowed, so the two
 // can't drift.
+//
+// Exceptions, mirrored on purpose: `tags` (repeated `filter[tag]`, AND
+// semantics) is checked client-side for empty values and commas, and `sort`
+// against RECORD_SORTS, so a typo fails before a request is sent. Update
+// RECORD_SORTS when markpost's allowed sorts change.
 export type RecordListFilters = {
   source?: string;
   status?: string;
   search?: string;
+  tags?: string[];
+  sort?: RecordSort;
 };
+
+// The scalar filters, one query param each. `tags` and `sort` are emitted
+// separately in `buildRecordsQuery`.
+type ScalarFilterKey = Exclude<keyof RecordListFilters, 'tags' | 'sort'>;
+
+// markpost splits each `filter[tag]` value on this (server/utils/recordListQuery.ts),
+// so a tag containing it can't be matched.
+export const TAG_DELIMITER = ',';
+const TAG_QUERY_KEY = 'filter[tag]';
+const SORT_QUERY_KEY = 'sort';
 
 // A read either succeeded (`ok: true`) or the INITIAL page fetch failed
 // (`ok: false`). Collapsing a failed initial fetch to an empty array — the old
@@ -173,7 +194,7 @@ export type FetchAllRecordsResult =
 // A mapped type, not `Record<...>`: this module imports a `Record` record
 // type from records.types.js, which shadows TypeScript's global `Record`
 // utility.
-const FILTER_QUERY_KEYS: { [Key in keyof RecordListFilters]-?: string } = {
+const FILTER_QUERY_KEYS: { [Key in ScalarFilterKey]-?: string } = {
   source: 'filter[source]',
   status: 'filter[status]',
   search: 'filter[q]',
@@ -271,7 +292,8 @@ export const fetchAllRecords = async (
 };
 
 // Emits `page[size]`/`page[after]` plus whichever of markpost's list filters
-// (`filter[source]`, `filter[status]`, `filter[q]`) the caller supplied.
+// (`filter[source]`, `filter[status]`, `filter[q]`, repeated `filter[tag]`) and
+// `sort` the caller supplied.
 // markpost's GET /api/records returns every status when no `filter[status]` is
 // given (server/api/records/index.get.ts), so scoping the sync to pending is
 // the caller's job (see the `PENDING_STATUS` call in src/index.ts) — this keeps
@@ -287,9 +309,7 @@ const buildRecordsQuery = (
     params.push(`page[after]=${encodeURIComponent(after)}`);
   }
 
-  const filterKeys = Object.keys(
-    FILTER_QUERY_KEYS,
-  ) as (keyof RecordListFilters)[];
+  const filterKeys = Object.keys(FILTER_QUERY_KEYS) as ScalarFilterKey[];
 
   for (const filterKey of filterKeys) {
     const value = filters[filterKey];
@@ -299,6 +319,16 @@ const buildRecordsQuery = (
     }
 
     params.push(`${FILTER_QUERY_KEYS[filterKey]}=${encodeURIComponent(value)}`);
+  }
+
+  // Repeated `filter[tag]` params: markpost ANDs them (a record must carry
+  // every tag).
+  for (const tag of filters.tags ?? []) {
+    params.push(`${TAG_QUERY_KEY}=${encodeURIComponent(tag)}`);
+  }
+
+  if (filters.sort) {
+    params.push(`${SORT_QUERY_KEY}=${encodeURIComponent(filters.sort)}`);
   }
 
   return params.join('&');
