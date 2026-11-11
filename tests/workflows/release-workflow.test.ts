@@ -26,8 +26,8 @@ function jobBodies(): Record<string, string> {
   return bodies;
 }
 
-function runTagCheck(tag: string) {
-  return spawnSync('node', ['scripts/check-release-tag.mjs', tag], {
+function runTagCheck(...args: string[]) {
+  return spawnSync('node', ['scripts/check-release-tag.mjs', ...args], {
     cwd: REPO_ROOT,
     encoding: 'utf-8',
   });
@@ -126,11 +126,6 @@ describe('check-release-tag script', () => {
 
   it('fails when no tag is given', () => {
     expect(runTagCheck('').status).toBe(1);
-    const missingArgument = spawnSync(
-      'node',
-      ['scripts/check-release-tag.mjs'],
-      { cwd: REPO_ROOT, encoding: 'utf-8' },
-    );
-    expect(missingArgument.status).toBe(1);
+    expect(runTagCheck().status).toBe(1);
   });
 });

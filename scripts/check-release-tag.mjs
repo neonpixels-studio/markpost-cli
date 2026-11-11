@@ -6,6 +6,13 @@ const { version } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
 );
 
+if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
+  console.error(
+    `package.json version "${version}" must be a plain X.Y.Z release (prereleases are not published by this workflow).`,
+  );
+  process.exit(1);
+}
+
 if (tag !== `v${version}`) {
   console.error(
     `Tag "${tag}" does not match package.json version "v${version}".`,
