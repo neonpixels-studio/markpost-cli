@@ -73,7 +73,7 @@ const parseSourceId = (
     );
   }
 
-  return sourceId;
+  return sourceId?.toLowerCase();
 };
 
 // Turns parseArgs' raw `kind`/`source` values into validated filters. Throws
@@ -106,15 +106,19 @@ export const buildEventFilterParams = (filters: EventFilters): string[] => {
 // never reads the query), so `events export` applies them to the returned
 // rows instead. The export is still capped at the server's row limit before
 // this runs, so a truncated export stays flagged as incomplete.
-export const filterEventRows = <
-  Row extends { kind: string; sourceId: string | null },
->(
+type FilterableRow = { kind: string; sourceId: string | null };
+
+const matchesKind = (row: FilterableRow, filters: EventFilters): boolean =>
+  filters.kind === undefined || row.kind === filters.kind;
+
+const matchesSource = (row: FilterableRow, filters: EventFilters): boolean =>
+  filters.sourceId === undefined ||
+  row.sourceId?.toLowerCase() === filters.sourceId;
+
+export const filterEventRows = <Row extends FilterableRow>(
   rows: Row[],
   filters: EventFilters,
 ): Row[] =>
   rows.filter(
-    (row) =>
-      (filters.kind === undefined || row.kind === filters.kind) &&
-      (filters.sourceId === undefined ||
-        row.sourceId?.toLowerCase() === filters.sourceId.toLowerCase()),
+    (row) => matchesKind(row, filters) && matchesSource(row, filters),
   );

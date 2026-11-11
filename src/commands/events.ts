@@ -41,11 +41,11 @@ export const USAGE = `Usage: markpost events <list|export> [options]
 Options:
   --kind <kind>  Only events of one kind: ok, dim, warn, or err
   --source <id>  Only events for one source (its uuid, see \`sources list\`)
-  --json        Print the events as JSON instead of formatted text (export:
-                cannot be combined with --out)
-  --out <path>  (export) Write the export as JSON to <path> instead of
-                printing to stdout (creates parent directories as needed)
-  --force       (export) Overwrite <path> if it already exists (--out only)`;
+  --json         Print the events as JSON instead of formatted text (export:
+                 cannot be combined with --out)
+  --out <path>   (export) Write the export as JSON to <path> instead of
+                 printing to stdout (creates parent directories as needed)
+  --force        (export) Overwrite <path> if it already exists (--out only)`;
 
 export const runEventsCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
@@ -241,7 +241,13 @@ const runEventsExport = async (
   }
 };
 
-const parseEventExportArgs = (exportArgs: string[]) => {
+const parseEventExportArgs = (
+  exportArgs: string[],
+): {
+  outputPath: string | undefined;
+  force: boolean;
+  filters: EventFilters;
+} => {
   const { extraValues, ...exportOptions } = parseExportArgs(
     exportArgs,
     'events export',

@@ -68,7 +68,10 @@ describe('runEventsCommand', () => {
     // it logs stays silent on stderr under --json (see warnPartialRead /
     // issue #194) — a regression here would silently reintroduce the stray
     // plain-text line without any test catching it.
-    expect(fetchAllEvents).toHaveBeenCalledWith(false, {});
+    expect(fetchAllEvents).toHaveBeenCalledWith(false, {
+      kind: undefined,
+      sourceId: undefined,
+    });
   });
 
   it('never dispatches to list when checkConfig resolves false', async () => {
@@ -136,6 +139,19 @@ describe('runEventsCommand', () => {
 
         expect(fetchAllEvents).toHaveBeenCalledWith(false, {
           kind: 'err',
+          sourceId: SOURCE_ID,
+        });
+      });
+
+      it('sends an uppercase --source uuid lowercased', async () => {
+        const fetchAllEvents = await run([
+          'list',
+          '--source',
+          SOURCE_ID.toUpperCase(),
+        ]);
+
+        expect(fetchAllEvents).toHaveBeenCalledWith(false, {
+          kind: undefined,
           sourceId: SOURCE_ID,
         });
       });
@@ -470,7 +486,10 @@ describe('runEventsCommand', () => {
       // `--json` must thread through to fetchAllEvents (see the comment on
       // the plain-mode assertion above) so its own page-level diagnostic
       // stays silent, leaving only the single JSON object below on stderr.
-      expect(fetchAllEvents).toHaveBeenCalledWith(true, {});
+      expect(fetchAllEvents).toHaveBeenCalledWith(true, {
+        kind: undefined,
+        sourceId: undefined,
+      });
       expect(console.error).toHaveBeenCalledTimes(1);
       const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
       expect(JSON.parse(errorOutput)).toEqual({

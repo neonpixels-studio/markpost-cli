@@ -342,6 +342,48 @@ describe('runEventsCommand export', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    it('matches --source case-insensitively and skips null sourceId rows', async () => {
+      const { fetchEventExport, runEventsCommand } = await loadModules();
+      vi.mocked(fetchEventExport).mockResolvedValue(completeExport(rows));
+
+      await runEventsCommand([
+        'export',
+        '--source',
+        SOURCE_ID.toUpperCase(),
+        '--json',
+      ]);
+
+      expect(printedIds()).toEqual(['evt-3']);
+    });
+
+    it('writes only the filtered rows with --out', async () => {
+      const { fetchEventExport, writeExportFile, runEventsCommand } =
+        await loadModules();
+      vi.mocked(fetchEventExport).mockResolvedValue(completeExport(rows));
+      vi.mocked(writeExportFile).mockReturnValue('/tmp/out.json');
+
+      await runEventsCommand(['export', '--kind', 'ok', '--out', 'out.json']);
+
+      expect(writeExportFile).toHaveBeenCalledWith(
+        'out.json',
+        [firstRow],
+        false,
+      );
+    });
+
+    it.each([
+      ['a non-uuid --source', ['export', '--source', 'webhook']],
+      ['a repeated --kind', ['export', '--kind', 'ok', '--kind', 'err']],
+      ['an empty --kind', ['export', '--kind=']],
+    ])('rejects %s without fetching', async (_label, args) => {
+      const { fetchEventExport, runEventsCommand } = await loadModules();
+
+      await runEventsCommand(args);
+
+      expect(fetchEventExport).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
     it('rejects an invalid --kind without fetching', async () => {
       const { fetchEventExport, runEventsCommand } = await loadModules();
 
