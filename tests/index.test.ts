@@ -2594,6 +2594,36 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('refuses a record whose server filePath is unsafe, naming it, continuing with the rest, and exiting non-zero', async () => {
+    const { FilePathViolationError } = await import('#src/libs/filePathSafety.js');
+    const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
+    const { fetchAllRecords, deleteRecords } = await import('#src/libs/records.js');
+    const { writeMarkdown } = await import('#src/libs/markdown.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
+    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, mockRecord2], partial: false });
+    vi.mocked(writeMarkdown).mockImplementation((record) => {
+      if (record.uuid === 'abc-123') {
+        throw new FilePathViolationError('Refusing to write: server file path "../x.md" is invalid (traversal).', 'traversal');
+      }
+
+      return '/mock/output/title-2.md';
+    });
+    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
+
+    await import('#src/index.js');
+
+    expect(writeMarkdown).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Test Title (abc-123): Refusing to write: server file path "../x.md" is invalid (traversal).'),
+    );
+    expect(deleteRecords).toHaveBeenCalledWith(['def-456']);
+    expect(process.exitCode).toBe(1);
+  });
+
   it('exits non-zero, shows an error (not a green checkmark), and issues no delete when every record fails to write', async () => {
     const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
     const { fetchAllRecords, deleteRecords } = await import('#src/libs/records.js');
@@ -3373,6 +3403,29 @@ describe('index', () => {
       expect(mockSpinner.start).not.toHaveBeenCalledWith('Deleting records...');
       // A successful preview exits 0.
       expect(process.exitCode).toBeUndefined();
+    });
+
+    it('reports records with an unsafe server filePath as refused under --dry-run and exits non-zero', async () => {
+      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+      const { buildWritePreview } = await import('#src/libs/markdown.js');
+      await arrangeDryRun({ autoDelete: true });
+      vi.mocked(buildWritePreview).mockReturnValue([
+        { record: mockRecord, path: '../x.md', action: 'refuse', reason: 'Refusing to write: server file path "../x.md" is invalid (traversal).' },
+        { record: secondRecord, path: '/mock/output/title-2.md', action: 'write' },
+      ]);
+
+      await import('#src/index.js');
+
+      const logged = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join('\n');
+      expect(logged).toContain('Would refuse 1 record(s)');
+      expect(logged).toContain('Test Title (abc-123): Refusing to write: server file path "../x.md" is invalid (traversal).');
+      expect(logged).toContain('Would write 1 record(s)');
+      // The refused record stays on the server: only the written one is listed
+      // for deletion.
+      expect(logged).toContain('Would delete 1 record(s)');
+      expect(logged).toContain('! def-456');
+      expect(logged).not.toContain('! abc-123');
+      expect(process.exitCode).toBe(1);
     });
 
     it('lists the intended writes and the server-side deletes under --dry-run', async () => {

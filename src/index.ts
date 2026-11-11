@@ -847,12 +847,44 @@ function reportIncompleteSync(partial: boolean): void {
   );
 }
 
+// The real sync fails every refused record (non-zero exit), so the dry run does
+// too.
+function hasRefusals(previews: WritePreview[]): boolean {
+  return previews.some((preview) => preview.action === 'refuse');
+}
+
 // The records a dry run would actually persist. A `skip` leaves the existing
 // file untouched and the record on the server, so it never reaches the delete
 // or mark-synced step — mirroring the real sync, which excludes skipped records
 // from both.
 function previewedWrites(previews: WritePreview[]): WritePreview[] {
-  return previews.filter((preview) => preview.action !== 'skip');
+  return previews.filter(
+    (preview) => preview.action !== 'skip' && preview.action !== 'refuse',
+  );
+}
+
+// Records whose server file path is unsafe: the real sync would fail them
+// (non-zero exit) and leave them on the server. Sanitized like every other
+// server-derived value.
+function printPreviewRefusals(refusals: WritePreview[]): void {
+  if (refusals.length === 0) {
+    return;
+  }
+
+  console.log(
+    chalk.redBright(
+      `Would refuse ${refusals.length} record(s), left on the server:`,
+    ),
+  );
+  refusals.forEach(({ record, path, reason }) => {
+    console.log(
+      chalk.redBright(
+        sanitizeForTerminal(
+          `  -> ${record.title} (${record.uuid}): ${reason ?? path}`,
+        ),
+      ),
+    );
+  });
 }
 
 // Prints the local write plan: each record that would be written (with its
@@ -865,6 +897,7 @@ function previewedWrites(previews: WritePreview[]): WritePreview[] {
 function printWritePreview(previews: WritePreview[]): void {
   const writes = previewedWrites(previews);
   const skips = previews.filter((preview) => preview.action === 'skip');
+  const refusals = previews.filter((preview) => preview.action === 'refuse');
 
   console.log(chalk.dim(`Would write ${writes.length} record(s):`));
   writes.forEach((preview) => {
@@ -874,6 +907,8 @@ function printWritePreview(previews: WritePreview[]): void {
       ),
     );
   });
+
+  printPreviewRefusals(refusals);
 
   if (skips.length === 0) {
     return;
@@ -957,6 +992,10 @@ function reportDryRunPlan(
   const previews = buildWritePreview(records, conflictStrategy);
   printWritePreview(previews);
   printServerPreview(previews, autoDelete, settingsOk);
+
+  if (hasRefusals(previews)) {
+    process.exitCode = 1;
+  }
 }
 
 // Default behavior when no subcommand is given: read the user's markpost
