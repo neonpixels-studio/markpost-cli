@@ -372,17 +372,43 @@ describe('runEventsCommand export', () => {
     });
 
     it.each([
-      ['a non-uuid --source', ['export', '--source', 'webhook']],
-      ['a repeated --kind', ['export', '--kind', 'ok', '--kind', 'err']],
-      ['an empty --kind', ['export', '--kind=']],
-    ])('rejects %s without fetching', async (_label, args) => {
-      const { fetchEventExport, runEventsCommand } = await loadModules();
+      [
+        'a non-uuid --source',
+        ['export', '--source', 'webhook'],
+        '--source must be a source uuid',
+      ],
+      [
+        'a repeated --kind',
+        ['export', '--kind', 'ok', '--kind', 'err'],
+        'more than once',
+      ],
+      ['an empty --kind', ['export', '--kind='], 'non-empty'],
+      [
+        'a repeated --source',
+        [
+          'export',
+          '--source',
+          '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+          '--source',
+          '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+        ],
+        'more than once',
+      ],
+      ['an empty --source', ['export', '--source='], 'non-empty'],
+    ])(
+      'rejects %s before checking config or fetching',
+      async (_label, args, message) => {
+        const { checkConfig, fetchEventExport, runEventsCommand } =
+          await loadModules();
 
-      await runEventsCommand(args);
+        await runEventsCommand(args);
 
-      expect(fetchEventExport).not.toHaveBeenCalled();
-      expect(process.exitCode).toBe(1);
-    });
+        expect(checkConfig).not.toHaveBeenCalled();
+        expect(fetchEventExport).not.toHaveBeenCalled();
+        expect(stderrText()).toContain(message);
+        expect(process.exitCode).toBe(1);
+      },
+    );
 
     it('rejects an invalid --kind without fetching', async () => {
       const { fetchEventExport, runEventsCommand } = await loadModules();

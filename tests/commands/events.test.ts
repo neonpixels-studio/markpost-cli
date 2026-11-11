@@ -156,6 +156,15 @@ describe('runEventsCommand', () => {
         });
       });
 
+      it('trims whitespace around --kind', async () => {
+        const fetchAllEvents = await run(['list', '--kind', ' err ']);
+
+        expect(fetchAllEvents).toHaveBeenCalledWith(false, {
+          kind: 'err',
+          sourceId: undefined,
+        });
+      });
+
       it('accepts the --flag=value form', async () => {
         const fetchAllEvents = await run(['list', '--kind=warn']);
 
@@ -177,6 +186,19 @@ describe('runEventsCommand', () => {
           'more than once',
         ],
         ['an empty kind', ['list', '--kind='], 'non-empty'],
+        ['a whitespace-only kind', ['list', '--kind', '   '], 'non-empty'],
+        [
+          'a repeated source',
+          [
+            'list',
+            '--source',
+            '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+            '--source',
+            '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+          ],
+          'more than once',
+        ],
+        ['an empty source', ['list', '--source='], 'non-empty'],
         [
           'a non-uuid source',
           ['list', '--source', 'webhook'],
