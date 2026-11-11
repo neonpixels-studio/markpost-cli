@@ -11,7 +11,7 @@ vi.mock('#src/libs/records.js', async () => {
   // while keeping every other export undefined, so a command that starts
   // calling an unmocked function still fails loudly here instead of quietly
   // running the real implementation.
-  const { ERROR_STATUS, PENDING_STATUS } =
+  const { ERROR_STATUS, PENDING_STATUS, RECORD_SORTS, TAG_DELIMITER } =
     await vi.importActual<typeof import('#src/libs/records.js')>(
       '#src/libs/records.js',
     );
@@ -19,6 +19,8 @@ vi.mock('#src/libs/records.js', async () => {
   return {
     ERROR_STATUS,
     PENDING_STATUS,
+    RECORD_SORTS,
+    TAG_DELIMITER,
     fetchAllRecords: vi.fn(),
     deleteRecords: vi.fn(),
     updateRecord: vi.fn(),
@@ -587,6 +589,85 @@ describe('runRecordsCommand', () => {
         expect.stringContaining('First Record'),
       );
       expect(process.exitCode).not.toBe(1);
+    });
+
+    it('threads repeated --tag and --sort=-createdAt into the fetch', async () => {
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('#src/commands/records.js');
+
+      await runRecordsCommand([
+        'list',
+        '--tag',
+        'a',
+        '--tag= b ',
+        '--sort=-createdAt',
+      ]);
+
+      expect(fetchAllRecords).toHaveBeenCalledWith(
+        expect.objectContaining({ tags: ['a', 'b'], sort: '-createdAt' }),
+        false,
+      );
+    });
+
+    it('collapses duplicate --tag values after trimming', async () => {
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('#src/commands/records.js');
+
+      await runRecordsCommand(['list', '--tag', 'a', '--tag', ' a ']);
+
+      expect(fetchAllRecords).toHaveBeenCalledWith(
+        expect.objectContaining({ tags: ['a'] }),
+        false,
+      );
+    });
+
+    it('threads --sort createdAt into the fetch', async () => {
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      vi.mocked(fetchAllRecords).mockResolvedValue({
+        ok: true,
+        records: [],
+        partial: false,
+      });
+      const { runRecordsCommand } = await import('#src/commands/records.js');
+
+      await runRecordsCommand(['list', '--sort', 'createdAt']);
+
+      expect(fetchAllRecords).toHaveBeenCalledWith(
+        expect.objectContaining({ sort: 'createdAt' }),
+        false,
+      );
+    });
+
+    it.each([
+      [['--sort', 'title'], '--sort must be one of: createdAt, -createdAt'],
+      [['--sort', '-createdAt'], 'ambiguous'],
+      [['--tag', 'a,b'], 'contains a comma'],
+      [['--tag', '  '], '--tag needs a non-empty value.'],
+      [
+        ['--sort=createdAt', '--sort=-createdAt'],
+        '--sort was given more than once',
+      ],
+    ])('rejects invalid %j without fetching', async (flags, message) => {
+      const { fetchAllRecords } = await import('#src/libs/records.js');
+      const { runRecordsCommand } = await import('#src/commands/records.js');
+
+      await runRecordsCommand(['list', ...flags]);
+
+      expect(fetchAllRecords).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining(message),
+      );
+      expect(process.exitCode).toBe(1);
     });
 
     it('accepts the --flag=value form', async () => {

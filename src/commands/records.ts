@@ -8,6 +8,9 @@ import {
   MAX_DELETE_BATCH_SIZE,
   PENDING_STATUS,
   RecordListFilters,
+  RecordSort,
+  RECORD_SORTS,
+  TAG_DELIMITER,
   updateRecord,
 } from '#src/libs/records.js';
 import {
@@ -40,7 +43,7 @@ const DELETE_SUBCOMMAND = 'delete';
 
 export const USAGE = `Usage: markpost records <list|update|delete> [options]
 
-  list              List records, optionally filtered by source, status, or search text
+  list              List records, optionally filtered by source, status, tag, or search text
   update <uuid>     Edit an existing record's title and/or content — requeues it to
                     pending (for resync) if the record was already synced
   delete <uuid...>  Delete one or more records from the server. Asks to confirm
@@ -50,6 +53,12 @@ List options:
   --source <type>    Filter by source type (markpost reports the valid types if the value is rejected)
   --status <status>  Filter by record status (synced, pending, or error)
   --search <text>    Filter by text in the title or content
+  --tag <tag>        Only records carrying this tag; repeat to require several (AND).
+                     A tag containing a comma can't be matched: markpost splits
+                     filter[tag] values on commas, so the CLI rejects it
+  --sort=<value>     Order by creation time: createdAt (oldest first) or
+                     -createdAt (newest first, the server default). Use the
+                     "=" form: a bare -createdAt is parsed as a flag
   --json             Print the records as JSON instead of formatted text
 
 Update options (at least one of --title/--content is required; neither may be
@@ -130,6 +139,8 @@ const parseListArgs = (args: string[]): { filters: RecordListFilters } => {
       source: { type: 'string', multiple: true },
       status: { type: 'string', multiple: true },
       search: { type: 'string', multiple: true },
+      tag: { type: 'string', multiple: true },
+      sort: { type: 'string', multiple: true },
       json: { type: 'boolean' },
     },
   });
@@ -140,7 +151,7 @@ const parseListArgs = (args: string[]): { filters: RecordListFilters } => {
   // everything unfiltered.
   if (positionals.length > 1) {
     throw new Error(
-      `Unexpected argument "${positionals[1]}". Set filters with --source, --status, or --search.`,
+      `Unexpected argument "${positionals[1]}". Set filters with --source, --status, --tag, --search, or --sort.`,
     );
   }
 
@@ -149,6 +160,8 @@ const parseListArgs = (args: string[]): { filters: RecordListFilters } => {
       source: normalizeFilter('source', values.source),
       status: normalizeFilter('status', values.status),
       search: normalizeFilter('search', values.search),
+      tags: normalizeTags(values.tag),
+      sort: normalizeSort(values.sort),
     },
   };
 };
@@ -180,6 +193,54 @@ const normalizeFilter = (
   }
 
   return trimmed;
+};
+
+// Each `--tag` is trimmed and must be non-empty. markpost splits `filter[tag]`
+// values on commas (server/utils/recordListQuery.ts), so a tag that itself
+// contains a comma would silently become several tags; reject it instead.
+const normalizeTag = (occurrence: string): string => {
+  const trimmed = occurrence.trim();
+
+  if (trimmed.length === 0) {
+    throw new Error('--tag needs a non-empty value.');
+  }
+
+  if (trimmed.includes(TAG_DELIMITER)) {
+    throw new Error(
+      `--tag "${trimmed}" contains a comma, which markpost treats as a tag separator. Pass each tag with its own --tag.`,
+    );
+  }
+
+  return trimmed;
+};
+
+// Duplicates collapse after trimming: AND-ing the same tag twice is a no-op.
+const normalizeTags = (
+  occurrences: string[] | undefined,
+): string[] | undefined => {
+  if (occurrences === undefined) {
+    return undefined;
+  }
+
+  return [...new Set(occurrences.map(normalizeTag))];
+};
+
+const normalizeSort = (
+  occurrences: string[] | undefined,
+): RecordSort | undefined => {
+  const value = normalizeFilter('sort', occurrences);
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!(RECORD_SORTS as readonly string[]).includes(value)) {
+    throw new Error(
+      `--sort must be one of: ${RECORD_SORTS.join(', ')} (got "${value}").`,
+    );
+  }
+
+  return value as RecordSort;
 };
 
 // title, uuid, createdAt, status, syncedAt, and errorMessage all come from the
