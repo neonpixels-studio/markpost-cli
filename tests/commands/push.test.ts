@@ -1004,3 +1004,206 @@ describe('runPushCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 });
+
+describe('runPushCommand with stdin (`push -`)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    process.exitCode = undefined;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.exitCode = undefined;
+  });
+
+  const load = async () => {
+    const { createRecord } = await import('#src/libs/records.js');
+    const { checkConfig } = await import('#src/libs/config.js');
+    const { resolveMarkdownInputs } = await import('#src/libs/files.js');
+    const { runPushCommand } = await import('#src/commands/push.js');
+    vi.mocked(checkConfig).mockResolvedValue(true);
+    return { createRecord, checkConfig, resolveMarkdownInputs, runPushCommand };
+  };
+
+  it('pushes piped content with its heading title and frontmatter tags', async () => {
+    const { createRecord, resolveMarkdownInputs, runPushCommand } =
+      await load();
+    vi.mocked(createRecord).mockResolvedValue(recordFor('My Note', 'u-1'));
+    const text =
+      '---\ntitle: My Note\nsource: web\ncreated: 2024-01-01T00:00:00Z\ntags: [a, b]\n---\n\n# My Note\n\nbody\n';
+
+    await runPushCommand(['-'], async () => text);
+
+    expect(createRecord).toHaveBeenCalledWith('My Note', 'body\n', [
+      'a',
+      'b',
+    ]);
+    expect(resolveMarkdownInputs).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith('Pushed "My Note" (u-1)');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('falls back to a timestamp title when there is no heading', async () => {
+    const { createRecord, runPushCommand } = await load();
+    vi.mocked(createRecord).mockResolvedValue(recordFor('x', 'u-2'));
+
+    await runPushCommand(['-'], async () => 'just text');
+
+    expect(createRecord).toHaveBeenCalledWith(
+      expect.stringMatching(/^Note \d{4}-\d{2}-\d{2}T/),
+      'just text',
+      [],
+    );
+  });
+
+  it('previews on --dry-run without config or createRecord', async () => {
+    const { createRecord, checkConfig, runPushCommand } = await load();
+
+    await runPushCommand(['--dry-run', '-'], async () => '# Title\n\nbody');
+
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push <stdin> as "Title"'),
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('exits 1 with the helpful message when stdin is a TTY', async () => {
+    const { createRecord, runPushCommand } = await load();
+    const { readStdinText } = await import('#src/libs/stdin.js');
+
+    await runPushCommand(['-'], () =>
+      readStdinText({
+        isTTY: true,
+        setEncoding: () => {},
+        [Symbol.asyncIterator]: () => {
+          throw new Error('must not read a TTY');
+        },
+      }),
+    );
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Nothing piped to stdin'),
+    );
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('exits 1 on empty or whitespace-only stdin', async () => {
+    const { createRecord, runPushCommand } = await load();
+
+    await runPushCommand(['-'], async () => '  \n\n');
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Stdin was empty'),
+    );
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('rejects "-" given twice without reading stdin', async () => {
+    const { runPushCommand } = await load();
+    const readInput = vi.fn();
+
+    await runPushCommand(['-', '-'], readInput);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('can only be given once'),
+    );
+    expect(readInput).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('rejects "-" mixed with paths without reading stdin', async () => {
+    const { runPushCommand } = await load();
+    const readInput = vi.fn();
+
+    await runPushCommand(['-', 'note.md'], readInput);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('cannot be combined with other paths'),
+    );
+    expect(readInput).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('treats "-" after "--" as a literal path, not stdin', async () => {
+    const { resolveMarkdownInputs, runPushCommand } = await load();
+    vi.mocked(resolveMarkdownInputs).mockReturnValue({
+      files: [],
+      missing: ['-'],
+      skipped: [],
+    });
+    const readInput = vi.fn();
+
+    await runPushCommand(['--', '-'], readInput);
+
+    expect(readInput).not.toHaveBeenCalled();
+    expect(resolveMarkdownInputs).toHaveBeenCalledWith(['-']);
+  });
+
+  it('rejects "-" mixed with a path after "--"', async () => {
+    const { runPushCommand } = await load();
+    const readInput = vi.fn();
+
+    await runPushCommand(['-', '--', 'note.md'], readInput);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('cannot be combined with other paths'),
+    );
+    expect(readInput).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('accepts --dry-run after "-"', async () => {
+    const { createRecord, checkConfig, runPushCommand } = await load();
+
+    await runPushCommand(['-', '--dry-run'], async () => 'x');
+
+    expect(createRecord).not.toHaveBeenCalled();
+    expect(checkConfig).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would push <stdin>'),
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('does not push when config is missing', async () => {
+    const { createRecord, checkConfig, runPushCommand } = await load();
+    vi.mocked(checkConfig).mockResolvedValue(false);
+
+    await runPushCommand(['-'], async () => '# T\n\nbody');
+
+    expect(checkConfig).toHaveBeenCalled();
+    expect(createRecord).not.toHaveBeenCalled();
+  });
+
+  it('warns about an unparseable tags line using the <stdin> label', async () => {
+    const { createRecord, runPushCommand } = await load();
+    vi.mocked(createRecord).mockResolvedValue(recordFor('T', 'u-3'));
+    const text =
+      '---\ntitle: T\nsource: web\ncreated: 2024-01-01T00:00:00Z\ntags: urgent\n---\n\n# T\n\nbody\n';
+
+    await runPushCommand(['-'], async () => text);
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('tags in "<stdin>" could not be parsed'),
+    );
+    expect(createRecord).toHaveBeenCalledWith('T', 'body\n', []);
+  });
+
+  it('reports a createRecord failure under the <stdin> label', async () => {
+    const { createRecord, runPushCommand } = await load();
+    vi.mocked(createRecord).mockResolvedValue(null);
+
+    await runPushCommand(['-'], async () => '# T\n\nbody');
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to push "<stdin>"'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+});

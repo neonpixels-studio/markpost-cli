@@ -12,11 +12,23 @@ import { resolveMarkdownInputs } from '#src/libs/files.js';
 import { checkConfig } from '#src/libs/config.js';
 import { failWithUsage } from '#src/libs/usage.js';
 import { sanitizeForTerminal } from '#src/libs/terminal.js';
+import {
+  parseStdinNote,
+  readStdinText,
+  STDIN_ARGUMENT,
+  STDIN_LABEL,
+} from '#src/libs/stdin.js';
+import type { ReadInput, ParsedNote } from '#src/libs/stdin.js';
 
 export const USAGE = `Usage: markpost push [--dry-run] <path...>
+       markpost push [--dry-run] -
 
   path       One or more markdown files, directories (recursed for .md files),
              or glob patterns to create records from
+  -          Read a single note from stdin (e.g. \`pbpaste | markpost push -\`).
+             The title is the note's first "# " heading, else "Note <timestamp>".
+             Frontmatter and tags are handled as for a file. Use it at most once
+             and not alongside other paths (\`--\` makes a literal "-" file)
   --dry-run  Preview the resolved files (and any missing/unreadable inputs)
              without creating any records`;
 
@@ -93,10 +105,24 @@ const warnIfTagsLineUnparseable = (
   );
 };
 
-const pushFile = async (filePath: string): Promise<PushResult> => {
+// One thing to push: a label for output plus a loader, so files and piped
+// stdin share the same push, error and summary handling.
+interface PushTarget {
+  filePath: string;
+  load: () => ParsedNote;
+}
+
+const fileTarget = (filePath: string): PushTarget => ({
+  filePath,
+  load: () => readMarkdown(filePath),
+});
+
+const pushFile = async ({
+  filePath,
+  load,
+}: PushTarget): Promise<PushResult> => {
   try {
-    const { title, content, tags, tagsLineUnparseable } =
-      readMarkdown(filePath);
+    const { title, content, tags, tagsLineUnparseable } = load();
     warnIfTagsLineUnparseable(filePath, tagsLineUnparseable);
 
     const record = await createRecord(title, content, tags);
@@ -148,12 +174,13 @@ const pushFile = async (filePath: string): Promise<PushResult> => {
 // A systemic failure stops the run immediately — the remaining files would all
 // hit the same wall, so firing those requests only wastes time and hammers a
 // server that's already failing (or rejecting an expired token).
-const pushFiles = async (filePaths: string[]): Promise<PushRun> => {
+const pushFiles = async (targets: PushTarget[]): Promise<PushRun> => {
   const results: PushResult[] = [];
-  const total = filePaths.length;
+  const total = targets.length;
 
-  for (const [index, filePath] of filePaths.entries()) {
-    const result = await pushFile(filePath);
+  for (const [index, target] of targets.entries()) {
+    const { filePath } = target;
+    const result = await pushFile(target);
     results.push(result);
 
     if (result.systemicError) {
@@ -234,7 +261,66 @@ const reportSummary = (run: PushRun, unresolvedCount: number): void => {
   }
 };
 
-export const runPushCommand = async (args: string[]): Promise<void> => {
+// `-` is only the stdin marker among the option args; after `--` it is a
+// literal filename like any other path.
+const validateStdinUsage = (
+  optionArgs: string[],
+  paths: string[],
+): string | null => {
+  const stdinCount = optionArgs.filter((arg) => arg === STDIN_ARGUMENT).length;
+
+  if (stdinCount === 0) {
+    return null;
+  }
+
+  if (stdinCount > 1) {
+    return `"${STDIN_ARGUMENT}" (stdin) can only be given once.`;
+  }
+
+  if (paths.length > 1) {
+    return `"${STDIN_ARGUMENT}" (stdin) cannot be combined with other paths.`;
+  }
+
+  return null;
+};
+
+const reportStdinDryRun = (note: ParsedNote): void => {
+  console.log(
+    chalk.yellow(
+      'Dry run — previewing 1 note from stdin; nothing will be pushed.',
+    ),
+  );
+  console.log(
+    chalk.dim(
+      sanitizeForTerminal(`Would push ${STDIN_LABEL} as "${note.title}"`),
+    ),
+  );
+};
+
+const pushStdin = async (
+  readInput: ReadInput,
+  dryRun: boolean,
+): Promise<void> => {
+  if (!dryRun && !(await checkConfig())) {
+    return;
+  }
+
+  const note = parseStdinNote(await readInput());
+
+  if (dryRun) {
+    warnIfTagsLineUnparseable(STDIN_LABEL, note.tagsLineUnparseable);
+    reportStdinDryRun(note);
+    return;
+  }
+
+  const run = await pushFiles([{ filePath: STDIN_LABEL, load: () => note }]);
+  reportSummary(run, 0);
+};
+
+export const runPushCommand = async (
+  args: string[],
+  readInput: ReadInput = readStdinText,
+): Promise<void> => {
   try {
     const dryRun = args.includes(DRY_RUN_FLAG);
 
@@ -271,6 +357,18 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
 
     if (paths.length === 0) {
       failWithUsage('No path given.', USAGE);
+      return;
+    }
+
+    const stdinProblem = validateStdinUsage(optionArgs, paths);
+
+    if (stdinProblem) {
+      failWithUsage(stdinProblem, USAGE);
+      return;
+    }
+
+    if (optionArgs.includes(STDIN_ARGUMENT)) {
+      await pushStdin(readInput, dryRun);
       return;
     }
 
@@ -320,7 +418,7 @@ export const runPushCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    const run = await pushFiles(files);
+    const run = await pushFiles(files.map(fileTarget));
     reportSummary(run, unresolvedCount);
   } catch (error) {
     console.error(chalk.redBright(toMessage(error)));
