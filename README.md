@@ -367,6 +367,36 @@ closes that gap the same way `sync:contract` and
   scripts periodically or whenever a markpost source/webhook/settings change
   is suspected.
 
+## Releasing
+
+Releases are published by [`.github/workflows/release.yml`](.github/workflows/release.yml)
+when a `vX.Y.Z` tag is pushed. The workflow fails unless the tag matches the
+`version` in `package.json`, then runs lint, typecheck, `test:ci` and the
+packed-artifact smoke test ([`scripts/smoke-test-pack.sh`](scripts/smoke-test-pack.sh))
+before `npm publish --provenance`, which attaches a signed supply-chain
+attestation to the package.
+
+To cut a release: bump `version` in `package.json`, merge to `main`, then
+`git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+### One-time npm setup (trusted publishing, no token)
+
+The publish job authenticates with GitHub OIDC (`id-token: write`), so no
+`NPM_TOKEN` secret is stored. A maintainer must configure this once:
+
+1. Make sure `@markpost/cli` exists on npm. npm only lets you attach a trusted
+   publisher to an existing package, so if it has never been published, do the
+   very first publish by hand (`npm publish --access public` from a clean
+   checkout).
+2. On npmjs.com open the package, then **Settings > Trusted Publisher > GitHub
+   Actions** and enter: organization `neonpixels-studio`, repository
+   `markpost-cli`, workflow filename `release.yml`, environment blank.
+3. Optionally set **Publishing access** to "Require two-factor authentication
+   and disallow tokens" so only the workflow can publish.
+
+Trusted publishing needs npm 11.5.1 or newer, which ships with the Node version
+pinned in `.nvmrc`.
+
 ## Security scanning
 
 This repo runs a deterministic security-scanner layer in two places: a local
