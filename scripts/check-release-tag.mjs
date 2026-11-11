@@ -2,7 +2,9 @@
 import { readFileSync } from 'node:fs';
 
 const tag = process.argv[2] ?? '';
-const { version } = JSON.parse(readFileSync('package.json', 'utf-8'));
+const { version } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+);
 
 if (tag !== `v${version}`) {
   console.error(

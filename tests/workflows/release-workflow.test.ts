@@ -36,7 +36,9 @@ function runTagCheck(tag: string) {
 describe('release workflow', () => {
   it('triggers only on version tags', () => {
     expect(workflow).toMatch(/on:\n {2}push:\n {4}tags: \['v\*\.\*\.\*'\]/);
-    expect(workflow).not.toMatch(/branches:/);
+    expect(workflow).not.toMatch(
+      /workflow_dispatch|pull_request|schedule:|branches:|release:/,
+    );
   });
 
   it('pins every action to a full commit SHA', () => {
@@ -76,7 +78,7 @@ describe('release workflow', () => {
     expect(workflow).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN/);
   });
 
-  it('checks the tag against package.json before anything else runs', () => {
+  it('checks the tag against package.json before installing dependencies', () => {
     const verify = jobBodies().verify;
     const tagCheck = verify.indexOf('scripts/check-release-tag.mjs');
     expect(tagCheck).toBeGreaterThan(-1);
@@ -87,6 +89,11 @@ describe('release workflow', () => {
     expect(jobBodies().verify).toContain(
       'git merge-base --is-ancestor "$GITHUB_SHA" origin/main',
     );
+  });
+
+  it('does not run dependency install scripts in the publish job', () => {
+    expect(jobBodies().publish).toContain('npm ci --ignore-scripts');
+    expect(jobBodies().publish).not.toMatch(/npm ci\s*$/m);
   });
 
   it('runs lint, typecheck, test:ci and the pack smoke test', () => {
