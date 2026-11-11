@@ -24,6 +24,10 @@ const lowestVersion = (range: string): string => {
       left[0] - right[0] || left[1] - right[1] || left[2] - right[2],
   );
 
+  if (!lowest) {
+    throw new Error(`No x.y.z version found in engines range "${range}"`);
+  }
+
   return lowest.join('.');
 };
 
@@ -50,13 +54,14 @@ describe('supported Node range', () => {
   });
 
   it('tests Windows in the CI matrix', () => {
-    expect(readRepoFile('.github/workflows/ci.yml')).toContain(
-      'windows-latest',
+    expect(readRepoFile('.github/workflows/ci.yml')).toMatch(
+      /^\s*-\s*os:\s*windows-latest\s*$/m,
     );
   });
 
   it('lowestVersion picks the smallest version in a range', () => {
     expect(lowestVersion('^22.13.0 || >=24.0.0')).toBe('22.13.0');
     expect(lowestVersion('>=24.0.0 || ^20.9.1')).toBe('20.9.1');
+    expect(() => lowestVersion('>=22')).toThrow('No x.y.z version');
   });
 });

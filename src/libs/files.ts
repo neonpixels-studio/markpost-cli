@@ -239,7 +239,7 @@ const globMatches = (pattern: string): string[] => {
   try {
     return globSync(pattern);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') {
+    if (errnoCode(error) === 'ENOTDIR') {
       return [];
     }
 
