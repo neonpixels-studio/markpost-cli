@@ -14,9 +14,21 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // (root bypasses the mode bits), so they are skipped in that case. The whole
 // file is POSIX-only already (see the /dev/null and symlink tests below), so
 // this guard doesn't attempt to also cover Windows.
-const skipPermissionTests = process.getuid?.() === 0;
+// @todo Windows has no POSIX mode bits, so `chmod`-based permission tests are
+// skipped there; cover EACCES handling on Windows with ACL-based fixtures.
+const IS_WINDOWS = process.platform === 'win32';
+const skipPermissionTests = process.getuid?.() === 0 || IS_WINDOWS;
 
 import { resolveMarkdownInputs } from '#src/libs/files.js';
+
+const restoreEnv = (name: string, value: string | undefined): void => {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
+};
 
 let workspace: string;
 
@@ -157,7 +169,8 @@ describe('resolveMarkdownInputs', () => {
     expect(files).toContain(note);
   });
 
-  it('skips a non-regular file named explicitly', () => {
+  // @todo Windows has no /dev/null; use a named pipe or device path there.
+  it.skipIf(IS_WINDOWS)('skips a non-regular file named explicitly', () => {
     const { files, skipped } = resolveMarkdownInputs(['/dev/null']);
 
     expect(files).toEqual([]);
@@ -359,19 +372,19 @@ describe('resolveMarkdownInputs', () => {
 
   describe('home directory expansion', () => {
     let originalHome: string | undefined;
+    let originalUserProfile: string | undefined;
 
     beforeEach(() => {
       originalHome = process.env.HOME;
+      originalUserProfile = process.env.USERPROFILE;
       process.env.HOME = workspace;
+      // os.homedir() reads USERPROFILE, not HOME, on Windows.
+      process.env.USERPROFILE = workspace;
     });
 
     afterEach(() => {
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-        return;
-      }
-
-      process.env.HOME = originalHome;
+      restoreEnv('HOME', originalHome);
+      restoreEnv('USERPROFILE', originalUserProfile);
     });
 
     it('expands a leading ~ so a quoted glob matches under home', () => {
