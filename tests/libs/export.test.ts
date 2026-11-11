@@ -318,14 +318,19 @@ describe('writeExportFile', () => {
   // A full-account export holds every record's private title/content — as
   // sensitive as the API token — so the file must not be left
   // group/world-readable, matching config.ts's `configFileMode: 0o600`.
-  it('creates the file owner-readable only (0o600)', () => {
-    const targetPath = join(tempDirectory, 'backup.json');
+  // @todo Windows reports 0o666 for every file (ACLs, not mode bits), so the
+  // 0o600 assertions are skipped there; verify owner-only access via ACLs.
+  it.skipIf(process.platform === 'win32')(
+    'creates the file owner-readable only (0o600)',
+    () => {
+      const targetPath = join(tempDirectory, 'backup.json');
 
-    writeExportFile(targetPath, [exportRow]);
+      writeExportFile(targetPath, [exportRow]);
 
-    const mode = statSync(targetPath).mode & 0o777;
-    expect(mode).toBe(0o600);
-  });
+      const mode = statSync(targetPath).mode & 0o777;
+      expect(mode).toBe(0o600);
+    },
+  );
 
   it('creates missing parent directories', () => {
     const targetPath = join(tempDirectory, 'nested', 'deeper', 'backup.json');
@@ -360,15 +365,18 @@ describe('writeExportFile', () => {
   // The new content always lands in a freshly created inode (temp file +
   // rename), so `force` overwriting a file some other process left
   // world-readable still ends up 0o600 rather than inheriting the old mode.
-  it('applies 0o600 even when force-overwriting a file with a looser mode', () => {
-    const targetPath = join(tempDirectory, 'backup.json');
-    writeFileSync(targetPath, 'previous backup contents', { mode: 0o644 });
+  it.skipIf(process.platform === 'win32')(
+    'applies 0o600 even when force-overwriting a file with a looser mode',
+    () => {
+      const targetPath = join(tempDirectory, 'backup.json');
+      writeFileSync(targetPath, 'previous backup contents', { mode: 0o644 });
 
-    writeExportFile(targetPath, [exportRow], true);
+      writeExportFile(targetPath, [exportRow], true);
 
-    const mode = statSync(targetPath).mode & 0o777;
-    expect(mode).toBe(0o600);
-  });
+      const mode = statSync(targetPath).mode & 0o777;
+      expect(mode).toBe(0o600);
+    },
+  );
 
   // Writes via a sibling temp file + rename (atomic on POSIX) rather than
   // truncating the target directly, so a mid-write failure can't leave a
@@ -387,6 +395,8 @@ describe('writeExportFile', () => {
     // Point HOME at the temp dir so the expansion is verifiable without
     // touching the real home directory.
     vi.stubEnv('HOME', tempDirectory);
+    // os.homedir() reads USERPROFILE, not HOME, on Windows.
+    vi.stubEnv('USERPROFILE', tempDirectory);
 
     const resolvedPath = writeExportFile('~/backup.json', [exportRow]);
 

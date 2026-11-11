@@ -177,7 +177,9 @@ describe('checkOutputDirectory', () => {
     expect(result.detail).toContain('ENOENT');
   });
 
-  it.skipIf(process.getuid?.() === 0)(
+  // @todo Windows has no POSIX mode bits, so chmod cannot make a directory
+  // unwritable there; cover with an ACL-based fixture.
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
     'fails when the directory is not writable',
     async () => {
       await chmod(directory, 0o500);
@@ -190,15 +192,20 @@ describe('checkOutputDirectory', () => {
     },
   );
 
-  it('strips terminal escapes from a passing path', async () => {
-    const escapedDirectory = path.join(directory, 'evil\u001b[31m');
-    await mkdir(escapedDirectory);
+  // @todo ESC is an invalid character in Windows file names; exercise the
+  // escape stripping with a unit test on the formatter instead.
+  it.skipIf(process.platform === 'win32')(
+    'strips terminal escapes from a passing path',
+    async () => {
+      const escapedDirectory = path.join(directory, 'evil\u001b[31m');
+      await mkdir(escapedDirectory);
 
-    const result = await checkOutputDirectory(escapedDirectory);
+      const result = await checkOutputDirectory(escapedDirectory);
 
-    expect(result.ok).toBe(true);
-    expect(result.detail).not.toContain('\u001b');
-  });
+      expect(result.ok).toBe(true);
+      expect(result.detail).not.toContain('\u001b');
+    },
+  );
 
   it('fails when the path is a file', async () => {
     const filePath = path.join(directory, 'file.txt');

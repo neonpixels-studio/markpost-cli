@@ -137,6 +137,8 @@ describe('package.json publish configuration', () => {
       const packOutput = execFileSync('npm', ['pack', '--dry-run', '--json'], {
         cwd: REPO_ROOT,
         encoding: 'utf-8',
+        // npm is npm.cmd on Windows, which spawn can only run through a shell.
+        shell: process.platform === 'win32',
       });
       const [packResult] = JSON.parse(packOutput) as [
         { files: { path: string }[] },
