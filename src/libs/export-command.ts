@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { parseArgs } from 'node:util';
+import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { writeExportFile } from '#src/libs/export.js';
 import { warnPartialRead } from '#src/libs/errors.js';
 import { hasJsonFlag } from '#src/libs/output.js';
@@ -16,10 +16,20 @@ import { sanitizeForTerminal } from '#src/libs/terminal.js';
 // are mutually exclusive: one writes a file, the other is a stdout data
 // channel, and combining them would leave the caller guessing which one
 // actually happened.
+// `extraOptions` lets a command declare flags of its own (e.g. `events
+// export --kind`); their raw parsed values come back as `extraValues`.
 export const parseExportArgs = (
   args: string[],
   commandName: string,
-): { outputPath: string | undefined; force: boolean } => {
+  extraOptions: ParseArgsOptionsConfig = {},
+): {
+  outputPath: string | undefined;
+  force: boolean;
+  extraValues: Record<
+    string,
+    string | boolean | (string | boolean)[] | undefined
+  >;
+} => {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -27,6 +37,7 @@ export const parseExportArgs = (
       out: { type: 'string' },
       force: { type: 'boolean' },
       json: { type: 'boolean' },
+      ...extraOptions,
     },
   });
 
@@ -62,7 +73,11 @@ export const parseExportArgs = (
     throw new Error('--force has no effect without --out.');
   }
 
-  return { outputPath: values.out?.trim(), force: Boolean(values.force) };
+  return {
+    outputPath: values.out?.trim(),
+    force: Boolean(values.force),
+    extraValues: values,
+  };
 };
 
 // A capped export and a batch of malformed rows are independent reasons the

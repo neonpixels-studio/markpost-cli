@@ -68,7 +68,7 @@ describe('runEventsCommand', () => {
     // it logs stays silent on stderr under --json (see warnPartialRead /
     // issue #194) — a regression here would silently reintroduce the stray
     // plain-text line without any test catching it.
-    expect(fetchAllEvents).toHaveBeenCalledWith(false);
+    expect(fetchAllEvents).toHaveBeenCalledWith(false, {});
   });
 
   it('never dispatches to list when checkConfig resolves false', async () => {
@@ -110,6 +110,85 @@ describe('runEventsCommand', () => {
   });
 
   describe('list', () => {
+    describe('filters', () => {
+      const SOURCE_ID = '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b';
+
+      const run = async (args: string[]) => {
+        const { fetchAllEvents } = await import('#src/libs/events.js');
+        vi.mocked(fetchAllEvents).mockResolvedValue({
+          ok: true,
+          events: [],
+          partial: false,
+        });
+        const { runEventsCommand } = await import('#src/commands/events.js');
+        await runEventsCommand(args);
+        return fetchAllEvents;
+      };
+
+      it('passes --kind and --source through as filters', async () => {
+        const fetchAllEvents = await run([
+          'list',
+          '--kind',
+          'err',
+          '--source',
+          SOURCE_ID,
+        ]);
+
+        expect(fetchAllEvents).toHaveBeenCalledWith(false, {
+          kind: 'err',
+          sourceId: SOURCE_ID,
+        });
+      });
+
+      it('accepts the --flag=value form', async () => {
+        const fetchAllEvents = await run(['list', '--kind=warn']);
+
+        expect(fetchAllEvents).toHaveBeenCalledWith(false, {
+          kind: 'warn',
+          sourceId: undefined,
+        });
+      });
+
+      it.each([
+        [
+          'an invalid kind',
+          ['list', '--kind', 'fatal'],
+          '--kind must be one of: ok, dim, warn, err',
+        ],
+        [
+          'a repeated kind',
+          ['list', '--kind', 'err', '--kind', 'ok'],
+          'more than once',
+        ],
+        ['an empty kind', ['list', '--kind='], 'non-empty'],
+        [
+          'a non-uuid source',
+          ['list', '--source', 'webhook'],
+          '--source must be a source uuid',
+        ],
+      ])(
+        'rejects %s before checking config or fetching',
+        async (_label, args, message) => {
+          const { checkConfig } = await import('#src/libs/config.js');
+          const fetchAllEvents = await run(args);
+
+          expect(checkConfig).not.toHaveBeenCalled();
+          expect(fetchAllEvents).not.toHaveBeenCalled();
+          expect(console.error).toHaveBeenCalledWith(
+            expect.stringContaining(message),
+          );
+          expect(process.exitCode).toBe(1);
+        },
+      );
+
+      it('still rejects a stray positional', async () => {
+        const fetchAllEvents = await run(['list', 'err']);
+
+        expect(fetchAllEvents).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      });
+    });
+
     it('prints "No events found." when the log is empty', async () => {
       const { fetchAllEvents } = await import('#src/libs/events.js');
       vi.mocked(fetchAllEvents).mockResolvedValue({
@@ -391,7 +470,7 @@ describe('runEventsCommand', () => {
       // `--json` must thread through to fetchAllEvents (see the comment on
       // the plain-mode assertion above) so its own page-level diagnostic
       // stays silent, leaving only the single JSON object below on stderr.
-      expect(fetchAllEvents).toHaveBeenCalledWith(true);
+      expect(fetchAllEvents).toHaveBeenCalledWith(true, {});
       expect(console.error).toHaveBeenCalledTimes(1);
       const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
       expect(JSON.parse(errorOutput)).toEqual({
@@ -427,7 +506,8 @@ describe('runEventsCommand', () => {
     // failWithMessage and now goes through failWithUsage, so the usage block
     // must print alongside the message.
     it('prints the usage block, not bare prose, for an unknown flag without --json', async () => {
-      const { runEventsCommand, USAGE } = await import('#src/commands/events.js');
+      const { runEventsCommand, USAGE } =
+        await import('#src/commands/events.js');
 
       await runEventsCommand(['list', '--bogus']);
 

@@ -492,3 +492,64 @@ describe('fetchAllEvents', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('event filter query string', () => {
+  const SOURCE_ID = '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b';
+  const emptyPage = {
+    data: [],
+    meta: { total: 0, size: 100, hasMore: false },
+    links: { next: null },
+  };
+
+  it('sends no filter params when none are given', async () => {
+    mockFetch(emptyPage);
+
+    await fetchPaginatedEvents();
+
+    const url = (global.fetch as ReturnType<typeof vi.fn>).mock
+      .calls[0][0] as string;
+    expect(url).not.toContain('filter[');
+  });
+
+  it('sends filter[kind] and filter[sourceId] exactly as markpost parses them', async () => {
+    mockFetch(emptyPage);
+
+    await fetchPaginatedEvents(undefined, 100, false, {
+      kind: 'err',
+      sourceId: SOURCE_ID,
+    });
+
+    const url = (global.fetch as ReturnType<typeof vi.fn>).mock
+      .calls[0][0] as string;
+    expect(url).toContain('filter[kind]=err');
+    expect(url).toContain(`filter[sourceId]=${SOURCE_ID}`);
+  });
+
+  it('re-sends the filters on every page', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [eventResource(mockEvent)],
+            meta: { total: 2, size: 1, hasMore: true },
+            links: {
+              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+            },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(emptyPage),
+      });
+    global.fetch = fetchMock;
+
+    await fetchAllEvents(false, { kind: 'warn' });
+
+    for (const call of fetchMock.mock.calls) {
+      expect(call[0] as string).toContain('filter[kind]=warn');
+    }
+    expect(fetchMock.mock.calls[1][0] as string).toContain('page[after]=evt-1');
+  });
+});

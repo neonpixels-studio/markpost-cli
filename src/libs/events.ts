@@ -5,8 +5,10 @@ import {
   unwrapResourceCollection,
 } from '#src/libs/api.js';
 import { ApiPaginationLinks } from '#src/types/api.types.js';
+import { buildEventFilterParams } from '#src/libs/event-filters.js';
 import {
   Event,
+  EventFilters,
   EventListApiResponse,
   PaginatedEventsMeta,
 } from '#src/types/events.types.js';
@@ -87,11 +89,13 @@ export type FetchAllEventsResult =
 // matching the command's own JSON failure contract for the read as a whole.
 export const fetchAllEvents = async (
   json = false,
+  filters: EventFilters = {},
 ): Promise<FetchAllEventsResult> => {
   const initial = await fetchPaginatedEvents(
     undefined,
     DEFAULT_PAGE_SIZE,
     json,
+    filters,
   );
 
   if (!initial) {
@@ -136,6 +140,7 @@ export const fetchAllEvents = async (
       after,
       DEFAULT_PAGE_SIZE,
       json,
+      filters,
     );
 
     if (!subsequent) {
@@ -154,11 +159,15 @@ export const fetchAllEvents = async (
   return { ok: true, events: events.flat(1) as Event[], partial };
 };
 
-// Emits `page[size]`/`page[after]` — the only query params markpost's
-// GET /api/events accepts (server/api/events/index.get.ts has no filter
-// params, unlike GET /api/records).
-const buildEventsQuery = (size: number, after: string | undefined): string => {
-  const params = [`page[size]=${size}`];
+// Emits `page[size]`/`page[after]` plus whichever of markpost's event filters
+// (`filter[kind]`, `filter[sourceId]`) the caller supplied. The filters are
+// re-sent on every page: the CLI only extracts the cursor from `links.next`.
+const buildEventsQuery = (
+  size: number,
+  after: string | undefined,
+  filters: EventFilters,
+): string => {
+  const params = [`page[size]=${size}`, ...buildEventFilterParams(filters)];
 
   if (after) {
     params.push(`page[after]=${encodeURIComponent(after)}`);
@@ -178,6 +187,7 @@ export const fetchPaginatedEvents = async (
   after?: string,
   size: number = DEFAULT_PAGE_SIZE,
   json = false,
+  filters: EventFilters = {},
 ): Promise<{
   events: Event[];
   meta: PaginatedEventsMeta;
@@ -185,7 +195,7 @@ export const fetchPaginatedEvents = async (
 } | null> => {
   try {
     const body = (await authedRequest(
-      `/api/events?${buildEventsQuery(size, after)}`,
+      `/api/events?${buildEventsQuery(size, after, filters)}`,
     )) as EventListApiResponse;
 
     const events = unwrapResourceCollection(

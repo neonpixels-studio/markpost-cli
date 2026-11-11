@@ -1,5 +1,10 @@
 import { parseArgs } from 'node:util';
 import chalk from 'chalk';
+import {
+  EVENT_FILTER_PARSE_OPTIONS,
+  filterEventRows,
+  resolveEventFilters,
+} from '#src/libs/event-filters.js';
 import { fetchAllEvents } from '#src/libs/events.js';
 import { fetchEventExport } from '#src/libs/export.js';
 import {
@@ -19,6 +24,7 @@ import { hasJsonFlag, printJson } from '#src/libs/output.js';
 import {
   EVENT_KINDS,
   EventExportRow,
+  EventFilters,
   EventKind,
 } from '#src/types/events.types.js';
 
@@ -33,6 +39,8 @@ export const USAGE = `Usage: markpost events <list|export> [options]
           non-zero so a script can detect an incomplete export.
 
 Options:
+  --kind <kind>  Only events of one kind: ok, dim, warn, or err
+  --source <id>  Only events for one source (its uuid, see \`sources list\`)
   --json        Print the events as JSON instead of formatted text (export:
                 cannot be combined with --out)
   --out <path>  (export) Write the export as JSON to <path> instead of
@@ -57,10 +65,16 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
     return;
   }
 
-  // markpost's GET /api/events takes no filters, so this only rejects a
-  // stray argument before checkConfig. Parsed via parseOrFailWithUsage so a
-  // usage throw reports the `usage` JSON code, not `fetch_failed`.
-  if (!parseOrFailWithUsage(() => parseListArgs(args), USAGE, json)) {
+  // Validates the filters and rejects a stray argument before checkConfig.
+  // Parsed via parseOrFailWithUsage so a usage throw reports the `usage` JSON
+  // code, not `fetch_failed`.
+  const parsedList = parseOrFailWithUsage(
+    () => parseListArgs(args),
+    USAGE,
+    json,
+  );
+
+  if (!parsedList) {
     return;
   }
 
@@ -69,7 +83,7 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
       return;
     }
 
-    await listEvents(json);
+    await listEvents(json, parsedList.filters);
   } catch (error) {
     // A systemic auth/5xx failure re-throws from fetchAllEvents; surface its
     // classified, actionable message with a non-zero exit rather than the
@@ -83,22 +97,23 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
 // bad invocation (`events list --bogus`, `events list webhook`) fails loud
 // here rather than silently ignored. positionals[0] is the `list` subcommand
 // itself; anything past it is a stray argument.
-const parseListArgs = (args: string[]): { positionals: string[] } => {
-  const { positionals } = parseArgs({
+const parseListArgs = (args: string[]): { filters: EventFilters } => {
+  const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
     options: {
       json: { type: 'boolean' },
+      ...EVENT_FILTER_PARSE_OPTIONS,
     },
   });
 
   if (positionals.length > 1) {
     throw new Error(
-      `Unexpected argument "${positionals[1]}". \`events list\` takes no arguments.`,
+      `Unexpected argument "${positionals[1]}". \`events list\` takes no positional arguments. Filter with --kind or --source.`,
     );
   }
 
-  return { positionals };
+  return { filters: resolveEventFilters(values) };
 };
 
 // One color function per markpost event kind, keyed off the local
@@ -155,8 +170,11 @@ const printEvent = (event: EventExportRow): void => {
 // Read-only view of the ingestion activity log — the diagnostic counterpart
 // to `records list`: a source that silently stops ingesting shows up here as
 // a warn/err entry even when it produced no record at all.
-const listEvents = async (json: boolean): Promise<void> => {
-  const result = await fetchAllEvents(json);
+const listEvents = async (
+  json: boolean,
+  filters: EventFilters,
+): Promise<void> => {
+  const result = await fetchAllEvents(json, filters);
 
   // A failed fetch must not masquerade as "No events found." — throw so the
   // command's catch reports it loudly and exits non-zero, rather than
@@ -203,7 +221,7 @@ const runEventsExport = async (
   json: boolean,
 ): Promise<void> => {
   const parsed = parseOrFailWithUsage(
-    () => parseExportArgs(exportArgs, 'events export'),
+    () => parseEventExportArgs(exportArgs),
     USAGE,
     json,
   );
@@ -217,16 +235,32 @@ const runEventsExport = async (
       return;
     }
 
-    await exportEvents(parsed.outputPath, parsed.force, json);
+    await exportEvents(parsed.outputPath, parsed.force, json, parsed.filters);
   } catch (error) {
     failWithMessage(sanitizeForTerminal(describeApiError(error)), json);
   }
+};
+
+const parseEventExportArgs = (exportArgs: string[]) => {
+  const { extraValues, ...exportOptions } = parseExportArgs(
+    exportArgs,
+    'events export',
+    EVENT_FILTER_PARSE_OPTIONS,
+  );
+
+  return {
+    ...exportOptions,
+    filters: resolveEventFilters(
+      extraValues as Parameters<typeof resolveEventFilters>[0],
+    ),
+  };
 };
 
 const exportEvents = async (
   outputPath: string | undefined,
   force: boolean,
   json: boolean,
+  filters: EventFilters,
 ): Promise<void> => {
   const result = await fetchEventExport(json);
 
@@ -236,7 +270,8 @@ const exportEvents = async (
     throw new Error('Failed to fetch the events export from the server.');
   }
 
-  const { rows, truncated, skippedCount } = result;
+  const { truncated, skippedCount } = result;
+  const rows = filterEventRows(result.rows, filters);
   reportIncompleteExport(truncated, skippedCount, json);
 
   if (outputPath) {
