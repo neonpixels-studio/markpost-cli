@@ -468,9 +468,12 @@ describe('writeMarkdown', () => {
 
   it('refuses to write when a subfolder resolves through a symlink outside the output directory', async () => {
     const { realpathSync } = await import('node:fs');
+    // The guard passes platform-native paths (backslashes on Windows) to
+    // realpathSync, so the symlink must be matched on a resolve()d path.
+    const symlinkedFolder = resolve(outputDirectory, 'link');
     vi.mocked(realpathSync).mockImplementation((path) =>
-      String(path).startsWith(`${outputDirectory}/link`)
-        ? '/elsewhere'
+      String(path).startsWith(symlinkedFolder)
+        ? resolve('/elsewhere')
         : String(path),
     );
 
@@ -478,6 +481,8 @@ describe('writeMarkdown', () => {
       writeMarkdown({ ...mockRecord, filePath: 'link/x.md' }),
     ).toThrow(FilePathViolationError);
     expect(writeFileSync).not.toHaveBeenCalled();
+    // Proves the symlink scenario was reached, not refused for another reason.
+    expect(realpathSync).toHaveBeenCalledWith(symlinkedFolder);
 
     const [preview] = buildWritePreview([
       { ...mockRecord, filePath: 'link/x.md' },
