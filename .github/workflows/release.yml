@@ -56,12 +56,15 @@ jobs:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
       # --ignore-scripts: dependency install scripts must not run in the job
-      # that holds the OIDC publish token. npm publish still runs prepack.
+      # that holds the OIDC publish token. npm stage publish still runs prepack.
       - run: npm ci --ignore-scripts
-      # Trusted publishing (OIDC): no stored npm token. Requires npm >= 11.5.1,
-      # which ships with the Node version in .nvmrc. The dist-tag is always
-      # explicit (latest for X.Y.Z, the preid for prereleases) so a prerelease
-      # never lands on latest and publishConfig.tag can't override it.
-      - run: npm publish --provenance --access public --tag "$DIST_TAG"
+      # Trusted publishing (OIDC): no stored npm token. The trusted publisher
+      # only allows `npm stage publish`, so this stages the release and a
+      # maintainer approves it with 2FA (`npm stage approve <stage-id>`); a
+      # leaked workflow token can't publish on its own. Needs the npm bundled
+      # with the Node version in .nvmrc (11.19.1 has `npm stage`). The dist-tag
+      # is always explicit (latest for X.Y.Z, the preid for prereleases) so a
+      # prerelease never lands on latest and publishConfig.tag can't override it.
+      - run: npm stage publish --provenance --access public --tag "$DIST_TAG"
         env:
           DIST_TAG: ${{ needs.verify.outputs.dist-tag }}

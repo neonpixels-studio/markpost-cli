@@ -81,8 +81,21 @@ describe('release workflow', () => {
   });
 
   it('publishes with provenance and no long-lived token', () => {
-    expect(jobBodies().publish).toMatch(/npm publish[^\n]*--provenance/);
+    expect(jobBodies().publish).toMatch(/npm stage publish[^\n]*--provenance/);
     expect(workflow).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN/);
+  });
+
+  // The npm trusted publisher is configured stage-only (a human approves
+  // each release with 2FA), so a direct `npm publish` would be rejected.
+  it('stages the release instead of publishing it directly', () => {
+    const publishCommands = [
+      ...jobBodies().publish.matchAll(
+        /^\s+- run: (npm (?:stage )?publish.*)$/gm,
+      ),
+    ].map((match) => match[1]);
+
+    expect(publishCommands).toHaveLength(1);
+    expect(publishCommands[0]).toMatch(/^npm stage publish /);
   });
 
   it('publishes under the dist-tag computed by the verify job', () => {
@@ -93,7 +106,7 @@ describe('release workflow', () => {
     expect(bodies.verify).toMatch(
       /id: tag-check\n\s+run: node scripts\/check-release-tag\.mjs/,
     );
-    expect(bodies.publish).toMatch(/npm publish[^\n]*--tag "\$DIST_TAG"/);
+    expect(bodies.publish).toMatch(/npm stage publish[^\n]*--tag "\$DIST_TAG"/);
     expect(bodies.publish).toMatch(
       /DIST_TAG: \$\{\{ needs\.verify\.outputs\.dist-tag \}\}/,
     );
