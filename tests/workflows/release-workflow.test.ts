@@ -2,9 +2,11 @@
 // The YAML is checked as text (no YAML parser dependency) because the
 // properties are simple, line-level invariants.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
@@ -27,9 +29,14 @@ function jobBodies(): Record<string, string> {
 }
 
 function runTagCheck(...args: string[]) {
+  return runTagCheckWithEnv({}, ...args);
+}
+
+function runTagCheckWithEnv(env: NodeJS.ProcessEnv, ...args: string[]) {
   return spawnSync('node', ['scripts/check-release-tag.mjs', ...args], {
     cwd: REPO_ROOT,
     encoding: 'utf-8',
+    env: { ...process.env, GITHUB_OUTPUT: '', ...env },
   });
 }
 
@@ -76,6 +83,20 @@ describe('release workflow', () => {
   it('publishes with provenance and no long-lived token', () => {
     expect(jobBodies().publish).toMatch(/npm publish[^\n]*--provenance/);
     expect(workflow).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN/);
+  });
+
+  it('publishes under the dist-tag computed by the verify job', () => {
+    const bodies = jobBodies();
+    expect(bodies.verify).toMatch(
+      /dist-tag: \$\{\{ steps\.tag-check\.outputs\.dist-tag \}\}/,
+    );
+    expect(bodies.verify).toMatch(
+      /id: tag-check\n\s+run: node scripts\/check-release-tag\.mjs/,
+    );
+    expect(bodies.publish).toMatch(/npm publish[^\n]*--tag "\$DIST_TAG"/);
+    expect(bodies.publish).toMatch(
+      /DIST_TAG: \$\{\{ needs\.verify\.outputs\.dist-tag \}\}/,
+    );
   });
 
   it('checks the tag against package.json before installing dependencies', () => {
@@ -127,5 +148,68 @@ describe('check-release-tag script', () => {
   it('fails when no tag is given', () => {
     expect(runTagCheck('').status).toBe(1);
     expect(runTagCheck().status).toBe(1);
+  });
+});
+
+describe('check-release-tag dist-tag', () => {
+  let workspace: string;
+  let outputPath: string;
+
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), 'markpost-release-tag-'));
+    outputPath = join(workspace, 'github-output');
+    writeFileSync(outputPath, '');
+  });
+
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function checkVersion(version: string, tag = `v${version}`) {
+    const packageJsonPath = join(workspace, 'package.json');
+    writeFileSync(packageJsonPath, JSON.stringify({ version }));
+    const result = runTagCheckWithEnv(
+      { GITHUB_OUTPUT: outputPath },
+      tag,
+      packageJsonPath,
+    );
+
+    return { ...result, output: readFileSync(outputPath, 'utf-8') };
+  }
+
+  it('publishes a plain X.Y.Z release to latest', () => {
+    const result = checkVersion('1.2.3');
+    expect(result.status).toBe(0);
+    expect(result.output).toBe('dist-tag=latest\n');
+  });
+
+  it('publishes an alpha prerelease to the alpha dist-tag', () => {
+    const result = checkVersion('0.1.0-alpha.0');
+    expect(result.status).toBe(0);
+    expect(result.output).toBe('dist-tag=alpha\n');
+  });
+
+  it('uses the preid of any prerelease as the dist-tag', () => {
+    expect(checkVersion('2.0.0-rc.3').output).toBe('dist-tag=rc\n');
+  });
+
+  it('rejects a prerelease whose preid is not a word', () => {
+    const result = checkVersion('1.0.0-0');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('lowercase word');
+    expect(result.output).toBe('');
+  });
+
+  it('rejects a version that is not semver', () => {
+    const result = checkVersion('1.0');
+    expect(result.status).toBe(1);
+    expect(result.output).toBe('');
+  });
+
+  it('writes no output when the tag does not match', () => {
+    const result = checkVersion('0.1.0-alpha.0', 'v0.1.0-alpha.1');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('does not match');
+    expect(result.output).toBe('');
   });
 });

@@ -370,14 +370,23 @@ closes that gap the same way `sync:contract` and
 ## Releasing
 
 Releases are published by [`.github/workflows/release.yml`](.github/workflows/release.yml)
-when a `vX.Y.Z` tag is pushed. The workflow fails unless the tag matches the
-`version` in `package.json`, then runs lint, typecheck, `test:ci` and the
-packed-artifact smoke test ([`scripts/smoke-test-pack.sh`](scripts/smoke-test-pack.sh))
+when a `vX.Y.Z` or `vX.Y.Z-<preid>.N` tag is pushed. The workflow fails unless
+the tag matches the `version` in `package.json`, then runs lint, typecheck,
+`test:ci` and the packed-artifact smoke test ([`scripts/smoke-test-pack.sh`](scripts/smoke-test-pack.sh))
 before `npm publish --provenance`, which attaches a signed supply-chain
 attestation to the package.
 
-To cut a release: bump `version` in `package.json`, merge to `main`, then
-`git tag vX.Y.Z && git push origin vX.Y.Z`.
+The npm dist-tag comes from the version, never from `publishConfig`:
+
+| `package.json` version | npm dist-tag | Installed by                |
+| ---------------------- | ------------ | --------------------------- |
+| `1.2.3`                | `latest`     | `npm i @markpost/cli`       |
+| `0.1.0-alpha.0`        | `alpha`      | `npm i @markpost/cli@alpha` |
+| `2.0.0-rc.1`           | `rc`         | `npm i @markpost/cli@rc`    |
+
+To cut a release: bump `version` in `package.json` (for the next alpha,
+`npm version prerelease --preid alpha --no-git-tag-version`), merge to `main`,
+then `git tag v<version> && git push origin v<version>`.
 
 ### One-time npm setup (trusted publishing, no token)
 
@@ -386,8 +395,10 @@ The publish job authenticates with GitHub OIDC (`id-token: write`), so no
 
 1. Make sure `@markpost/cli` exists on npm. npm only lets you attach a trusted
    publisher to an existing package, so if it has never been published, do the
-   very first publish by hand (`npm publish --access public` from a clean
-   checkout).
+   very first publish by hand from a clean checkout of `main`, passing the
+   dist-tag explicitly (`npm publish --access public --tag alpha` for an alpha
+   version). Don't push that version's tag afterwards: the workflow would try
+   to republish it and fail.
 2. On npmjs.com open the package, then **Settings > Trusted Publisher > GitHub
    Actions** and enter: organization `neonpixels-studio`, repository
    `markpost-cli`, workflow filename `release.yml`, environment blank.

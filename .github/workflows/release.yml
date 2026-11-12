@@ -15,6 +15,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      dist-tag: ${{ steps.tag-check.outputs.dist-tag }}
     steps:
       - uses: actions/checkout@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -27,6 +29,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - name: Verify tag matches package.json version
+        id: tag-check
         run: node scripts/check-release-tag.mjs "$GITHUB_REF_NAME"
       - run: npm ci
       - run: npm run lint
@@ -56,5 +59,9 @@ jobs:
       # that holds the OIDC publish token. npm publish still runs prepack.
       - run: npm ci --ignore-scripts
       # Trusted publishing (OIDC): no stored npm token. Requires npm >= 11.5.1,
-      # which ships with the Node version in .nvmrc.
-      - run: npm publish --provenance --access public
+      # which ships with the Node version in .nvmrc. The dist-tag is always
+      # explicit (latest for X.Y.Z, the preid for prereleases) so a prerelease
+      # never lands on latest and publishConfig.tag can't override it.
+      - run: npm publish --provenance --access public --tag "$DIST_TAG"
+        env:
+          DIST_TAG: ${{ needs.verify.outputs.dist-tag }}
