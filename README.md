@@ -1,11 +1,13 @@
 # @markpost/cli
 
+> **Invite-only alpha.** Markpost isn't open for signups yet, so this CLI won't work without an invited account. [Join the waitlist](https://markpost.io/sign-up) to get access. Expect breaking changes between alpha releases.
+
 CLI tool for markpost.io
 
 ## Installation
 
 ```bash
-npm install -g @markpost/cli
+npm install -g @markpost/cli@alpha
 ```
 
 Once installed, run the CLI with the `markpost` command.
@@ -56,7 +58,7 @@ to **stderr**:
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | `config_required` | A required value (API token or output directory) is not configured and `--json` mode will not prompt. Also includes a `missing` field naming the config key.                                                                                                          | nothing                                     |
 | `usage`           | A bad or missing argument/subcommand, or `--json` passed where it is not supported.                                                                                                                                                                                   | nothing                                     |
-| `fetch_failed`    | The requested operation could not be completed (a failed or empty fetch, or an error thrown while carrying it out — e.g. an auth/5xx failure).                                                                                                                        | nothing                                     |
+| `fetch_failed`    | The requested operation could not be completed (a failed or empty fetch, or an error thrown while carrying it out — e.g. an auth/5xx failure). After an auth failure (HTTP 401/403), `message` ends with a pointer to the invite-only alpha waitlist.                 | nothing                                     |
 | `partial_read`    | `records list`/`events list` paginated past the first page and a later page failed non-systemically, truncating the result; or `export`/`events export`'s result was capped at the server-side row limit and/or the server returned malformed rows that were skipped. | the JSON array of pages/rows fetched so far |
 
 `partial_read` is the one exception to "stdout stays the clean `--json | jq`
@@ -67,7 +69,9 @@ specifically (not just any non-zero exit) to know whether it's safe to still
 consume stdout.
 
 Any string in `message` that is server-derived is sanitized so it cannot inject
-a live terminal escape sequence. Additional fields (such as `missing`) may
+a live terminal escape sequence. During the invite-only alpha, a missing API
+token's `config_required` message also ends with the waitlist link; the codes
+and the `missing` field are unchanged. Additional fields (such as `missing`) may
 appear alongside `error` and `message` depending on the code; consumers should
 key off `error` and ignore unknown fields.
 
@@ -172,7 +176,7 @@ npm install
 
 ### Environment Variables
 
-Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://direnv.net/), run `direnv allow` to load them automatically.
+Create a `.envrc` in the repo root (it's gitignored) that exports the variables below. If you use [direnv](https://direnv.net/), run `direnv allow` to load them automatically.
 
 | Variable           | Description                                                                                                                                                                                                                                                     |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -200,14 +204,15 @@ Copy [`.envrc`](.envrc) and populate your values. If you use [direnv](https://di
 
 ### Contract sync
 
-The CLI talks to [markpost](https://github.com/neonpixels-studio/markpost)'s API, so its
+The CLI talks to the markpost server's API, so its
 request/response types need to match markpost's real contract exactly — a
 structural mismatch here previously caused real pagination and
 error-swallowing bugs. Instead of hand-mirroring markpost's types (which drift
 silently), `src/types/vendor/markpost-api.types.ts` is a vendored, verbatim
 copy of markpost's `server/types/api.types.ts`, and `src/types/api.types.ts`
 re-exports the generic envelope types (`ApiError`, `ApiRequest`,
-`ApiResourceObject`, `ApiResponse`) from it.
+`ApiResourceObject`, `ApiResponse`) from it. The markpost server repo is
+private, so every `sync:*` script requires access to it.
 
 - **Refreshing it:** run `npm run sync:contract` (optionally
   `-- --from <path-to-a-local-markpost-checkout>`; without `--from` it

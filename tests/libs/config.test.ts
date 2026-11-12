@@ -7,6 +7,7 @@ import {
   isConfigKey,
   setConfigValue,
 } from '#src/libs/config.js';
+import { WAITLIST_SENTENCE, WAITLIST_URL } from '#src/libs/alpha.js';
 
 const { mockGet, mockSet, CONFIG_FILE_PATH } = vi.hoisted(() => ({
   mockGet: vi.fn(),
@@ -209,6 +210,14 @@ describe('checkConfig', () => {
         missing: 'apiToken',
       });
       expect(parsed.message).toContain('API_TOKEN');
+      // Invite-only alpha: point a token-less user at the waitlist without
+      // changing the documented code or `missing` field.
+      expect(parsed.message.endsWith(` ${WAITLIST_SENTENCE}`)).toBe(true);
+      expect(Object.keys(parsed).sort()).toEqual([
+        'error',
+        'message',
+        'missing',
+      ]);
       // The diagnostic must survive on a pipe: exit via exitCode, never a
       // non-flushing process.exit.
       expect(process.exitCode).toBe(1);
@@ -229,6 +238,7 @@ describe('checkConfig', () => {
         missing: 'outputDirectory',
       });
       expect(parsed.message).toContain('OUTPUT_DIRECTORY');
+      expect(parsed.message).not.toContain(WAITLIST_SENTENCE);
       expect(process.exitCode).toBe(1);
       expect(exitSpy).not.toHaveBeenCalled();
     });
@@ -281,6 +291,33 @@ describe('checkConfig', () => {
       await checkConfig();
       expect(mockSet).toHaveBeenCalledWith('apiToken', 'my-token');
       expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it('prints the invite-only alpha notice before prompting for a token', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.mocked(input).mockResolvedValue('my-token');
+
+      await checkConfig();
+
+      // Matched loosely: chalk colors the notice (and re-opens the color at
+      // each line break) when the runner reports color support, e.g. on CI.
+      const printed = String(logSpy.mock.calls[0][0]);
+      expect(printed).toContain('invite-only alpha');
+      expect(printed).toContain(WAITLIST_URL);
+      expect(logSpy.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(input).mock.invocationCallOrder[0],
+      );
+      logSpy.mockRestore();
+    });
+
+    it('does not print the alpha notice when the token comes from env', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.env.API_TOKEN = 'env-token';
+
+      await checkConfig();
+
+      expect(logSpy).not.toHaveBeenCalled();
+      logSpy.mockRestore();
     });
 
     it('logs error and flags a non-zero exit when token prompt is empty', async () => {

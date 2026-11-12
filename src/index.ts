@@ -64,6 +64,8 @@ import yoctoSpinner from 'yocto-spinner';
 import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
 import { checkConfig } from '#src/libs/config.js';
+import { AUTH_FAILURE_NOTICE, hasSeenAuthFailure } from '#src/libs/alpha.js';
+import { hasJsonFlag } from '#src/libs/output.js';
 import { sanitizeForTerminal } from '#src/libs/terminal.js';
 import { runSyncWithAutoSchedule } from '#src/libs/scheduler.js';
 import { Record } from '#src/types/records.types.js';
@@ -387,7 +389,20 @@ async function dispatch(): Promise<void> {
   await command.run(commandArgs);
 }
 
+// Printed once, after whatever the command already reported, rather than at
+// each failure site: many commands swallow the API error and report a generic
+// message, so only this process-wide flag knows a 401/403 happened. `--json`
+// gets the waitlist sentence inside its `fetch_failed` message instead.
+function printAuthFailureNotice(): void {
+  if (!hasSeenAuthFailure() || hasJsonFlag(process.argv.slice(2))) {
+    return;
+  }
+
+  console.error(chalk.yellow(AUTH_FAILURE_NOTICE));
+}
+
 await dispatch();
+printAuthFailureNotice();
 
 type WrittenRecord = { record: Record; filePath: string };
 type FailedRecord = { record: Record; error: unknown };
