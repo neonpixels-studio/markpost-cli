@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/**/*.{test,spec}.{ts,js}'],
+    setupFiles: ['tests/setup/isolate-git-env.ts'],
   },
   resolve: {
     alias: {
