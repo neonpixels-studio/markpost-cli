@@ -8,6 +8,7 @@ import {
   JSON_ERROR_CONFIG_REQUIRED,
   printJsonError,
 } from '#src/libs/output.js';
+import { FIRST_RUN_NOTICE, withWaitlistSentence } from '#src/libs/alpha.js';
 
 const schema = {
   apiToken: {
@@ -119,9 +120,10 @@ const REQUIRED_CONFIG_FIELDS: readonly ConfigField[] = [
 // the repo-wide `process.exitCode = 1` convention (see errors.ts, usage.ts).
 const failConfigRequiredAsJson = (field: ConfigField): void => {
   process.exitCode = 1;
+  const message = `${field.key} is not configured. In --json mode the CLI will not prompt; set the ${field.envVar} environment variable or run \`markpost config set ${field.key} <value>\` before retrying.`;
   printJsonError(
     JSON_ERROR_CONFIG_REQUIRED,
-    `${field.key} is not configured. In --json mode the CLI will not prompt; set the ${field.envVar} environment variable or run \`markpost config set ${field.key} <value>\` before retrying.`,
+    field === API_TOKEN_FIELD ? withWaitlistSentence(message) : message,
     { missing: field.key },
   );
 };
@@ -149,6 +151,12 @@ const ensureConfigValue = async (
   if (json) {
     failConfigRequiredAsJson(field);
     return false;
+  }
+
+  // A missing token on an interactive run is almost always a first run; during
+  // the invite-only alpha the user may not have an account to get one from.
+  if (field === API_TOKEN_FIELD) {
+    console.log(chalk.yellow(FIRST_RUN_NOTICE));
   }
 
   // Trim so a pasted answer with surrounding whitespace matches the `config

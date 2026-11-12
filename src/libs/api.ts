@@ -5,6 +5,7 @@ import {
   ApiResponse,
 } from '#src/types/api.types.js';
 import { logErrorMessage, messageFromError } from '#src/libs/errors.js';
+import { recordAuthFailure } from '#src/libs/alpha.js';
 
 const DEFAULT_BASE_URL = 'https://markpost.io';
 const HTTPS_PROTOCOL = 'https:';
@@ -396,6 +397,10 @@ export const assertApiSuccess = (response: Response, body: unknown): void => {
 
   if (response.ok && !hasErrors) {
     return;
+  }
+
+  if (AUTH_STATUS_CODES.includes(response.status)) {
+    recordAuthFailure();
   }
 
   throw new ApiRequestError(

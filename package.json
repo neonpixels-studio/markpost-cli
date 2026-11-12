@@ -1,7 +1,24 @@
 {
   "name": "@markpost/cli",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.0",
   "description": "",
+  "license": "UNLICENSED",
+  "keywords": [
+    "markdown",
+    "sync",
+    "cli",
+    "obsidian",
+    "notes",
+    "webhooks"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neonpixels-studio/markpost-cli.git"
+  },
+  "homepage": "https://github.com/neonpixels-studio/markpost-cli#readme",
+  "bugs": {
+    "url": "https://github.com/neonpixels-studio/markpost-cli/issues"
+  },
   "type": "module",
   "bin": {
     "markpost": "./dist/index.js"
@@ -19,7 +36,8 @@
     "node": "^22.17.0 || >=24.0.0"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "tag": "alpha"
   },
   "scripts": {
     "build": "tsc",
@@ -31,8 +49,10 @@
     "lint": "prettier --check ./src && eslint ./src",
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
     "prepare": "husky",
+    "prepublishOnly": "npm run lint && npm run test:ci",
     "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && npm run build",
     "postpack": "node -e \"require('node:fs').accessSync('dist/index.js')\"",
+    "release:alpha": "npm version prerelease --preid alpha --no-git-tag-version",
     "sync:contract": "node scripts/sync-contract.mjs",
     "sync:markdown-serialization": "node scripts/sync-markdown-serialization.mjs",
     "sync:source-endpoints": "node scripts/sync-source-endpoints.mjs",

@@ -1,3 +1,5 @@
+import { hasSeenAuthFailure, withWaitlistSentence } from '#src/libs/alpha.js';
+
 // DEL (0x7f) and the C1 control range (0x80–0x9f). JSON.stringify escapes the
 // C0 range (0x00–0x1f) but leaves these untouched, and some terminals decode
 // UTF-8 C1 bytes as 8-bit CSI/OSC and act on them — the same threat terminal.ts
@@ -82,6 +84,17 @@ export const hasJsonFlag = (args: string[]): boolean =>
 export const withoutJsonFlag = (args: string[]): string[] =>
   args.filter((token) => token !== JSON_FLAG);
 
+// A 401/403 during the alpha most likely means the user has no invited
+// account, so a `fetch_failed` caused by one points at the waitlist. The code
+// stays `fetch_failed`: the README promises a small, stable set of codes.
+const withAuthFailureWaitlist = (code: string, message: string): string => {
+  if (code !== JSON_ERROR_FETCH_FAILED || !hasSeenAuthFailure()) {
+    return message;
+  }
+
+  return withWaitlistSentence(message);
+};
+
 // The single serializer for every `--json` failure. Config, argument/usage,
 // and fetch/result errors all route through here so a script parsing stderr
 // sees one documented shape: `{ "error": <code>, "message": <string>, ... }`.
@@ -94,7 +107,11 @@ export const printJsonError = (
   message: string,
   details: Record<string, unknown> = {},
 ): void => {
-  const json = JSON.stringify({ error: code, message, ...details });
+  const json = JSON.stringify({
+    error: code,
+    message: withAuthFailureWaitlist(code, message),
+    ...details,
+  });
 
   console.error(escapeResidualControls(json));
 };

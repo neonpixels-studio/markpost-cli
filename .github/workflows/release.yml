@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      dist-tag: ${{ steps.tag-check.outputs.dist-tag }}
+    steps:
+      - uses: actions/checkout@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require the tagged commit to be on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not on main"; exit 1; }
+      - uses: actions/setup-node@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify tag matches package.json version
+        id: tag-check
+        run: node scripts/check-release-tag.mjs "$GITHUB_REF_NAME"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:ci
+      - name: Pack and smoke-test the installed CLI artifact
+        run: bash scripts/smoke-test-pack.sh
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/markpost-config
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+      # --ignore-scripts: dependency install scripts must not run in the job
+      # that holds the OIDC publish token. npm publish still runs prepack.
+      - run: npm ci --ignore-scripts
+      # Trusted publishing (OIDC): no stored npm token. Requires npm >= 11.5.1,
+      # which ships with the Node version in .nvmrc. The dist-tag is always
+      # explicit (latest for X.Y.Z, the preid for prereleases) so a prerelease
+      # never lands on latest and publishConfig.tag can't override it.
+      - run: npm publish --provenance --access public --tag "$DIST_TAG"
+        env:
+          DIST_TAG: ${{ needs.verify.outputs.dist-tag }}
