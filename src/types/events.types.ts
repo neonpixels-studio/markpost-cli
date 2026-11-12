@@ -7,6 +7,13 @@ import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 export const EVENT_KINDS = ['ok', 'dim', 'warn', 'err'] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
+// The filters markpost's GET /api/events validates and applies
+// (`filter[kind]`, `filter[sourceId]`; server/api/events/index.get.ts).
+export type EventFilters = {
+  kind?: EventKind;
+  sourceId?: string;
+};
+
 // Mirrors markpost's eventSerializer attributes (server/utils/response.ts).
 // `kind` stays `string` (not `EventKind`) because it's untrusted API output —
 // same reasoning as Record's `status` in records.types.ts — so an
