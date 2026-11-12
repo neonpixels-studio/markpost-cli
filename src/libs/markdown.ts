@@ -6,15 +6,7 @@ import {
   readFileSync,
   rmSync,
 } from 'node:fs';
-import {
-  basename,
-  dirname,
-  extname,
-  isAbsolute,
-  relative,
-  resolve,
-  sep,
-} from 'node:path';
+import { basename, dirname, extname, relative, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import slugify from '@sindresorhus/slugify';
@@ -25,7 +17,11 @@ import {
   extractFrontmatterTagsWithDiagnostics,
   stripFrontmatterDocument,
 } from '#src/libs/frontmatter.js';
-import { warnMessage } from '#src/libs/errors.js';
+import {
+  assertSafeServerFilePath,
+  FilePathViolationError,
+  resolveWithinVault,
+} from '#src/libs/filePathSafety.js';
 import { Record } from '#src/types/records.types.js';
 import {
   ConflictStrategy,
@@ -37,23 +33,8 @@ const MARKDOWN_EXTENSION = '.md';
 // src/types/records.types.ts); the CLI splits on it to validate each segment
 // and never treats a backslash as a separator (a `\` is rejected outright).
 const VAULT_PATH_SEPARATOR = '/';
-const PARENT_DIRECTORY_SEGMENT = '..';
-const BACKSLASH = '\\';
-const NUL_BYTE = '\0';
-// Windows reserved device names: a file whose segment name (ignoring any
-// extension) is one of these can't be created on Windows. Rejected as ANY path
-// segment so a server-built `record.filePath` can't produce an un-writable
-// path on a Windows vault. CON/PRN/AUX/NUL plus COM1-9 and LPT1-9.
-const WINDOWS_RESERVED_DEVICE_NAMES = ((): Set<string> => {
-  const names = new Set(['CON', 'PRN', 'AUX', 'NUL']);
-
-  for (let ordinal = 1; ordinal <= 9; ordinal += 1) {
-    names.add(`COM${ordinal}`);
-    names.add(`LPT${ordinal}`);
-  }
-
-  return names;
-})();
+// Shown in a refused dry-run entry when the server sent no file path.
+const NO_SERVER_FILE_PATH = '(none)';
 const FIRST_COLLISION_SUFFIX = 2;
 // Give up rather than loop forever if a directory somehow has this many
 // same-slug files already; something else is wrong at that point. Exported
@@ -145,26 +126,15 @@ const slugifyTitle = (title: string, fallbackSlug: string): string => {
 };
 
 // Resolve `fileName` against `outputDirectory` and verify the result is
-// still inside it. Slugifying the title already strips path separators and
-// `..` segments, but this is a second, independent guard against writing
-// outside outputDirectory rather than trusting slugification alone.
+// still inside it (lexically and through symlinks, see resolveWithinVault).
+// Slugifying the title already strips path separators and `..` segments, but
+// this is a second, independent guard against writing outside outputDirectory
+// rather than trusting slugification alone.
 const resolveWithinOutputDirectory = (
   outputDirectory: string,
   fileName: string,
 ): string => {
-  const resolvedDirectory = resolve(outputDirectory);
-  const resolvedPath = resolve(resolvedDirectory, fileName);
-  const relativePath = relative(resolvedDirectory, resolvedPath);
-  const escapesDirectory =
-    relativePath === '..' || relativePath.startsWith(`..${sep}`);
-  const isWithinDirectory =
-    relativePath !== '' && !escapesDirectory && !isAbsolute(relativePath);
-
-  if (!isWithinDirectory) {
-    throw Error(`Refusing to write outside output directory: ${fileName}`);
-  }
-
-  return resolvedPath;
+  return resolveWithinVault(outputDirectory, fileName);
 };
 
 // The base relative path a record lands on when no collision pushes it to a
@@ -180,68 +150,22 @@ const resolveBasePath = (
   return resolveWithinOutputDirectory(outputDirectory, relativePath);
 };
 
-// Whether a path segment names a Windows reserved device, ignoring any
-// extension (Windows treats `CON.md` as reserved too, so compare the portion
-// before the first dot), case-insensitively.
-const isReservedDeviceSegment = (segment: string): boolean => {
-  const name = segment.split('.')[0]?.toUpperCase() ?? '';
-
-  return WINDOWS_RESERVED_DEVICE_NAMES.has(name);
-};
-
-// Whether `record.filePath` is a safe vault-relative path the CLI will honor:
-// a non-empty relative path with no `..` segment, no backslash or NUL byte, and
-// no Windows reserved device name as any segment. Anything else (including an
-// absolute path, which earlier CLI versions sent back on mark-synced so old
-// records may still hold one) is rejected and the caller falls back to
-// `<slug>.md` at the output root (see resolveWriteRelativePath).
-const isSafeRelativeFilePath = (filePath: string): boolean => {
-  if (!filePath || isAbsolute(filePath)) {
-    return false;
-  }
-
-  if (filePath.includes(BACKSLASH) || filePath.includes(NUL_BYTE)) {
-    return false;
-  }
-
-  return filePath
-    .split(VAULT_PATH_SEPARATOR)
-    .every(
-      (segment) =>
-        segment !== PARENT_DIRECTORY_SEGMENT &&
-        !isReservedDeviceSegment(segment),
-    );
-};
-
 // Decide the vault-relative path a record's document is written to. Honor the
-// server's `record.filePath` when it's a safe relative path; otherwise fall
-// back to `<slug>.md` at the output root and flag the fallback so the caller
-// can warn (naming the record) rather than silently dropping the server's
-// intended placement.
+// server's `record.filePath` when present, throwing a FilePathViolationError if
+// it is not a safe relative markdown path (see filePathSafety.ts) so the record
+// is reported as failed and left on the server rather than written somewhere
+// unintended. Only a missing path falls back to `<slug>.md` at the output root.
 const resolveWriteRelativePath = (
   filePath: string | null | undefined,
   slug: string,
-): { relativePath: string; usedFallback: boolean } => {
-  if (filePath && isSafeRelativeFilePath(filePath)) {
-    return { relativePath: filePath, usedFallback: false };
+): string => {
+  if (filePath === null || filePath === undefined) {
+    return `${slug}${MARKDOWN_EXTENSION}`;
   }
 
-  return { relativePath: `${slug}${MARKDOWN_EXTENSION}`, usedFallback: true };
-};
+  assertSafeServerFilePath(filePath);
 
-// Warn (without failing the sync) that a record couldn't be written where the
-// server asked, naming the record uuid so the line is actionable. The record
-// is still written to `fallbackPath`, never skipped.
-const warnFilePathFallback = (
-  recordUuid: string,
-  filePath: string | null | undefined,
-  fallbackPath: string,
-): void => {
-  const serverPath = filePath ? `"${filePath}"` : '(none)';
-
-  warnMessage(
-    `Record ${recordUuid}: server file path ${serverPath} is missing or unsafe; writing to ${fallbackPath} at the output root instead.`,
-  );
+  return filePath;
 };
 
 // Insert a collision suffix before the final segment's extension, keeping the
@@ -815,16 +739,9 @@ export const writeMarkdown = (
 
   // Write where the server asked (`<outputDirectory>/<record.filePath>`),
   // creating the subfolder on demand; fall back to `<slug>.md` at the output
-  // root (with a warning) when the server path is missing or unsafe.
-  const { relativePath, usedFallback } = resolveWriteRelativePath(
-    record.filePath,
-    slug,
-  );
+  // root only when the server sent no path. An invalid path throws.
+  const relativePath = resolveWriteRelativePath(record.filePath, slug);
   const basePath = resolveBasePath(outputDirectory, relativePath);
-
-  if (usedFallback) {
-    warnFilePathFallback(record.uuid, record.filePath, relativePath);
-  }
 
   ensureParentDirectory(outputDirectory, basePath);
 
@@ -863,16 +780,21 @@ export const writeMarkdown = (
   return writtenPath;
 };
 
-// The three ways a record shows up in a dry-run write preview: it would be
-// written to a fresh path, it would `overwrite` an existing file, or the `skip`
-// strategy would leave an existing file untouched. Mirrors the outcomes the real
-// writers produce so the preview matches what an actual sync would do.
-export type WritePreviewAction = 'write' | 'overwrite' | 'skip';
+// The ways a record shows up in a dry-run write preview: it would be written to
+// a fresh path, it would `overwrite` an existing file, the `skip` strategy would
+// leave an existing file untouched, or its server file path is unsafe and the
+// real sync would refuse it (`path` then holds the server's raw value). Mirrors
+// the outcomes the real writers produce so the preview matches what an actual
+// sync would do.
+export type WritePreviewAction = 'write' | 'overwrite' | 'skip' | 'refuse';
 
 export type WritePreview = {
   record: Record;
   path: string;
   action: WritePreviewAction;
+  // Why a `refuse` record would be refused (the same message the real sync
+  // reports for it).
+  reason?: string;
 };
 
 // Read-only counterpart to ensureOutputDirectory: resolves the configured output
@@ -936,8 +858,35 @@ const previewRecordWrite = (
   outputDirectory: string,
   plannedPaths: Set<string>,
 ): WritePreview => {
+  try {
+    return planRecordWrite(
+      record,
+      conflictStrategy,
+      outputDirectory,
+      plannedPaths,
+    );
+  } catch (error) {
+    if (!(error instanceof FilePathViolationError)) {
+      throw error;
+    }
+
+    return {
+      record,
+      path: record.filePath ?? NO_SERVER_FILE_PATH,
+      action: 'refuse',
+      reason: error.message,
+    };
+  }
+};
+
+const planRecordWrite = (
+  record: Record,
+  conflictStrategy: ConflictStrategy,
+  outputDirectory: string,
+  plannedPaths: Set<string>,
+): WritePreview => {
   const slug = slugifyTitle(record.title, record.uuid);
-  const { relativePath } = resolveWriteRelativePath(record.filePath, slug);
+  const relativePath = resolveWriteRelativePath(record.filePath, slug);
   const basePath = resolveBasePath(outputDirectory, relativePath);
   const baseKey = pathKey(basePath);
   const baseTaken = plannedPaths.has(baseKey) || existsSync(basePath);

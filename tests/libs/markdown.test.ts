@@ -21,6 +21,7 @@ import {
   writeMarkdown,
 } from '#src/libs/markdown.js';
 import type { WrittenRecordState } from '#src/libs/markdown.js';
+import { FilePathViolationError } from '#src/libs/filePathSafety.js';
 import { Record } from '#src/types/records.types.js';
 import { ConflictStrategy } from '#src/types/settings.types.js';
 
@@ -99,6 +100,7 @@ vi.mock('node:fs', () => ({
   writeFileSync: vi.fn(),
   readFileSync: vi.fn(),
   rmSync: vi.fn(),
+  realpathSync: vi.fn((path: string) => path),
 }));
 
 // lstatSync(path, { throwIfNoEntry: false }) returns undefined for a missing
@@ -444,32 +446,55 @@ describe('writeMarkdown', () => {
 
   it.each([
     ['a parent-escape path', '../escape.md'],
+    ['a nested parent-escape path', 'a/../../x.md'],
     ['an absolute POSIX path', '/etc/passwd'],
     ['an absolute Windows path', 'C:\\x.md'],
+    ['a backslash path', 'notes\\x.md'],
     ['a Windows reserved device segment', 'notes/CON/x.md'],
+    ['a non-markdown file', 'notes/x.txt'],
+    ['an empty string', ''],
   ])(
-    'falls back to <slug>.md and warns, writing nothing outside the output directory, for %s',
+    'refuses to write, throwing and touching nothing on disk, for %s',
     (_label, filePath) => {
-      const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
       const unsafeRecord: Record = { ...mockRecord, filePath };
 
-      const writtenPath = writeMarkdown(unsafeRecord);
-
-      expect(writtenPath).toBe(resolve(outputDirectory, 'test-title.md'));
-      vi.mocked(writeFileSync).mock.calls.forEach(([writtenCallPath]) => {
-        expect(
-          (writtenCallPath as string).startsWith(
-            resolve(outputDirectory) + sep,
-          ),
-        ).toBe(true);
+      expect(() => writeMarkdown(unsafeRecord)).toThrow(FilePathViolationError);
+      expect(writeFileSync).not.toHaveBeenCalled();
+      vi.mocked(mkdirSync).mock.calls.forEach(([createdPath]) => {
+        expect(createdPath).toBe(outputDirectory);
       });
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining(unsafeRecord.uuid),
-      );
-
-      warn.mockRestore();
     },
   );
+
+  it('refuses to write when a subfolder resolves through a symlink outside the output directory', async () => {
+    const { realpathSync } = await import('node:fs');
+    vi.mocked(realpathSync).mockImplementation((path) =>
+      String(path).startsWith(`${outputDirectory}/link`)
+        ? '/elsewhere'
+        : String(path),
+    );
+
+    expect(() =>
+      writeMarkdown({ ...mockRecord, filePath: 'link/x.md' }),
+    ).toThrow(FilePathViolationError);
+    expect(writeFileSync).not.toHaveBeenCalled();
+
+    const [preview] = buildWritePreview([
+      { ...mockRecord, filePath: 'link/x.md' },
+    ]);
+    expect(preview).toMatchObject({
+      action: 'refuse',
+      reason: expect.stringMatching(/outside output directory/),
+    });
+
+    vi.mocked(realpathSync).mockImplementation((path) => String(path));
+  });
+
+  it('names the offending server path in the refusal message', () => {
+    expect(() =>
+      writeMarkdown({ ...mockRecord, filePath: '../escape.md' }),
+    ).toThrow(/\.\.\/escape\.md.*traversal/);
+  });
 
   it.each<ConflictStrategy>(['suffix', 'overwrite', 'skip'])(
     'writes two same-slug records in different folders to distinct files under %s',
@@ -1931,6 +1956,23 @@ describe('readMarkdown', () => {
 });
 
 describe('buildWritePreview', () => {
+  it('marks a record with an unsafe server filePath as refused and keeps previewing the rest', () => {
+    const unsafe: Record = { ...mockRecord, uuid: 'bad', filePath: '../x.md' };
+    const safe: Record = { ...mockRecord, uuid: 'good', filePath: 'a/ok.md' };
+
+    const previews = buildWritePreview([unsafe, safe], 'suffix');
+
+    expect(previews[0]).toMatchObject({
+      action: 'refuse',
+      path: '../x.md',
+      reason: expect.stringContaining('traversal'),
+    });
+    expect(previews[1]).toMatchObject({
+      action: 'write',
+      path: resolve(outputDirectory, 'a/ok.md'),
+    });
+  });
+
   const secondRecord: Record = { uuid: 'def-456', title: 'Test Title', content: 'Second body', createdAt: '2024-01-02T00:00:00Z' };
 
   beforeEach(() => {
