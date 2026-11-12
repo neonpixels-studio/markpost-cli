@@ -21,7 +21,7 @@
   },
   "type": "module",
   "bin": {
-    "markpost": "./dist/index.js"
+    "markpost": "dist/index.js"
   },
   "files": [
     "dist"

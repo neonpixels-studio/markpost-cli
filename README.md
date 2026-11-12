@@ -378,8 +378,9 @@ Releases are published by [`.github/workflows/release.yml`](.github/workflows/re
 when a `vX.Y.Z` or `vX.Y.Z-<preid>.N` tag is pushed. The workflow fails unless
 the tag matches the `version` in `package.json`, then runs lint, typecheck,
 `test:ci` and the packed-artifact smoke test ([`scripts/smoke-test-pack.sh`](scripts/smoke-test-pack.sh))
-before `npm publish --provenance`, which attaches a signed supply-chain
-attestation to the package.
+before `npm stage publish --provenance`, which attaches a signed supply-chain
+attestation to the package. The workflow only **stages** the release: nothing
+reaches npm until a maintainer approves it with 2FA (step 3 below).
 
 The npm dist-tag comes from the version, never from `publishConfig`:
 
@@ -398,6 +399,10 @@ To cut a release:
    `node scripts/release-tag.mjs --dry-run` prints the commands without
    running them. A tag pushed from a commit that isn't on `main` is rejected
    by the workflow; delete it with `git push origin :v<version>`.
+3. Once the workflow passes, approve the staged release:
+   `npm stage list @markpost/cli` to find its stage id, then
+   `npm stage approve <stage-id>` (prompts for 2FA). To discard it instead,
+   run `npm stage reject <stage-id>`.
 
 ### One-time npm setup (trusted publishing, no token)
 
@@ -412,12 +417,14 @@ The publish job authenticates with GitHub OIDC (`id-token: write`), so no
    to republish it and fail.
 2. On npmjs.com open the package, then **Settings > Trusted Publisher > GitHub
    Actions** and enter: organization `neonpixels-studio`, repository
-   `markpost-cli`, workflow filename `release.yml`, environment blank.
+   `markpost-cli`, workflow filename `release.yml`, environment blank. Under
+   **Allowed actions** leave **Allow npm publish** and **Allow npm dist-tag**
+   unchecked, so the workflow can only stage releases.
 3. Optionally set **Publishing access** to "Require two-factor authentication
    and disallow tokens" so only the workflow can publish.
 
-Trusted publishing needs npm 11.5.1 or newer, which ships with the Node version
-pinned in `.nvmrc`.
+Trusted publishing and `npm stage` need a recent npm; the npm bundled with the
+Node version pinned in `.nvmrc` (11.19.1) supports both.
 
 ## Security scanning
 
