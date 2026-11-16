@@ -13,7 +13,9 @@ import {
 import { checkConfig } from '#src/libs/config.js';
 import { failWithMessage, messageFromError } from '#src/libs/errors.js';
 import {
+  confirmRefusal,
   isInteractiveTerminal,
+  isPromptAbort,
   sanitizeForTerminal,
 } from '#src/libs/terminal.js';
 import {
@@ -157,18 +159,30 @@ const SOURCES_HANDLERS = new Map<
 // here — its other prompt (a
 // manual-secret provider's password) is guarded separately inside
 // collectRotateInput, since the provider isn't known this early (see there).
+const CONFIRM_VERBS = new Map<string, string>([
+  [DELETE_SUBCOMMAND, 'delete'],
+  [ROTATE_ENDPOINT_SUBCOMMAND, 'rotate'],
+]);
+
 const interactiveGuardMessageFor = (
   subcommand: string | undefined,
   uuid: string | undefined,
   skipConfirm: boolean,
   clearFieldMapping: boolean,
 ): string | null => {
-  if (subcommand === DELETE_SUBCOMMAND && !skipConfirm) {
-    return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
-  }
+  const confirmVerb = CONFIRM_VERBS.get(subcommand ?? '');
 
-  if (subcommand === ROTATE_ENDPOINT_SUBCOMMAND && !skipConfirm) {
-    return `\`sources ${ROTATE_ENDPOINT_SUBCOMMAND}\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${ROTATE_ENDPOINT_SUBCOMMAND} <uuid> --yes\`) to rotate without a prompt.`;
+  if (subcommand && confirmVerb && !skipConfirm) {
+    return confirmRefusal(
+      {
+        command: 'sources',
+        subcommand,
+        argument: '<uuid>',
+        verb: confirmVerb,
+        identifier: 'uuid',
+      },
+      { skipConfirm, isInteractive: false },
+    );
   }
 
   if (subcommand === CREATE_SUBCOMMAND) {
@@ -431,9 +445,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
 
     await handler(uuid, json, skipConfirm, payload, clearFieldMapping);
   } catch (error) {
-    // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
-    // that's a user abort, not a command failure, so don't flag it non-zero.
-    if (error instanceof Error && error.name === 'ExitPromptError') {
+    if (isPromptAbort(error)) {
       return;
     }
 

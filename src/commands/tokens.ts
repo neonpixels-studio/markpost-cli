@@ -12,7 +12,9 @@ import { checkConfig } from '#src/libs/config.js';
 import { getApiToken } from '#src/libs/api.js';
 import { failWithMessage } from '#src/libs/errors.js';
 import {
+  confirmRefusal,
   isInteractiveTerminal,
+  isPromptAbort,
   sanitizeForTerminal,
 } from '#src/libs/terminal.js';
 import {
@@ -700,8 +702,17 @@ const usageErrorFor = (
   // Without --yes, revoke prompts; inquirer needs both stdin and stdout to be
   // a TTY, so a redirected/non-interactive run would otherwise hang. Refuse
   // instead, pointing at the --yes escape hatch — mirrors `sources delete`.
-  if (subcommand === REVOKE_SUBCOMMAND && !skipConfirm && !isInteractive) {
-    return `\`tokens ${REVOKE_SUBCOMMAND}\` needs an interactive terminal to confirm; pass an id with --yes (\`markpost tokens ${REVOKE_SUBCOMMAND} <id> --yes\`) to revoke without a prompt.`;
+  if (subcommand === REVOKE_SUBCOMMAND) {
+    return confirmRefusal(
+      {
+        command: 'tokens',
+        subcommand: REVOKE_SUBCOMMAND,
+        argument: '<id>',
+        verb: 'revoke',
+        identifier: 'id',
+      },
+      { skipConfirm, isInteractive },
+    );
   }
 
   return null;
@@ -743,10 +754,7 @@ export const runTokensCommand = async (args: string[]): Promise<void> => {
 
     await handler(rest, json, skipConfirm);
   } catch (error) {
-    // A deliberate Ctrl+C at the revoke prompt throws @inquirer's
-    // `ExitPromptError`; that's a user abort, not a command failure, so don't
-    // flag it non-zero — mirrors commands/sources.ts.
-    if (error instanceof Error && error.name === 'ExitPromptError') {
+    if (isPromptAbort(error)) {
       return;
     }
 

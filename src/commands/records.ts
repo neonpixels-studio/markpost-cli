@@ -21,7 +21,9 @@ import {
 import { checkConfig } from '#src/libs/config.js';
 import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
 import {
+  confirmRefusal,
   isInteractiveTerminal,
+  isPromptAbort,
   sanitizeForTerminal,
 } from '#src/libs/terminal.js';
 import {
@@ -588,11 +590,15 @@ const nonInteractiveRefusal = (
     return `\`records ${DELETE_SUBCOMMAND} --json\` needs --yes: the confirmation prompt would corrupt the JSON on stdout.`;
   }
 
-  if (isInteractiveTerminal()) {
-    return null;
-  }
-
-  return `\`records ${DELETE_SUBCOMMAND}\` needs an interactive terminal to confirm; pass --yes (\`markpost records ${DELETE_SUBCOMMAND} <uuid...> --yes\`) to delete without a prompt.`;
+  return confirmRefusal(
+    {
+      command: 'records',
+      subcommand: DELETE_SUBCOMMAND,
+      argument: '<uuid...>',
+      verb: 'delete',
+    },
+    { skipConfirm, isInteractive: isInteractiveTerminal() },
+  );
 };
 
 const confirmRecordDeletion = (count: number): Promise<boolean> =>
@@ -801,8 +807,7 @@ const runDeleteCommand = async (
 
     await deleteRecordsAndReport(parsed, json);
   } catch (error) {
-    // A deliberate Ctrl+C at the prompt is a user abort, not a failure.
-    if (error instanceof Error && error.name === 'ExitPromptError') {
+    if (isPromptAbort(error)) {
       return;
     }
 
