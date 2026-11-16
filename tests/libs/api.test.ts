@@ -7,6 +7,7 @@ import {
   ApiTimeoutError,
   assertApiSuccess,
   authedRequest,
+  authedRequestWithHeaders,
   describeApiError,
   describeRequestRejection,
   describeSystemicFailure,
@@ -18,6 +19,10 @@ import {
   isPermanentApiFailure,
   isSystemicApiFailure,
   logApiFailure,
+  parseRetryAfterMs,
+  MAX_GET_ATTEMPTS,
+  MAX_RETRY_WAIT_MS,
+  BASE_RETRY_BACKOFF_MS,
   rethrowIfTimeout,
   unwrapResourceAttributes,
   unwrapResourceCollection,
@@ -978,4 +983,210 @@ describe('describeRequestRejection', () => {
       'Network error',
     );
   });
+});
+
+describe('authedRequest retry', () => {
+  const failure = (status: number, retryAfter?: string) => ({
+    ok: false,
+    status,
+    headers: new Headers(retryAfter ? { 'Retry-After': retryAfter } : {}),
+    json: () => Promise.resolve({ data: { errors: [] } }),
+  });
+  const success = {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    json: () => Promise.resolve({ data: 'ok' }),
+  };
+  const sleep = vi.fn().mockResolvedValue(undefined);
+
+  beforeEach(() => {
+    vi.stubEnv('BASE_URL', 'https://example.com');
+    vi.stubEnv('API_TOKEN', 'test-token');
+    sleep.mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('retries a GET on 429 honoring Retry-After seconds, then succeeds', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(failure(429, '3'))
+      .mockResolvedValueOnce(success);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(authedRequest('/api/records', {}, { sleep })).resolves.toEqual(
+      { data: 'ok' },
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(3000);
+  });
+
+  it('retries a GET on 503 and on a plain 500 with exponential backoff', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(failure(500, '9'))
+      .mockResolvedValueOnce(failure(503))
+      .mockResolvedValueOnce(success);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authedRequest('/api/records', { method: 'GET' }, { sleep });
+
+    // 500 ignores Retry-After; 503 without the header falls back to backoff.
+    expect(sleep.mock.calls).toEqual([
+      [BASE_RETRY_BACKOFF_MS],
+      [BASE_RETRY_BACKOFF_MS * 2],
+    ]);
+  });
+
+  it('honors Retry-After on 503 and returns headers from the final response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(failure(503, '2'))
+        .mockResolvedValueOnce({
+          ...success,
+          headers: new Headers({ 'X-Final': 'yes' }),
+        }),
+    );
+
+    const result = await authedRequestWithHeaders(
+      '/api/records',
+      {},
+      { sleep },
+    );
+
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(2000);
+    expect(result.headers.get('X-Final')).toBe('yes');
+  });
+
+  it('honors an HTTP-date Retry-After', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse('2026-01-01T00:00:00Z'));
+    try {
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValueOnce(failure(429, 'Thu, 01 Jan 2026 00:00:04 GMT'))
+          .mockResolvedValueOnce(success),
+      );
+
+      await authedRequest('/api/records', {}, { sleep });
+
+      expect(sleep).toHaveBeenCalledExactlyOnceWith(4000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to backoff when Retry-After is unparseable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(failure(429, 'soon'))
+        .mockResolvedValueOnce(success),
+    );
+
+    await authedRequest('/api/records', {}, { sleep });
+
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(BASE_RETRY_BACKOFF_MS);
+  });
+
+  it('retries a lowercase get, honors Retry-After 0, and stops on a non-retryable follow-up', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(failure(503, '0'))
+      .mockResolvedValueOnce(failure(404));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      authedRequest('/api/records', { method: 'get' }, { sleep }),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(0);
+  });
+
+  it('caps the wait so a hostile Retry-After cannot stall the sync', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(failure(429, '86400'))
+        .mockResolvedValueOnce(success),
+    );
+
+    await authedRequest('/api/records', {}, { sleep });
+
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(MAX_RETRY_WAIT_MS);
+  });
+
+  it('gives up after the attempt cap and throws the final error', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(failure(503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      authedRequest('/api/records', {}, { sleep }),
+    ).rejects.toMatchObject({ statusCode: 503 });
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS);
+    expect(sleep).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS - 1);
+  });
+
+  it.each(['POST', 'PATCH', 'DELETE', 'PUT'])(
+    'never retries a %s request',
+    async (method) => {
+      const fetchMock = vi.fn().mockResolvedValue(failure(429, '1'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        authedRequest('/api/records', { method }, { sleep }),
+      ).rejects.toMatchObject({ statusCode: 429 });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([401, 403, 404, 422])(
+    'does not retry a GET on %i',
+    async (status) => {
+      const fetchMock = vi.fn().mockResolvedValue(failure(status));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        authedRequest('/api/records', {}, { sleep }),
+      ).rejects.toMatchObject({ statusCode: status });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('parseRetryAfterMs', () => {
+  const now = Date.parse('2026-01-01T00:00:00Z');
+
+  it('parses delta-seconds', () => {
+    expect(parseRetryAfterMs('120', now)).toBe(120_000);
+  });
+
+  it('parses an HTTP-date relative to now', () => {
+    expect(parseRetryAfterMs('Thu, 01 Jan 2026 00:00:30 GMT', now)).toBe(
+      30_000,
+    );
+  });
+
+  it('clamps a past HTTP-date to zero', () => {
+    expect(parseRetryAfterMs('Wed, 31 Dec 2025 23:00:00 GMT', now)).toBe(0);
+  });
+
+  it.each([null, undefined, '', '  ', 'soon', 'foo 1', '-5', '1.5'])(
+    'returns null for garbage value %j',
+    (value) => {
+      expect(parseRetryAfterMs(value, now)).toBeNull();
+    },
+  );
 });

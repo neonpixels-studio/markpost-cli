@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { MAX_GET_ATTEMPTS } from '#src/libs/api.js';
 import { fetchAllEvents, fetchPaginatedEvents } from '#src/libs/events.js';
 import { Event } from '#src/types/events.types.js';
 
@@ -310,7 +311,7 @@ describe('fetchAllEvents', () => {
             },
           }),
       })
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         ok: false,
         status: 500,
         json: () =>
@@ -320,7 +321,16 @@ describe('fetchAllEvents', () => {
       });
     global.fetch = fetchMock;
 
-    await expect(fetchAllEvents()).rejects.toThrow();
+    // The GET is retried on 5xx, so run the backoff on fake timers.
+    vi.useFakeTimers();
+    try {
+      const assertion = expect(fetchAllEvents()).rejects.toThrow();
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(fetchMock).toHaveBeenCalledTimes(1 + MAX_GET_ATTEMPTS);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // A request timeout on the INITIAL page must propagate as an

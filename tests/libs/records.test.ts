@@ -15,7 +15,11 @@ import {
   MAX_MARK_SYNCED_BATCH_SIZE,
   updateRecord,
 } from '#src/libs/records.js';
-import { ApiTimeoutError, InvalidBaseUrlError } from '#src/libs/api.js';
+import {
+  ApiTimeoutError,
+  InvalidBaseUrlError,
+  MAX_GET_ATTEMPTS,
+} from '#src/libs/api.js';
 import { ApiDeleteMeta } from '#src/types/api.types.js';
 import { Record } from '#src/types/records.types.js';
 
@@ -161,16 +165,25 @@ describe('fetchAllRecords', () => {
             },
           }),
       })
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         ok: false,
         status: 500,
         json: () => Promise.resolve({ data: { errors: [] } }),
       });
 
-    await expect(fetchAllRecords()).rejects.toMatchObject({
-      statusCode: 500,
-      isSystemic: true,
-    });
+    // The GET is retried on 5xx, so run the backoff on fake timers.
+    vi.useFakeTimers();
+    try {
+      const assertion = expect(fetchAllRecords()).rejects.toMatchObject({
+        statusCode: 500,
+        isSystemic: true,
+      });
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(global.fetch).toHaveBeenCalledTimes(1 + MAX_GET_ATTEMPTS);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // A legitimately empty account is a success, distinct from a failed fetch.
