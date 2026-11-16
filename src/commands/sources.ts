@@ -13,7 +13,9 @@ import {
 import { checkConfig } from '#src/libs/config.js';
 import { failWithMessage, messageFromError } from '#src/libs/errors.js';
 import {
+  confirmRefusal,
   isInteractiveTerminal,
+  isPromptAbort,
   sanitizeForTerminal,
 } from '#src/libs/terminal.js';
 import {
@@ -144,6 +146,12 @@ const SOURCES_HANDLERS = new Map<
   ],
 ]);
 
+// The verb in each confirming subcommand's "... without a prompt" refusal.
+const CONFIRM_VERBS = new Map<string, string>([
+  [DELETE_SUBCOMMAND, 'delete'],
+  [ROTATE_ENDPOINT_SUBCOMMAND, 'rotate'],
+]);
+
 // The message for the subcommand (if any) that can't complete without an
 // interactive terminal — inquirer needs both stdin and stdout to be a TTY to
 // render and read a prompt, so a redirected/non-interactive run would
@@ -163,12 +171,23 @@ const interactiveGuardMessageFor = (
   skipConfirm: boolean,
   clearFieldMapping: boolean,
 ): string | null => {
-  if (subcommand === DELETE_SUBCOMMAND && !skipConfirm) {
-    return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
-  }
+  const confirmVerb = CONFIRM_VERBS.get(subcommand ?? '');
+  const confirmRefusalMessage =
+    subcommand && confirmVerb
+      ? confirmRefusal(
+          {
+            command: 'sources',
+            subcommand,
+            argument: '<uuid>',
+            verb: confirmVerb,
+            requirement: 'a uuid with --yes',
+          },
+          { skipConfirm, isInteractive: isInteractiveTerminal() },
+        )
+      : null;
 
-  if (subcommand === ROTATE_ENDPOINT_SUBCOMMAND && !skipConfirm) {
-    return `\`sources ${ROTATE_ENDPOINT_SUBCOMMAND}\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${ROTATE_ENDPOINT_SUBCOMMAND} <uuid> --yes\`) to rotate without a prompt.`;
+  if (confirmRefusalMessage) {
+    return confirmRefusalMessage;
   }
 
   if (subcommand === CREATE_SUBCOMMAND) {
@@ -431,9 +450,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
 
     await handler(uuid, json, skipConfirm, payload, clearFieldMapping);
   } catch (error) {
-    // A deliberate Ctrl+C at a prompt throws @inquirer's `ExitPromptError`;
-    // that's a user abort, not a command failure, so don't flag it non-zero.
-    if (error instanceof Error && error.name === 'ExitPromptError') {
+    if (isPromptAbort(error)) {
       return;
     }
 

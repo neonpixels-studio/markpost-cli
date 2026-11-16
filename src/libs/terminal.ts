@@ -88,3 +88,46 @@ export function sanitizeBlockForTerminal(value: unknown): string {
 export function isInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
+
+export interface ConfirmRefusalOptions {
+  // The top-level command and the subcommand that confirms, e.g. `sources` /
+  // `delete`; the refusal message is derived from them.
+  command: string;
+  subcommand: string;
+  // How the invocation is spelled in the suggested rerun, e.g. `<uuid>`.
+  argument: string;
+  // The verb for the "... without a prompt" tail, e.g. `delete`.
+  verb: string;
+  // What the caller must pass, e.g. `a uuid with --yes` or `an id with --yes`
+  // for commands where --yes only works with an explicit target. Defaults to
+  // plain `--yes`.
+  requirement?: string;
+}
+
+// The refusal for a confirming subcommand that cannot prompt: null when --yes
+// was given or a terminal is available, otherwise the message pointing at
+// --yes. One definition for every command that confirms before a destructive
+// action, so the wording and the non-TTY rule can't drift between them.
+export function confirmRefusal(
+  options: ConfirmRefusalOptions,
+  state: { skipConfirm: boolean; isInteractive: boolean },
+): string | null {
+  if (state.skipConfirm || state.isInteractive) {
+    return null;
+  }
+
+  const {
+    command,
+    subcommand,
+    argument,
+    verb,
+    requirement = '--yes',
+  } = options;
+  return `\`${command} ${subcommand}\` needs an interactive terminal to confirm; pass ${requirement} (\`markpost ${command} ${subcommand} ${argument} --yes\`) to ${verb} without a prompt.`;
+}
+
+// A deliberate Ctrl+C at an @inquirer prompt throws `ExitPromptError`. That is
+// a user abort, not a command failure, so callers swallow it and exit quietly.
+export function isPromptAbort(error: unknown): boolean {
+  return error instanceof Error && error.name === 'ExitPromptError';
+}

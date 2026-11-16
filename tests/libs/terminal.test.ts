@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  confirmRefusal,
   isInteractiveTerminal,
+  isPromptAbort,
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
 } from '#src/libs/terminal.js';
@@ -131,5 +133,83 @@ describe('isInteractiveTerminal', () => {
     process.stdout.isTTY = false;
 
     expect(isInteractiveTerminal()).toBe(false);
+  });
+});
+
+describe('confirmRefusal', () => {
+  const options = {
+    command: 'sources',
+    subcommand: 'delete',
+    argument: '<uuid>',
+    verb: 'delete',
+    requirement: 'a uuid with --yes',
+  };
+
+  it('refuses without --yes on a non-interactive terminal', () => {
+    expect(
+      confirmRefusal(options, { skipConfirm: false, isInteractive: false }),
+    ).toBe(
+      '`sources delete` needs an interactive terminal to confirm; pass a uuid with --yes (`markpost sources delete <uuid> --yes`) to delete without a prompt.',
+    );
+  });
+
+  it('allows --yes on a non-interactive terminal', () => {
+    expect(
+      confirmRefusal(options, { skipConfirm: true, isInteractive: false }),
+    ).toBeNull();
+  });
+
+  it('allows an interactive terminal without --yes', () => {
+    expect(
+      confirmRefusal(options, { skipConfirm: false, isInteractive: true }),
+    ).toBeNull();
+  });
+
+  it('uses the caller-supplied requirement wording', () => {
+    expect(
+      confirmRefusal(
+        {
+          command: 'tokens',
+          subcommand: 'revoke',
+          argument: '<id>',
+          verb: 'revoke',
+          requirement: 'an id with --yes',
+        },
+        { skipConfirm: false, isInteractive: false },
+      ),
+    ).toBe(
+      '`tokens revoke` needs an interactive terminal to confirm; pass an id with --yes (`markpost tokens revoke <id> --yes`) to revoke without a prompt.',
+    );
+  });
+
+  it('defaults to plain --yes when no requirement is given', () => {
+    expect(
+      confirmRefusal(
+        {
+          command: 'records',
+          subcommand: 'delete',
+          argument: '<uuid...>',
+          verb: 'delete',
+        },
+        { skipConfirm: false, isInteractive: false },
+      ),
+    ).toBe(
+      '`records delete` needs an interactive terminal to confirm; pass --yes (`markpost records delete <uuid...> --yes`) to delete without a prompt.',
+    );
+  });
+});
+
+describe('isPromptAbort', () => {
+  it('is true for an ExitPromptError', () => {
+    const error = new Error('aborted');
+    error.name = 'ExitPromptError';
+
+    expect(isPromptAbort(error)).toBe(true);
+  });
+
+  it('is false for other errors and non-errors', () => {
+    expect(isPromptAbort(new Error('boom'))).toBe(false);
+    expect(isPromptAbort('ExitPromptError')).toBe(false);
+    expect(isPromptAbort(null)).toBe(false);
   });
 });
