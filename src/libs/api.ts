@@ -409,10 +409,97 @@ export const assertApiSuccess = (response: Response, body: unknown): void => {
   );
 };
 
+// Bounded retry for idempotent GETs that hit a transient 429/5xx. Paginated
+// sync, `records list` and `export` run unattended under autoSync, so one blip
+// shouldn't fail the whole run. Non-GET requests are never retried (a repeated
+// POST/PATCH/DELETE could apply twice, and bulk callers such as mark-synced
+// own their back-off), and a 4xx other than 429 is a real answer, not a blip.
+export const MAX_GET_ATTEMPTS = 3;
+// Hard ceiling on any single wait, so a hostile or buggy `Retry-After` can't
+// stall an unattended sync for minutes.
+export const MAX_RETRY_WAIT_MS = 10_000;
+export const BASE_RETRY_BACKOFF_MS = 500;
+const RETRY_AFTER_HEADER = 'Retry-After';
+const IMF_FIXDATE_PATTERN =
+  /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
+const MS_PER_SECOND = 1000;
+const HTTP_TOO_MANY_REQUESTS = 429;
+const HTTP_SERVICE_UNAVAILABLE = 503;
+// `Retry-After` is only honored on these; other 5xx use plain backoff.
+const RETRY_AFTER_STATUS_CODES = [
+  HTTP_TOO_MANY_REQUESTS,
+  HTTP_SERVICE_UNAVAILABLE,
+];
+
+export type AuthedRequestOptions = {
+  // Injectable so tests retry without real delays.
+  sleep?: (milliseconds: number) => Promise<void>;
+};
+
+const defaultSleep = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const isGetRequest = (init: { method?: string }): boolean =>
+  (init.method ?? 'GET').toUpperCase() === 'GET';
+
+const isRetryableStatus = (status: number): boolean =>
+  status === HTTP_TOO_MANY_REQUESTS || status >= SERVER_ERROR_MIN_STATUS;
+
+// Parses both `Retry-After` forms (delta-seconds or an HTTP-date) into a wait
+// in milliseconds; returns `null` for a missing or garbage value.
+export const parseRetryAfterMs = (
+  value: string | null | undefined,
+  now: number = Date.now(),
+): number | null => {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed) * MS_PER_SECOND;
+  }
+
+  // `Date.parse` is lenient ("-5", "foo 1" both parse), so only the
+  // IMF-fixdate form servers actually send is accepted.
+  const dateMs = IMF_FIXDATE_PATTERN.test(trimmed) ? Date.parse(trimmed) : NaN;
+
+  if (Number.isNaN(dateMs)) {
+    return null;
+  }
+
+  return Math.max(0, dateMs - now);
+};
+
+const retryDelayMs = (response: Response, attempt: number): number => {
+  const backoff = BASE_RETRY_BACKOFF_MS * 2 ** (attempt - 1);
+  const headerWait = RETRY_AFTER_STATUS_CODES.includes(response.status)
+    ? parseRetryAfterMs(response.headers?.get(RETRY_AFTER_HEADER))
+    : null;
+
+  return Math.min(headerWait ?? backoff, MAX_RETRY_WAIT_MS);
+};
+
 // The result of an authed request when a caller needs more than the parsed
 // body — today, only `fetchRecordExport` (src/libs/export.ts), which reads the
 // truncation signal off a response header rather than the JSON body.
 export type AuthedRequestResult = { body: unknown; headers: Headers };
+
+// Adds the base URL and bearer token to one `apiFetch` call.
+const sendAuthedRequest = (
+  path: string,
+  init: Omit<RequestInit, 'headers' | 'signal'> & {
+    headers?: Record<string, string>;
+  },
+): Promise<ApiFetchResult> =>
+  apiFetch(`${getBaseUrl()}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${getApiToken()}`,
+      ...init.headers,
+    },
+  });
 
 // Single seam for talking to the markpost API: prefixes the base URL,
 // attaches the bearer token, throws with the server's real error detail on
@@ -427,23 +514,29 @@ export type AuthedRequestResult = { body: unknown; headers: Headers };
 // inherits the request timeout (a stall fails loud as `ApiTimeoutError`
 // instead of hanging the sync forever); `signal` is owned by `apiFetch`, so
 // callers can't override the timeout.
+// Idempotent GETs are retried on 429/5xx (see `MAX_GET_ATTEMPTS`); every other
+// method is sent exactly once. Network errors and timeouts are not retried.
 export const authedRequestWithHeaders = async (
   path: string,
   init: Omit<RequestInit, 'headers' | 'signal'> & {
     headers?: Record<string, string>;
   } = {},
+  options: AuthedRequestOptions = {},
 ): Promise<AuthedRequestResult> => {
-  const { response, body } = await apiFetch(`${getBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${getApiToken()}`,
-      ...init.headers,
-    },
-  });
+  const sleep = options.sleep ?? defaultSleep;
+  const maxAttempts = isGetRequest(init) ? MAX_GET_ATTEMPTS : 1;
+  let attempt = 1;
+  let result = await sendAuthedRequest(path, init);
 
-  assertApiSuccess(response, body);
+  while (attempt < maxAttempts && isRetryableStatus(result.response.status)) {
+    await sleep(retryDelayMs(result.response, attempt));
+    attempt++;
+    result = await sendAuthedRequest(path, init);
+  }
 
-  return { body, headers: response.headers };
+  assertApiSuccess(result.response, result.body);
+
+  return { body: result.body, headers: result.response.headers };
 };
 
 // The common case: every existing caller only ever wanted the parsed body, so
@@ -454,8 +547,9 @@ export const authedRequest = async (
   init: Omit<RequestInit, 'headers' | 'signal'> & {
     headers?: Record<string, string>;
   } = {},
+  options: AuthedRequestOptions = {},
 ): Promise<unknown> => {
-  const { body } = await authedRequestWithHeaders(path, init);
+  const { body } = await authedRequestWithHeaders(path, init, options);
 
   return body;
 };
