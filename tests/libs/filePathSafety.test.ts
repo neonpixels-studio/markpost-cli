@@ -13,6 +13,7 @@ import {
   assertSafeServerFilePath,
   FilePathViolationError,
   filePathViolation,
+  isLegacyLocalFilePath,
   resolveWithinVault,
 } from '#src/libs/filePathSafety.js';
 
@@ -58,6 +59,22 @@ describe('filePathViolation', () => {
   ])('rejects %j as %s', (value, violation) => {
     expect(filePathViolation(value)).toBe(violation);
   });
+});
+
+describe('isLegacyLocalFilePath', () => {
+  it.each(['', '  ', '/a.md', 'C:\\a.md', 'C:/a.md', '\\\\srv\\share\\a.md'])(
+    'treats %j as a stale legacy path',
+    (value) => {
+      expect(isLegacyLocalFilePath(value)).toBe(true);
+    },
+  );
+
+  it.each(['C:x.md', 'a/b.md', '../a.md', 'notes\\x.md', 'notes/x.txt'])(
+    'does not treat %j as legacy, so it is still judged by the safety rules',
+    (value) => {
+      expect(isLegacyLocalFilePath(value)).toBe(false);
+    },
+  );
 });
 
 describe('assertSafeServerFilePath', () => {
