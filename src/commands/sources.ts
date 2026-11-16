@@ -146,6 +146,12 @@ const SOURCES_HANDLERS = new Map<
   ],
 ]);
 
+// The verb in each confirming subcommand's "... without a prompt" refusal.
+const CONFIRM_VERBS = new Map<string, string>([
+  [DELETE_SUBCOMMAND, 'delete'],
+  [ROTATE_ENDPOINT_SUBCOMMAND, 'rotate'],
+]);
+
 // The message for the subcommand (if any) that can't complete without an
 // interactive terminal — inquirer needs both stdin and stdout to be a TTY to
 // render and read a prompt, so a redirected/non-interactive run would
@@ -159,11 +165,6 @@ const SOURCES_HANDLERS = new Map<
 // here — its other prompt (a
 // manual-secret provider's password) is guarded separately inside
 // collectRotateInput, since the provider isn't known this early (see there).
-const CONFIRM_VERBS = new Map<string, string>([
-  [DELETE_SUBCOMMAND, 'delete'],
-  [ROTATE_ENDPOINT_SUBCOMMAND, 'rotate'],
-]);
-
 const interactiveGuardMessageFor = (
   subcommand: string | undefined,
   uuid: string | undefined,
@@ -171,18 +172,22 @@ const interactiveGuardMessageFor = (
   clearFieldMapping: boolean,
 ): string | null => {
   const confirmVerb = CONFIRM_VERBS.get(subcommand ?? '');
+  const confirmRefusalMessage =
+    subcommand && confirmVerb
+      ? confirmRefusal(
+          {
+            command: 'sources',
+            subcommand,
+            argument: '<uuid>',
+            verb: confirmVerb,
+            requirement: 'a uuid with --yes',
+          },
+          { skipConfirm, isInteractive: isInteractiveTerminal() },
+        )
+      : null;
 
-  if (subcommand && confirmVerb && !skipConfirm) {
-    return confirmRefusal(
-      {
-        command: 'sources',
-        subcommand,
-        argument: '<uuid>',
-        verb: confirmVerb,
-        identifier: 'uuid',
-      },
-      { skipConfirm, isInteractive: false },
-    );
+  if (confirmRefusalMessage) {
+    return confirmRefusalMessage;
   }
 
   if (subcommand === CREATE_SUBCOMMAND) {

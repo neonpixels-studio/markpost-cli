@@ -709,7 +709,7 @@ const usageErrorFor = (
         subcommand: REVOKE_SUBCOMMAND,
         argument: '<id>',
         verb: 'revoke',
-        identifier: 'id',
+        requirement: 'an id with --yes',
       },
       { skipConfirm, isInteractive },
     );

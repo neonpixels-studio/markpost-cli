@@ -21,9 +21,7 @@ const CARRIAGE_RETURN = String.fromCharCode(0x0d);
 
 describe('sanitizeForTerminal', () => {
   it('leaves ordinary printable text untouched', () => {
-    expect(sanitizeForTerminal('Meeting notes 2024')).toBe(
-      'Meeting notes 2024',
-    );
+    expect(sanitizeForTerminal('Meeting notes 2024')).toBe('Meeting notes 2024');
   });
 
   it('replaces an ANSI escape (ESC) with a space', () => {
@@ -144,7 +142,7 @@ describe('confirmRefusal', () => {
     subcommand: 'delete',
     argument: '<uuid>',
     verb: 'delete',
-    identifier: 'uuid',
+    requirement: 'a uuid with --yes',
   };
 
   it('refuses without --yes on a non-interactive terminal', () => {
@@ -167,7 +165,24 @@ describe('confirmRefusal', () => {
     ).toBeNull();
   });
 
-  it('omits the identifier phrase when none is given', () => {
+  it('uses the caller-supplied requirement wording', () => {
+    expect(
+      confirmRefusal(
+        {
+          command: 'tokens',
+          subcommand: 'revoke',
+          argument: '<id>',
+          verb: 'revoke',
+          requirement: 'an id with --yes',
+        },
+        { skipConfirm: false, isInteractive: false },
+      ),
+    ).toBe(
+      '`tokens revoke` needs an interactive terminal to confirm; pass an id with --yes (`markpost tokens revoke <id> --yes`) to revoke without a prompt.',
+    );
+  });
+
+  it('defaults to plain --yes when no requirement is given', () => {
     expect(
       confirmRefusal(
         {

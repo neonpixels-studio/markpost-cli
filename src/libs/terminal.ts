@@ -98,9 +98,10 @@ export interface ConfirmRefusalOptions {
   argument: string;
   // The verb for the "... without a prompt" tail, e.g. `delete`.
   verb: string;
-  // Names the identifier the --yes escape hatch also requires (e.g. `uuid`),
-  // for commands where --yes only works with an explicit target.
-  identifier?: string;
+  // What the caller must pass, e.g. `a uuid with --yes` or `an id with --yes`
+  // for commands where --yes only works with an explicit target. Defaults to
+  // plain `--yes`.
+  requirement?: string;
 }
 
 // The refusal for a confirming subcommand that cannot prompt: null when --yes
@@ -115,9 +116,13 @@ export function confirmRefusal(
     return null;
   }
 
-  const { command, subcommand, argument, verb, identifier } = options;
-  const requirement = identifier ? `a ${identifier} with --yes` : '--yes';
-
+  const {
+    command,
+    subcommand,
+    argument,
+    verb,
+    requirement = '--yes',
+  } = options;
   return `\`${command} ${subcommand}\` needs an interactive terminal to confirm; pass ${requirement} (\`markpost ${command} ${subcommand} ${argument} --yes\`) to ${verb} without a prompt.`;
 }
 
