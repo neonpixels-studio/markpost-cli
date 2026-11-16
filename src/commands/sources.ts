@@ -285,7 +285,7 @@ const usageErrorFor = (
 
   // --payload only makes sense for `test` (it's the sample the field mapping
   // is previewed against); reject it elsewhere for the same reason --yes is
-  // rejected outside `delete`.
+  // rejected outside the CONFIRMING_SUBCOMMANDS.
   if (payloadFlag !== undefined && subcommand !== TEST_SUBCOMMAND) {
     return `--payload is only supported by \`sources ${TEST_SUBCOMMAND}\`.`;
   }
@@ -1232,7 +1232,10 @@ const rotateEndpointCommand = async (
   if (!target) {
     // A scripted `rotate-endpoint <uuid> --yes` must not read an unknown uuid
     // as a completed rotation; an empty picker is a user choice, not a failure.
-    process.exitCode = uuid ? 1 : process.exitCode;
+    if (uuid) {
+      process.exitCode = 1;
+    }
+
     return;
   }
 
