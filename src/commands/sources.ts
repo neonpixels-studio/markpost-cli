@@ -1204,7 +1204,7 @@ const rotateEndpointForSource = async (
     // 409 means a concurrent rotation won; either way the URL on file may be
     // stale, so point at how to find the live one.
     failWithMessage(
-      'Failed to rotate source endpoint. If the rotation was applied server-side the previous URL no longer works — run `markpost sources list` to see the current one, or retry (a 409 means another rotation ran at the same time).',
+      'Failed to rotate source endpoint (see the error above). If the rotation was applied server-side the previous URL no longer works — run `markpost sources list` to see the current one before retrying.',
     );
     return;
   }
@@ -1229,13 +1229,14 @@ const rotateEndpointCommand = async (
         `None of your sources have a rotatable endpoint — ${ENDPOINT_NOT_ROTATABLE_NOTE}.`,
       );
 
-  if (!target) {
-    // A scripted `rotate-endpoint <uuid> --yes` must not read an unknown uuid
-    // as a completed rotation; an empty picker is a user choice, not a failure.
-    if (uuid) {
-      process.exitCode = 1;
-    }
+  // A scripted `rotate-endpoint <uuid> --yes` must not read an unknown uuid
+  // as a completed rotation; an empty picker is a user choice, not a failure.
+  if (!target && uuid) {
+    process.exitCode = 1;
+    return;
+  }
 
+  if (!target) {
     return;
   }
 

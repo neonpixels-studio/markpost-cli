@@ -2329,6 +2329,19 @@ describe('runSourcesCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
+    it('refuses an email source before prompting to confirm', async () => {
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([emailSource]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', 'def-456']);
+
+      expect(confirmPrompt).not.toHaveBeenCalled();
+      expect(rotateSourceEndpoint).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    });
+
     it('only offers rotatable sources in the picker', async () => {
       const { fetchSources, rotateSourceEndpoint } =
         await import('#src/libs/sources.js');
