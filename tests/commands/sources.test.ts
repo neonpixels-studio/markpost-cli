@@ -22,6 +22,7 @@ vi.mock('#src/libs/sources.js', () => ({
   updateSource: vi.fn(),
   deleteSource: vi.fn(),
   rotateSourceSecret: vi.fn(),
+  rotateSourceEndpoint: vi.fn(),
   testSource: vi.fn(),
 }));
 vi.mock('@inquirer/prompts', () => ({
@@ -2076,7 +2077,9 @@ describe('runSourcesCommand', () => {
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchSources).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('--yes is only supported by `sources delete`.'),
+        expect.stringContaining(
+          '--yes is only supported by `sources delete` and `sources rotate-endpoint`.',
+        ),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -2208,6 +2211,153 @@ describe('runSourcesCommand', () => {
       // A failed delete must exit non-zero so a scripted `delete --yes || …`
       // catches it instead of reading the non-delete as success.
       expect(process.exitCode).toBe(1);
+    });
+  });
+
+  describe('rotate-endpoint', () => {
+    const rotatedWebhook: Source = {
+      ...webhookSource,
+      endpointSlug: 'wh_rotated99',
+    };
+
+    it('confirms, rotates by uuid, and prints the new URL', async () => {
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(rotateSourceEndpoint).mockResolvedValue(rotatedWebhook);
+      vi.mocked(confirmPrompt).mockResolvedValue(true);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', 'abc-123']);
+
+      expect(confirmPrompt).toHaveBeenCalledTimes(1);
+      expect(rotateSourceEndpoint).toHaveBeenCalledWith('abc-123');
+      expect(loggedText()).toContain('Rotated endpoint for "Webhook Source"');
+      expect(loggedText()).toContain(
+        'https://ingest.markpost.io/v1/hooks/wh_rotated99',
+      );
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('does not rotate when the confirmation is declined', async () => {
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(confirmPrompt).mockResolvedValue(false);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', 'abc-123']);
+
+      expect(rotateSourceEndpoint).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith('Rotation cancelled.');
+    });
+
+    it('skips the confirmation with --yes, even on a non-TTY', async () => {
+      process.stdin.isTTY = false;
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(rotateSourceEndpoint).mockResolvedValue(rotatedWebhook);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', 'abc-123', '--yes']);
+
+      expect(confirmPrompt).not.toHaveBeenCalled();
+      expect(rotateSourceEndpoint).toHaveBeenCalledWith('abc-123');
+    });
+
+    it('fails loudly on a non-TTY run without --yes instead of hanging', async () => {
+      process.stdin.isTTY = false;
+      const { rotateSourceEndpoint } = await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', 'abc-123']);
+
+      expect(confirmPrompt).not.toHaveBeenCalled();
+      expect(rotateSourceEndpoint).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--yes'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('rejects --yes without a uuid instead of opening the picker', async () => {
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', '--yes']);
+
+      expect(fetchSources).not.toHaveBeenCalled();
+      expect(rotateSourceEndpoint).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('--yes requires a uuid'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('refuses an email source without calling the API', async () => {
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([emailSource]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', 'def-456', '--yes']);
+
+      expect(rotateSourceEndpoint).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('has no rotatable endpoint'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('only offers rotatable sources in the picker', async () => {
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([emailSource, webhookSource]);
+      vi.mocked(rotateSourceEndpoint).mockResolvedValue(rotatedWebhook);
+      vi.mocked(confirmPrompt).mockResolvedValue(true);
+      const { select } = await import('@inquirer/prompts');
+      vi.mocked(select).mockResolvedValue('abc-123');
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint']);
+
+      expect(select).toHaveBeenCalledWith(
+        expect.objectContaining({
+          choices: [{ name: 'Webhook Source (webhook)', value: 'abc-123' }],
+        }),
+      );
+      expect(rotateSourceEndpoint).toHaveBeenCalledWith('abc-123');
+    });
+
+    it('exits non-zero when the rotation fails (e.g. 409 conflict)', async () => {
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      vi.mocked(rotateSourceEndpoint).mockResolvedValue(null);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', 'abc-123', '--yes']);
+
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to rotate source endpoint'),
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('fails when the uuid matches no source', async () => {
+      const { fetchSources, rotateSourceEndpoint } =
+        await import('#src/libs/sources.js');
+      vi.mocked(fetchSources).mockResolvedValue([webhookSource]);
+      const { runSourcesCommand } = await import('#src/commands/sources.js');
+
+      await runSourcesCommand(['rotate-endpoint', 'nope', '--yes']);
+
+      expect(rotateSourceEndpoint).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Source not found'),
+      );
     });
   });
 

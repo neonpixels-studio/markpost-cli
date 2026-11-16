@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isManualSecretProvider,
   isRotatableProvider,
+  isSourceEndpointRotatable,
   MANUAL_SECRET_PROVIDERS,
   ROTATABLE_PROVIDERS,
   SECRET_BACKED_PROVIDERS,
@@ -72,4 +73,17 @@ describe('rotatable provider sets', () => {
     expect(isRotatableProvider('zapier')).toBe(true);
     expect(isRotatableProvider('shortcuts')).toBe(true);
   });
+});
+
+describe('isSourceEndpointRotatable', () => {
+  it('rejects only email, mirroring markpost', () => {
+    expect(isSourceEndpointRotatable('email')).toBe(false);
+  });
+
+  it.each(SOURCE_TYPES.filter((sourceType) => sourceType !== 'email'))(
+    'accepts %s',
+    (sourceType) => {
+      expect(isSourceEndpointRotatable(sourceType)).toBe(true);
+    },
+  );
 });

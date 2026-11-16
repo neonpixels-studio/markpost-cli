@@ -4,6 +4,7 @@ import {
   createSource,
   deleteSource,
   fetchSources,
+  rotateSourceEndpoint,
   rotateSourceSecret,
   testSource,
   updateSource,
@@ -533,6 +534,91 @@ describe('rotateSourceSecret', () => {
   it('returns null on network failure', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     expect(await rotateSourceSecret('ghi-789')).toBeNull();
+  });
+});
+
+describe('rotateSourceEndpoint', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('POSTs to the rotate-endpoint path with empty attributes', async () => {
+    mockFetch({ data: { attributes: mockSource } });
+    await rotateSourceEndpoint('abc-123');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/sources/abc-123/rotate-endpoint',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Authorization: 'Bearer test-token',
+        },
+        body: JSON.stringify({ data: { type: 'sources', attributes: {} } }),
+      }),
+    );
+  });
+
+  it('encodes the uuid into the URL path', async () => {
+    mockFetch({ data: { attributes: mockSource } });
+    await rotateSourceEndpoint('a/../b');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://example.com/api/sources/a%2F..%2Fb/rotate-endpoint',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('returns the rotated source attributes', async () => {
+    mockFetch({ data: { attributes: mockSource } });
+    expect(await rotateSourceEndpoint('abc-123')).toEqual(mockSource);
+  });
+
+  it('returns null and surfaces details on a 422 non-rotatable type', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [
+            {
+              title: 'Invalid Attribute',
+              detail:
+                'Sources of type "email" do not have a rotatable endpoint slug.',
+            },
+          ],
+        },
+      },
+      false,
+    );
+    expect(await rotateSourceEndpoint('def-456')).toBeNull();
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'rotateSourceEndpoint["def-456"]',
+      'Invalid Attribute: Sources of type "email" do not have a rotatable endpoint slug.',
+    );
+  });
+
+  it('returns null and surfaces details on a 409 concurrent rotation', async () => {
+    mockFetch(
+      {
+        data: {
+          errors: [
+            {
+              title: 'Conflict',
+              detail:
+                'The source endpoint changed during this request (likely a concurrent rotation). Try again.',
+            },
+          ],
+        },
+      },
+      false,
+    );
+    expect(await rotateSourceEndpoint('abc-123')).toBeNull();
+    expect(logErrorMessage).toHaveBeenCalledWith(
+      'rotateSourceEndpoint["abc-123"]',
+      expect.stringContaining('Conflict'),
+    );
+  });
+
+  it('returns null on network failure', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    expect(await rotateSourceEndpoint('abc-123')).toBeNull();
   });
 });
 

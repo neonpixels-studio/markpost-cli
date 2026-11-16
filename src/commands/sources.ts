@@ -5,6 +5,7 @@ import {
   createSource,
   deleteSource,
   fetchSources,
+  rotateSourceEndpoint,
   rotateSourceSecret,
   testSource,
   updateSource,
@@ -27,6 +28,7 @@ import {
   FieldMappingKey,
   isManualSecretProvider,
   isRotatableProvider,
+  isSourceEndpointRotatable,
   MANUAL_SECRET_PROVIDERS,
   ROTATABLE_PROVIDERS,
   RotateSourceSecretInput,
@@ -54,13 +56,14 @@ const CLEAR_FIELD_MAPPING_KEY_SENTINEL = '-';
 // "clear the whole stored mapping" value, without opening any prompt.
 const CLEAR_FIELD_MAPPING_FLAG = 'clear-field-mapping';
 
-export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret|test> [uuid]
+export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret|rotate-endpoint|test> [uuid]
 
   list                  List all sources (pass --json for machine-readable output)
   create                Create a new source (prompts for details)
   update [uuid]         Update a source's route folder and/or field mapping; prompts to pick one if uuid is omitted. Pass a uuid with --clear-field-mapping to remove the whole stored field mapping without prompting (for scripts)
   delete [uuid]         Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
   rotate-secret [uuid]  Rotate a provider source's signing secret; prompts to pick one if uuid is omitted
+  rotate-endpoint [uuid]  Replace a webhook source's ingest URL (the old URL stops working immediately; email sources can't be rotated); prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
   test <uuid>           Preview signature verification and field mapping for a source against a sample payload, without a real delivery (pass --json for machine-readable output, --payload '<json object>' to test against a custom sample instead of the server's default)`;
 
 export const buildEndpointUrl = (
@@ -86,6 +89,13 @@ const UPDATE_SUBCOMMAND = 'update';
 // guard that rejects the flag elsewhere as well as its handler-map key.
 const DELETE_SUBCOMMAND = 'delete';
 const ROTATE_SECRET_SUBCOMMAND = 'rotate-secret';
+const ROTATE_ENDPOINT_SUBCOMMAND = 'rotate-endpoint';
+// The subcommands that ask for confirmation, and so are the only ones `--yes`
+// applies to.
+const CONFIRMING_SUBCOMMANDS = new Set([
+  DELETE_SUBCOMMAND,
+  ROTATE_ENDPOINT_SUBCOMMAND,
+]);
 // `test` is non-interactive (it takes a required uuid, never a picker) and, like
 // `list`, renders JSON — so it's the second subcommand `--json` applies to.
 const TEST_SUBCOMMAND = 'test';
@@ -124,6 +134,10 @@ const SOURCES_HANDLERS = new Map<
   ],
   [ROTATE_SECRET_SUBCOMMAND, (uuid) => rotateSecretCommand(uuid)],
   [
+    ROTATE_ENDPOINT_SUBCOMMAND,
+    (uuid, _json, skipConfirm) => rotateEndpointCommand(uuid, skipConfirm),
+  ],
+  [
     TEST_SUBCOMMAND,
     (uuid, json, _skipConfirm, payload) =>
       testSourceCommand(uuid, json, payload),
@@ -151,6 +165,10 @@ const interactiveGuardMessageFor = (
 ): string | null => {
   if (subcommand === DELETE_SUBCOMMAND && !skipConfirm) {
     return `\`sources delete\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`) to delete without a prompt.`;
+  }
+
+  if (subcommand === ROTATE_ENDPOINT_SUBCOMMAND && !skipConfirm) {
+    return `\`sources ${ROTATE_ENDPOINT_SUBCOMMAND}\` needs an interactive terminal to confirm; pass a uuid with --yes (\`markpost sources ${ROTATE_ENDPOINT_SUBCOMMAND} <uuid> --yes\`) to rotate without a prompt.`;
   }
 
   if (subcommand === CREATE_SUBCOMMAND) {
@@ -261,8 +279,8 @@ const usageErrorFor = (
 
   // --yes only skips the delete confirmation; reject it elsewhere so a
   // misplaced flag fails loudly instead of appearing to take effect.
-  if (skipConfirm && subcommand !== DELETE_SUBCOMMAND) {
-    return `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\`.`;
+  if (skipConfirm && !CONFIRMING_SUBCOMMANDS.has(subcommand ?? '')) {
+    return `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\` and \`sources ${ROTATE_ENDPOINT_SUBCOMMAND}\`.`;
   }
 
   // --payload only makes sense for `test` (it's the sample the field mapping
@@ -293,7 +311,7 @@ const usageErrorFor = (
   // --yes promises a non-interactive delete, so it needs an explicit uuid —
   // without one the picker still opens and a script blocks on it forever.
   if (skipConfirm && !uuid) {
-    return `--yes requires a uuid: \`markpost sources ${DELETE_SUBCOMMAND} <uuid> --yes\`.`;
+    return `--yes requires a uuid: \`markpost sources ${subcommand} <uuid> --yes\`.`;
   }
 
   if (!isInteractive) {
@@ -1147,6 +1165,75 @@ const rotateSecretCommand = async (uuid?: string): Promise<void> => {
   }
 
   await rotateSecretForSource(target);
+};
+
+// Rotating the endpoint kills the URL a provider (or the user's scripts) is
+// currently pointed at, so it asks first, defaulting to "no". The label is
+// sanitized because it may have come from an untrusted API response.
+const confirmEndpointRotation = async (target: Source): Promise<boolean> =>
+  confirm({
+    message: `Rotate the endpoint for ${sanitizeForTerminal(
+      `${target.name} (${target.uuid})`,
+    )}? Its current URL stops working immediately and cannot be restored.`,
+    default: false,
+  });
+
+const ENDPOINT_NOT_ROTATABLE_NOTE =
+  'Email sources have a mailbox address, not a rotatable URL';
+
+const rotateEndpointForSource = async (
+  target: Source,
+  skipConfirm: boolean,
+): Promise<void> => {
+  if (!isSourceEndpointRotatable(target.type)) {
+    failWithMessage(
+      `Source "${sanitizeForTerminal(target.name)}" has no rotatable endpoint. ${ENDPOINT_NOT_ROTATABLE_NOTE}.`,
+    );
+    return;
+  }
+
+  if (!skipConfirm && !(await confirmEndpointRotation(target))) {
+    console.log('Rotation cancelled.');
+    return;
+  }
+
+  const rotated = await rotateSourceEndpoint(target.uuid);
+
+  if (!rotated) {
+    // May already have committed server-side (a 5xx after the write), and a
+    // 409 means a concurrent rotation won; either way the URL on file may be
+    // stale, so point at how to find the live one.
+    failWithMessage(
+      'Failed to rotate source endpoint. If the rotation was applied server-side the previous URL no longer works — run `markpost sources list` to see the current one, or retry (a 409 means another rotation ran at the same time).',
+    );
+    return;
+  }
+
+  console.log(
+    chalk.greenBright(
+      `Rotated endpoint for "${sanitizeForTerminal(rotated.name)}" — the previous URL no longer works`,
+    ),
+  );
+  printSource(rotated);
+};
+
+const rotateEndpointCommand = async (
+  uuid: string | undefined,
+  skipConfirm: boolean,
+): Promise<void> => {
+  const target = uuid
+    ? await findSourceByUuid(uuid)
+    : await promptForSource(
+        'rotate the endpoint for',
+        (source) => isSourceEndpointRotatable(source.type),
+        `None of your sources have a rotatable endpoint — ${ENDPOINT_NOT_ROTATABLE_NOTE}.`,
+      );
+
+  if (!target) {
+    return;
+  }
+
+  await rotateEndpointForSource(target, skipConfirm);
 };
 
 // A `Map`, not an object literal keyed by server-derived text — same reason
