@@ -424,7 +424,7 @@ The publish job authenticates with GitHub OIDC (`id-token: write`), so no
    and disallow tokens" so only the workflow can publish.
 
 Trusted publishing and `npm stage` need a recent npm; the npm bundled with the
-Node version pinned in `.nvmrc` (11.19.1) supports both.
+Node version pinned in `.nvmrc` (11.20.0) supports both.
 
 ## Security scanning
 
