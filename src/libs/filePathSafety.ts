@@ -1,5 +1,13 @@
 import { lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import {
+  dirname,
+  isAbsolute,
+  posix,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from 'node:path';
 
 // Mirrors markpost's shared/utils/filePath.ts (`filePathViolation`) and the
 // primitives it imports from shared/utils/pathSafety.ts (`hasTraversalSegment`,
@@ -131,6 +139,20 @@ export const filePathViolation = (value: string): FilePathViolation | null => {
 
   return null;
 };
+
+// Older CLI versions reported the absolute local path back to markpost on
+// mark-synced, and some records hold an empty one, so those values are still
+// stored server-side. They are not hostile input, just stale: the CLI never
+// uses them as a write target (the write falls back to a CLI-derived
+// `<slug>.md` and the new relative path is reported on mark-synced, replacing
+// the stale value). Detected with both POSIX and Windows rules since the value
+// may have been written on a different OS than the one now syncing. Anything
+// else invalid (traversal, drive-relative `C:x.md`, reserved names, ...) stays
+// a refusal.
+export const isLegacyLocalFilePath = (filePath: string): boolean =>
+  filePath.trim() === '' ||
+  posix.isAbsolute(filePath) ||
+  win32.isAbsolute(filePath);
 
 // Throws when the server-provided `record.filePath` is not a safe relative
 // markdown path. The message embeds the untrusted value; callers sanitize it

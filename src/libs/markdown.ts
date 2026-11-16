@@ -6,12 +6,22 @@ import {
   readFileSync,
   rmSync,
 } from 'node:fs';
-import { basename, dirname, extname, relative, resolve } from 'node:path';
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import slugify from '@sindresorhus/slugify';
 import { config } from '#src/libs/config.js';
+import { warnMessage } from '#src/libs/errors.js';
 import { expandHomeDirectory } from '#src/libs/paths.js';
+import { sanitizeForTerminal } from '#src/libs/terminal.js';
 import {
   buildRecordDocument,
   extractFrontmatterTagsWithDiagnostics,
@@ -20,6 +30,8 @@ import {
 import {
   assertSafeServerFilePath,
   FilePathViolationError,
+  filePathViolation,
+  isLegacyLocalFilePath,
   resolveWithinVault,
 } from '#src/libs/filePathSafety.js';
 import { Record } from '#src/types/records.types.js';
@@ -150,22 +162,68 @@ const resolveBasePath = (
   return resolveWithinOutputDirectory(outputDirectory, relativePath);
 };
 
+// A legacy absolute path that lies inside the output directory (the old CLI
+// reported where it wrote the file) keeps its folder, so the record lands back
+// where it was instead of duplicating at the vault root. The recovered value
+// still has to pass the normal safety rules; anything else yields null.
+const relativePathInsideVault = (
+  legacyPath: string,
+  outputDirectory: string,
+): string | null => {
+  if (!isAbsolute(legacyPath)) {
+    return null;
+  }
+
+  const recovered = relative(resolve(outputDirectory), legacyPath)
+    .split(sep)
+    .join(VAULT_PATH_SEPARATOR);
+
+  return filePathViolation(recovered) === null ? recovered : null;
+};
+
 // Decide the vault-relative path a record's document is written to. Honor the
 // server's `record.filePath` when present, throwing a FilePathViolationError if
 // it is not a safe relative markdown path (see filePathSafety.ts) so the record
 // is reported as failed and left on the server rather than written somewhere
-// unintended. Only a missing path falls back to `<slug>.md` at the output root.
+// unintended. A missing path, or a stale legacy one (empty or absolute, see
+// isLegacyLocalFilePath), keeps its folder when it points inside this output
+// directory and otherwise falls back to `<slug>.md` at the output root.
 const resolveWriteRelativePath = (
   filePath: string | null | undefined,
   slug: string,
+  outputDirectory: string,
 ): string => {
   if (filePath === null || filePath === undefined) {
     return `${slug}${MARKDOWN_EXTENSION}`;
   }
 
+  if (isLegacyLocalFilePath(filePath)) {
+    return (
+      relativePathInsideVault(filePath, outputDirectory) ??
+      `${slug}${MARKDOWN_EXTENSION}`
+    );
+  }
+
   assertSafeServerFilePath(filePath);
 
   return filePath;
+};
+
+// A legacy path is replaced, not refused: say so, since the new relative path
+// reported on mark-synced overwrites the stale value stored on the server.
+const warnIfLegacyFilePath = (record: Record, writtenPath: string): void => {
+  if (
+    typeof record.filePath !== 'string' ||
+    !isLegacyLocalFilePath(record.filePath)
+  ) {
+    return;
+  }
+
+  warnMessage(
+    sanitizeForTerminal(
+      `${record.title} (${record.uuid}) has a legacy server file path ${JSON.stringify(record.filePath)}; wrote ${toVaultRelativePath(writtenPath)} instead and will update the stored path.`,
+    ),
+  );
 };
 
 // Insert a collision suffix before the final segment's extension, keeping the
@@ -739,8 +797,12 @@ export const writeMarkdown = (
 
   // Write where the server asked (`<outputDirectory>/<record.filePath>`),
   // creating the subfolder on demand; fall back to `<slug>.md` at the output
-  // root only when the server sent no path. An invalid path throws.
-  const relativePath = resolveWriteRelativePath(record.filePath, slug);
+  // root when the server sent no path or a legacy one. An invalid path throws.
+  const relativePath = resolveWriteRelativePath(
+    record.filePath,
+    slug,
+    outputDirectory,
+  );
   const basePath = resolveBasePath(outputDirectory, relativePath);
 
   ensureParentDirectory(outputDirectory, basePath);
@@ -755,6 +817,11 @@ export const writeMarkdown = (
     STRATEGY_WRITERS.get(effectiveStrategy) ?? writeToFirstAvailablePath;
 
   const writtenPath = writer(outputDirectory, relativePath, content);
+
+  if (writtenPath !== null) {
+    warnIfLegacyFilePath(record, writtenPath);
+  }
+
   // Ownership means "this uuid wrote the base path", so record it only when the
   // write actually landed there — never for a `skip` no-op (null) or a `suffix`
   // write that spilled to `<name>-2.md`. The key is the resolved base path
@@ -886,7 +953,11 @@ const planRecordWrite = (
   plannedPaths: Set<string>,
 ): WritePreview => {
   const slug = slugifyTitle(record.title, record.uuid);
-  const relativePath = resolveWriteRelativePath(record.filePath, slug);
+  const relativePath = resolveWriteRelativePath(
+    record.filePath,
+    slug,
+    outputDirectory,
+  );
   const basePath = resolveBasePath(outputDirectory, relativePath);
   const baseKey = pathKey(basePath);
   const baseTaken = plannedPaths.has(baseKey) || existsSync(basePath);

@@ -447,12 +447,10 @@ describe('writeMarkdown', () => {
   it.each([
     ['a parent-escape path', '../escape.md'],
     ['a nested parent-escape path', 'a/../../x.md'],
-    ['an absolute POSIX path', '/etc/passwd'],
-    ['an absolute Windows path', 'C:\\x.md'],
+    ['a drive-relative Windows path', 'C:x.md'],
     ['a backslash path', 'notes\\x.md'],
     ['a Windows reserved device segment', 'notes/CON/x.md'],
     ['a non-markdown file', 'notes/x.txt'],
-    ['an empty string', ''],
   ])(
     'refuses to write, throwing and touching nothing on disk, for %s',
     (_label, filePath) => {
@@ -465,6 +463,131 @@ describe('writeMarkdown', () => {
       });
     },
   );
+
+  describe('legacy server filePath', () => {
+    let consoleError: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      consoleError = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      consoleError.mockRestore();
+    });
+
+    it.each([
+      ['an absolute POSIX path', '/Users/me/vault/old.md'],
+      ['an absolute Windows path', 'C:\\Users\\me\\old.md'],
+      ['a forward-slash Windows path', 'C:/Users/me/old.md'],
+      ['a UNC path', '\\\\server\\share\\old.md'],
+      ['a leading-slash non-markdown path', '/etc/passwd'],
+      ['an empty string', ''],
+      ['a whitespace-only string', '   '],
+    ])(
+      'ignores %s, writing <slug>.md at the output root and warning',
+      (_label, filePath) => {
+        const writtenPath = writeMarkdown({ ...mockRecord, filePath });
+
+        expect(writtenPath).toBe(resolve(outputDirectory, 'test-title.md'));
+        expect(writeFileSync).toHaveBeenCalledWith(
+          resolve(outputDirectory, 'test-title.md'),
+          mockRecord.content,
+          EXCLUSIVE_WRITE_OPTIONS,
+        );
+        expect(consoleError).toHaveBeenCalledWith(
+          expect.stringContaining('legacy server file path'),
+        );
+      },
+    );
+
+    it('keeps the folder of a legacy absolute path inside the output directory', () => {
+      const writtenPath = writeMarkdown({
+        ...mockRecord,
+        filePath: resolve(outputDirectory, 'notes/old.md'),
+      });
+
+      expect(writtenPath).toBe(resolve(outputDirectory, 'notes/old.md'));
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('notes/old.md'),
+      );
+    });
+
+    it.each([
+      ['a non-markdown file', 'notes/x.txt'],
+      ['a reserved device folder', 'notes/CON/x.md'],
+    ])(
+      'falls back to <slug>.md for an in-vault legacy path that is %s',
+      (_label, insidePath) => {
+        const writtenPath = writeMarkdown({
+          ...mockRecord,
+          filePath: resolve(outputDirectory, insidePath),
+        });
+
+        expect(writtenPath).toBe(resolve(outputDirectory, 'test-title.md'));
+      },
+    );
+
+    it('falls back to <slug>.md for a legacy absolute path outside the output directory', () => {
+      const writtenPath = writeMarkdown({
+        ...mockRecord,
+        filePath: resolve(outputDirectory, '../elsewhere/old.md'),
+      });
+
+      expect(writtenPath).toBe(resolve(outputDirectory, 'test-title.md'));
+    });
+
+    it('names the record and the written file, and strips terminal escapes from the warning', () => {
+      writeMarkdown({
+        ...mockRecord,
+        title: 'Test \u001b[31mTitle',
+        filePath: '/Users/me/old.md',
+      });
+
+      const message = String(consoleError.mock.calls[0]?.[0]);
+
+      expect(message).toContain('Test');
+      expect(message).toContain(mockRecord.uuid);
+      expect(message).toContain('.md instead');
+      expect(message).not.toContain('\u001b');
+    });
+
+    it('names the suffixed file when <slug>.md is already taken', () => {
+      mockWriteFileSyncRejectingExistingPaths([
+        resolve(outputDirectory, 'test-title.md'),
+      ]);
+
+      writeMarkdown({ ...mockRecord, filePath: '/Users/me/old.md' }, 'suffix');
+
+      expect(String(consoleError.mock.calls[0]?.[0])).toContain(
+        'test-title-2.md',
+      );
+    });
+
+    it('does not claim a replacement when skip leaves an existing <slug>.md untouched', () => {
+      mockWriteFileSyncRejectingExistingPaths([
+        resolve(outputDirectory, 'test-title.md'),
+      ]);
+
+      const writtenPath = writeMarkdown(
+        { ...mockRecord, filePath: '/Users/me/old.md' },
+        'skip',
+      );
+
+      expect(writtenPath).toBeNull();
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a safe relative path', 'a/b.md'],
+      ['no path', undefined],
+    ])('stays quiet for %s', (_label, filePath) => {
+      writeMarkdown({ ...mockRecord, filePath });
+
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+  });
 
   it('refuses to write when a subfolder resolves through a symlink outside the output directory', async () => {
     const { realpathSync } = await import('node:fs');
@@ -1961,6 +2084,38 @@ describe('readMarkdown', () => {
 });
 
 describe('buildWritePreview', () => {
+  it('previews an in-vault legacy absolute filePath at its recovered folder', () => {
+    const [preview] = buildWritePreview(
+      [{ ...mockRecord, filePath: resolve(outputDirectory, 'notes/old.md') }],
+      'suffix',
+    );
+
+    expect(preview).toMatchObject({
+      action: 'write',
+      path: resolve(outputDirectory, 'notes/old.md'),
+    });
+  });
+
+  it('previews a legacy absolute server filePath as a quiet write to <slug>.md, not a refusal', () => {
+    const legacy: Record = {
+      ...mockRecord,
+      filePath: '/Users/me/vault/old.md',
+    };
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    const [preview] = buildWritePreview([legacy], 'suffix');
+
+    const warningCount = consoleError.mock.calls.length;
+    consoleError.mockRestore();
+    expect(warningCount).toBe(0);
+    expect(preview).toMatchObject({
+      action: 'write',
+      path: resolve(outputDirectory, 'test-title.md'),
+    });
+  });
+
   it('marks a record with an unsafe server filePath as refused and keeps previewing the rest', () => {
     const unsafe: Record = { ...mockRecord, uuid: 'bad', filePath: '../x.md' };
     const safe: Record = { ...mockRecord, uuid: 'good', filePath: 'a/ok.md' };
