@@ -58,13 +58,13 @@ const CLEAR_FIELD_MAPPING_FLAG = 'clear-field-mapping';
 
 export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret|rotate-endpoint|test> [uuid]
 
-  list                  List all sources (pass --json for machine-readable output)
-  create                Create a new source (prompts for details)
-  update [uuid]         Update a source's route folder and/or field mapping; prompts to pick one if uuid is omitted. Pass a uuid with --clear-field-mapping to remove the whole stored field mapping without prompting (for scripts)
-  delete [uuid]         Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
-  rotate-secret [uuid]  Rotate a provider source's signing secret; prompts to pick one if uuid is omitted
+  list                    List all sources (pass --json for machine-readable output)
+  create                  Create a new source (prompts for details)
+  update [uuid]           Update a source's route folder and/or field mapping; prompts to pick one if uuid is omitted. Pass a uuid with --clear-field-mapping to remove the whole stored field mapping without prompting (for scripts)
+  delete [uuid]           Delete a source; prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
+  rotate-secret [uuid]    Rotate a provider source's signing secret; prompts to pick one if uuid is omitted
   rotate-endpoint [uuid]  Replace a webhook source's ingest URL (the old URL stops working immediately; email sources can't be rotated); prompts to pick one if uuid is omitted. Asks to confirm first; pass a uuid with --yes to skip the prompt (for scripts)
-  test <uuid>           Preview signature verification and field mapping for a source against a sample payload, without a real delivery (pass --json for machine-readable output, --payload '<json object>' to test against a custom sample instead of the server's default)`;
+  test <uuid>             Preview signature verification and field mapping for a source against a sample payload, without a real delivery (pass --json for machine-readable output, --payload '<json object>' to test against a custom sample instead of the server's default)`;
 
 export const buildEndpointUrl = (
   sourceType: SourceType,
@@ -277,7 +277,7 @@ const usageErrorFor = (
     return `\`sources ${TEST_SUBCOMMAND}\` requires a uuid: \`markpost sources ${TEST_SUBCOMMAND} <uuid>\`.`;
   }
 
-  // --yes only skips the delete confirmation; reject it elsewhere so a
+  // --yes only skips the confirmation of the CONFIRMING_SUBCOMMANDS; reject it elsewhere so a
   // misplaced flag fails loudly instead of appearing to take effect.
   if (skipConfirm && !CONFIRMING_SUBCOMMANDS.has(subcommand ?? '')) {
     return `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\` and \`sources ${ROTATE_ENDPOINT_SUBCOMMAND}\`.`;
@@ -308,7 +308,7 @@ const usageErrorFor = (
     return `--${CLEAR_FIELD_MAPPING_FLAG} requires a uuid: \`markpost sources ${UPDATE_SUBCOMMAND} <uuid> --${CLEAR_FIELD_MAPPING_FLAG}\`.`;
   }
 
-  // --yes promises a non-interactive delete, so it needs an explicit uuid —
+  // --yes promises a non-interactive run, so it needs an explicit uuid —
   // without one the picker still opens and a script blocks on it forever.
   if (skipConfirm && !uuid) {
     return `--yes requires a uuid: \`markpost sources ${subcommand} <uuid> --yes\`.`;
@@ -1230,6 +1230,9 @@ const rotateEndpointCommand = async (
       );
 
   if (!target) {
+    // A scripted `rotate-endpoint <uuid> --yes` must not read an unknown uuid
+    // as a completed rotation; an empty picker is a user choice, not a failure.
+    process.exitCode = uuid ? 1 : process.exitCode;
     return;
   }
 

@@ -52,12 +52,12 @@ export const isRotatableProvider = (
   provider !== null &&
   (ROTATABLE_PROVIDERS as readonly string[]).includes(provider);
 
+export const EMAIL_SOURCE_TYPE: SourceType = 'email';
+
 // Mirrors markpost's isSourceEndpointRotatable (shared/utils/sourceTypes.ts):
 // email-in addresses are a mailbox handed to senders, not a URL credential, so
 // only the webhook-style endpoints can have their slug rotated. Keep in
 // lockstep; the server answers 422 for any type this rejects.
-export const EMAIL_SOURCE_TYPE: SourceType = 'email';
-
 export const isSourceEndpointRotatable = (sourceType: string): boolean =>
   sourceType !== EMAIL_SOURCE_TYPE;
 
