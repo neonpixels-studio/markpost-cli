@@ -115,6 +115,21 @@ export const rotateSourceSecret = async (
     input,
   );
 
+// Replaces the source's ingest endpoint slug, which kills the old URL
+// immediately. The endpoint takes no attributes (the handler reads none) and
+// answers 422 for a non-rotatable type or 409 on a concurrent rotation; both
+// surface through `logApiFailure` and resolve to null like every source write.
+// The response is the plain source (no one-time secret), so `SourceResource`.
+export const rotateSourceEndpoint = async (
+  uuid: string,
+): Promise<Source | null> =>
+  writeSourceRequest<Record<string, never>, SourceResource>(
+    `rotateSourceEndpoint["${uuid}"]`,
+    `/api/sources/${encodeURIComponent(uuid)}/rotate-endpoint`,
+    'POST',
+    {},
+  );
+
 // Diagnostic-only: previews signature verification and field mapping for a
 // source against a sample payload without triggering a real provider delivery.
 // Reuses the shared write seam — the endpoint takes the same JSON:API envelope
