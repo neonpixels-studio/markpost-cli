@@ -416,7 +416,7 @@ export interface ParsedNoteText {
   rawContent: string;
   content: string;
   tags: string[];
-  tagsLineUnparseable?: boolean;
+  tagsLineUnparseable: boolean;
 }
 
 // The text-level steps every push source shares (a file via readMarkdown,

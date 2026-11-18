@@ -1980,6 +1980,18 @@ describe('readMarkdown', () => {
     expect(result.title).toBe('Test Title');
   });
 
+  it('strips a BOM so tags and the frontmatter block are handled', () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(
+      '\uFEFF---\ntitle: T\nsource: web\ncreated: 2024-01-01T00:00:00Z\ntags: [ci]\n---\n\n# T\n\nBody',
+    );
+
+    const result = readMarkdown('./notes/T.md');
+
+    expect(result.tags).toEqual(['ci']);
+    expect(result.content).toBe('Body');
+  });
+
   it('reads the file content as utf-8', () => {
     vi.mocked(existsSync).mockReturnValue(true);
     vi.mocked(readFileSync).mockReturnValue(mockRecord.content);
