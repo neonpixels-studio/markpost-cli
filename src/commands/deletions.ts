@@ -138,21 +138,32 @@ const printJsonReport = (
 };
 
 // Only a fully paged feed gets here (fetchDeletionFeed throws otherwise), but
-// an explicit --since later than the stored baseline skipped the deletions in
-// between, so moving the baseline to "now" would orphan those files for good.
+// an explicit --since later than the stored baseline (or with none stored)
+// skipped the deletions before it, so moving the baseline to "now" would orphan
+// those files for good. The overlap assumes the local clock is within a minute
+// of the server's.
+const skipsUnreadDeletions = (
+  explicitSince: string | undefined,
+  storedSince: string | undefined,
+): boolean => {
+  if (explicitSince === undefined) {
+    return false;
+  }
+
+  return (
+    storedSince === undefined ||
+    Date.parse(explicitSince) > Date.parse(storedSince)
+  );
+};
+
 const advanceBaseline = (
   explicitSince: string | undefined,
   storedSince: string | undefined,
   startedAt: number,
 ): void => {
-  const skippedGap =
-    explicitSince !== undefined &&
-    storedSince !== undefined &&
-    Date.parse(explicitSince) > Date.parse(storedSince);
-
-  if (skippedGap) {
+  if (skipsUnreadDeletions(explicitSince, storedSince)) {
     warnMessage(
-      `--since is later than the last recorded sync (${storedSince}), so that starting point was kept.`,
+      '--since starts after deletions that were never read, so the recorded sync point was not moved. Run without --since to record one.',
     );
     return;
   }

@@ -136,6 +136,24 @@ describe('fetchDeletionFeed', () => {
     );
   });
 
+  it('throws on a response with no data array', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ meta: { size: 100, hasMore: false, complete: true } }),
+    );
+
+    await expect(fetchDeletionFeed('2026-11-10T00:00:00Z')).rejects.toThrow(
+      /no data array/,
+    );
+  });
+
+  it('is incomplete if any page reports incomplete', async () => {
+    fetchMock
+      .mockResolvedValueOnce(page([UUID_A], true, false))
+      .mockResolvedValueOnce(page([UUID_B], false, true));
+
+    expect((await fetchDeletionFeed()).complete).toBe(false);
+  });
+
   it('throws when a later page fails', async () => {
     fetchMock
       .mockResolvedValueOnce(page([UUID_A], true, true))
@@ -271,7 +289,7 @@ describe('planPrune / applyPrune', () => {
       'unsafe',
     ]);
     expect(existsSync(join(outside, 'secret.md'))).toBe(true);
-    expect(removeLedgerEntries).toHaveBeenCalledWith([]);
+    expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A, UUID_B]);
   });
 
   it('does not follow or delete through a symlink at the leaf', () => {

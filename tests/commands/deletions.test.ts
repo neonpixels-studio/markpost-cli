@@ -104,6 +104,14 @@ describe('records deletions', () => {
     expect(setLastDeletionSync).not.toHaveBeenCalled();
   });
 
+  it('does not record a baseline from an explicit --since on a first run', async () => {
+    const { setLastDeletionSync } = await import('#src/libs/vault-ledger.js');
+
+    await run('--apply', '--since', '2026-11-17T00:00:00Z');
+
+    expect(setLastDeletionSync).not.toHaveBeenCalled();
+  });
+
   it('still advances the baseline when --since is earlier than the stored one', async () => {
     const { setLastDeletionSync, getLastDeletionSync } =
       await import('#src/libs/vault-ledger.js');
@@ -118,7 +126,11 @@ describe('records deletions', () => {
     const { fetchDeletionFeed } = await import('#src/libs/deletions.js');
 
     await run('--since', '2026-13-45T99:99:00Z');
+    expect(process.exitCode).toBe(1);
+
+    process.exitCode = undefined;
     await run('stray');
+    expect(process.exitCode).toBe(1);
 
     expect(fetchDeletionFeed).not.toHaveBeenCalled();
   });

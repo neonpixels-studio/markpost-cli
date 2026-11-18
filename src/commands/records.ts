@@ -19,7 +19,13 @@ import {
   isPerRecordRejection,
 } from '#src/libs/api.js';
 import { checkConfig } from '#src/libs/config.js';
-import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
+import {
+  failWithMessage,
+  messageFromError,
+  warnMessage,
+  warnPartialRead,
+} from '#src/libs/errors.js';
+import { removeLedgerEntries } from '#src/libs/vault-ledger.js';
 import {
   confirmRefusal,
   isInteractiveTerminal,
@@ -774,6 +780,19 @@ const reportDeleteSuccess = (
   }
 };
 
+// A record deleted here leaves a server tombstone; a vault file the user kept
+// from an earlier sync must not be pruned because of it. Done before the
+// request, since a failed-looking delete may still have gone through.
+const forgetDeletedRecordsInLedger = (uuids: string[]): void => {
+  try {
+    removeLedgerEntries(uuids);
+  } catch (error) {
+    warnMessage(
+      `Could not update the written-files ledger: ${messageFromError(error)}`,
+    );
+  }
+};
+
 const deleteRecordsAndReport = async (
   { uuids, skipConfirm }: DeleteRecordsArgs,
   json: boolean,
@@ -784,6 +803,8 @@ const deleteRecordsAndReport = async (
     console.log('Deletion cancelled.');
     return;
   }
+
+  forgetDeletedRecordsInLedger(uuids);
 
   const run = await deleteInChunks(uuids);
 

@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync, unlinkSync } from 'node:fs';
 import { authedRequest } from '#src/libs/api.js';
+import { messageFromError } from '#src/libs/errors.js';
 import { resolveWithinVault } from '#src/libs/filePathSafety.js';
 import { hashContent } from '#src/libs/markdown.js';
 import {
@@ -51,7 +52,13 @@ const buildDeletionsQuery = (since?: string, after?: string): string => {
 // A row without a usable uuid cannot be matched to a file, and dropping it
 // would let the feed look complete, so it fails the whole read instead.
 const readTombstones = (page: RecordDeletionList): RecordDeletion[] => {
-  return (page.data ?? []).map((resource) => {
+  if (!Array.isArray(page.data)) {
+    throw new Error(
+      'The deletions feed returned no data array; refusing to treat it as complete.',
+    );
+  }
+
+  return page.data.map((resource) => {
     const attributes = resource?.attributes;
 
     if (typeof attributes?.recordUuid !== 'string') {
@@ -96,7 +103,7 @@ export const fetchDeletionFeed = async (
 ): Promise<DeletionFeed> => {
   const tombstones: RecordDeletion[] = [];
   const seenCursors = new Set<string>();
-  let complete: boolean;
+  let complete = true;
   let after: string | undefined;
 
   do {
@@ -105,7 +112,7 @@ export const fetchDeletionFeed = async (
     )) as RecordDeletionList;
     const pageTombstones = readTombstones(page);
 
-    complete = page.meta?.complete === true;
+    complete = complete && page.meta?.complete === true;
     tombstones.push(...pageTombstones);
     after = nextCursor(page, pageTombstones, seenCursors);
   } while (after);
@@ -132,15 +139,32 @@ export type PrunePlan = {
   untrackedCount: number;
 };
 
+const resolveOrUndefined = (
+  vault: string,
+  path: string,
+): string | undefined => {
+  try {
+    return resolveWithinVault(vault, path);
+  } catch {
+    return undefined;
+  }
+};
+
+const hashFileOrUndefined = (absolutePath: string): string | undefined => {
+  try {
+    return hashContent(readFileSync(absolutePath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+};
+
 const classifyTrackedFile = (
   vault: string,
   entry: LedgerEntry,
 ): PruneOutcome => {
-  let absolutePath: string;
+  const absolutePath = resolveOrUndefined(vault, entry.path);
 
-  try {
-    absolutePath = resolveWithinVault(vault, entry.path);
-  } catch {
+  if (!absolutePath) {
     return 'unsafe';
   }
 
@@ -154,10 +178,13 @@ const classifyTrackedFile = (
     return 'unsafe';
   }
 
-  const unchanged =
-    hashContent(readFileSync(absolutePath, 'utf-8')) === entry.contentHash;
+  const currentHash = hashFileOrUndefined(absolutePath);
 
-  return unchanged ? 'remove' : 'modified';
+  if (!currentHash) {
+    return 'unsafe';
+  }
+
+  return currentHash === entry.contentHash ? 'remove' : 'modified';
 };
 
 // Only uuids present in the ledger (files this CLI wrote and left on the
@@ -191,8 +218,6 @@ export const planPrune = (
   return { items, untrackedCount };
 };
 
-// `unsafe` entries stay in the ledger so they keep showing up for a human;
-// everything else is settled (removed, already gone, or user-owned now).
 const isMissingFileError = (error: unknown): boolean =>
   (error as NodeJS.ErrnoException)?.code === 'ENOENT';
 
@@ -207,6 +232,16 @@ const removeFile = (vault: string, path: string): void => {
   }
 };
 
+const settleItem = (vault: string, item: PruneItem): void => {
+  if (item.outcome === 'remove') {
+    removeFile(vault, item.path);
+  }
+};
+
+// Every entry is settled (removed, already gone, or left for the user and
+// reported once): the baseline moves past its tombstone, so keeping an entry
+// would never surface it again.
+//
 // Entries are settled one by one and the ledger is updated even when a later
 // file fails, so a partial run never leaves removed files tracked. Failures
 // are reported together after everything else was attempted.
@@ -215,18 +250,11 @@ export const applyPrune = (plan: PrunePlan, vault: string): void => {
   const failures: string[] = [];
 
   for (const item of plan.items) {
-    if (item.outcome === 'unsafe') {
-      continue;
-    }
-
     try {
-      if (item.outcome === 'remove') {
-        removeFile(vault, item.path);
-      }
-
+      settleItem(vault, item);
       settled.push(item.uuid);
     } catch (error) {
-      failures.push(`${item.path} (${(error as Error).message})`);
+      failures.push(`${item.path} (${messageFromError(error)})`);
     }
   }
 
