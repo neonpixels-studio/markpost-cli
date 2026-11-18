@@ -150,14 +150,6 @@ const resolveOrUndefined = (
   }
 };
 
-const hashFileOrUndefined = (absolutePath: string): string | undefined => {
-  try {
-    return hashContent(readFileSync(absolutePath, 'utf-8'));
-  } catch {
-    return undefined;
-  }
-};
-
 const classifyTrackedFile = (
   vault: string,
   entry: LedgerEntry,
@@ -178,11 +170,10 @@ const classifyTrackedFile = (
     return 'unsafe';
   }
 
-  const currentHash = hashFileOrUndefined(absolutePath);
-
-  if (!currentHash) {
-    return 'unsafe';
-  }
+  // A read error (EACCES, EIO) is deliberately not caught: it fails the plan
+  // loudly rather than settling the entry, so a transient error cannot make
+  // the file permanently untracked.
+  const currentHash = hashContent(readFileSync(absolutePath, 'utf-8'));
 
   return currentHash === entry.contentHash ? 'remove' : 'modified';
 };

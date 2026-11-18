@@ -807,8 +807,6 @@ function reportDeleteOutcome(
 ): void {
   const requested = settleableRecords.length;
 
-  forgetDeletedRecordsInLedger(settleableRecords);
-
   if (deleteMeta.deleted === requested) {
     forgetSettledRecords(
       writtenState,
@@ -1339,6 +1337,8 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // wrong and fails identically every pass (`permanentlyFailed`, #204). A
     // transient failure (rate-limit/5xx, timeout, a plain per-chunk failure) is
     // worth another pass, so it keeps autoSync alive.
+    forgetDeletedRecordsInLedger(settleableRecords);
+
     const deleteResult = await deleteRecords(
       settleableRecords.map(({ record }) => record.uuid),
     ).catch((error: unknown): DeleteRecordsResult => {
