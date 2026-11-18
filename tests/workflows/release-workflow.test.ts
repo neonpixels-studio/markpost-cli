@@ -128,7 +128,7 @@ describe('release workflow', () => {
   it('does not install dependencies or rebuild in the publish job', () => {
     const publish = jobBodies().publish;
     expect(publish).not.toMatch(
-      /\b(?:npm (?:ci|i|install\S*|run|pack|exec|rebuild)|npx|pnpm|yarn)\b/,
+      /\b(?:npm (?:ci|clean-install|i|in|it|add|install\S*|run\S*|pack|exec|x|rebuild)|npx|pnpm|yarn|bun|corepack)\b/,
     );
   });
 
