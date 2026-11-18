@@ -125,9 +125,33 @@ describe('release workflow', () => {
     );
   });
 
-  it('does not run dependency install scripts in the publish job', () => {
-    expect(jobBodies().publish).toContain('npm ci --ignore-scripts');
-    expect(jobBodies().publish).not.toMatch(/npm ci\s*$/m);
+  it('does not install dependencies or rebuild in the publish job', () => {
+    const publish = jobBodies().publish;
+    expect(publish).not.toMatch(/npm (?:ci|install|run build|pack)/);
+  });
+
+  it('uploads the smoke-tested tarball from the verify job', () => {
+    const verify = jobBodies().verify;
+    const smokeTest = verify.indexOf('bash scripts/smoke-test-pack.sh');
+    const upload = verify.indexOf('actions/upload-artifact@');
+    expect(smokeTest).toBeGreaterThan(-1);
+    expect(upload).toBeGreaterThan(smokeTest);
+    expect(verify).toMatch(/name: release-tarball\n/);
+    expect(verify).toMatch(/path: \$\{\{ runner\.temp \}\}\/pack\/\*\.tgz/);
+    expect(verify).toMatch(/if-no-files-found: error/);
+  });
+
+  it('publishes the downloaded tarball file, not the working tree', () => {
+    const publish = jobBodies().publish;
+    expect(publish).toMatch(
+      /actions\/download-artifact@[^\n]*\n\s+with:\n\s+name: release-tarball\n\s+path: \$\{\{ runner\.temp \}\}\/release-tarball/,
+    );
+    expect(publish).toMatch(
+      /npm stage publish "\$RUNNER_TEMP"\/release-tarball\/\*\.tgz /,
+    );
+    expect(publish.indexOf('download-artifact')).toBeLessThan(
+      publish.indexOf('npm stage publish'),
+    );
   });
 
   it('runs lint, typecheck, test:ci and the pack smoke test', () => {
