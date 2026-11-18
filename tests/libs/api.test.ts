@@ -1089,21 +1089,21 @@ describe('authedRequest retry', () => {
       message: 'The server returned a non-JSON error response (HTTP 503)',
     });
     expect(fetchMock).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS);
+    expect(sleep).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS - 1);
   });
 
   it('still reports a timeout that fires while reading a non-OK body', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ...htmlFailure(503),
-        json: () =>
-          Promise.reject(new DOMException('timed out', 'TimeoutError')),
-      }),
-    );
+    const fetchMock = vi.fn().mockResolvedValue({
+      ...htmlFailure(503),
+      json: () => Promise.reject(new DOMException('timed out', 'TimeoutError')),
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     await expect(
       authedRequest('/api/records', {}, { sleep }),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it('still throws a SyntaxError for an OK response with an unparseable body', async () => {
