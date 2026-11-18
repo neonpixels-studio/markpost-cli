@@ -22,11 +22,7 @@ import { config } from '#src/libs/config.js';
 import { warnMessage } from '#src/libs/errors.js';
 import { expandHomeDirectory } from '#src/libs/paths.js';
 import { sanitizeForTerminal } from '#src/libs/terminal.js';
-import {
-  buildRecordDocument,
-  extractFrontmatterTagsWithDiagnostics,
-  stripFrontmatterDocument,
-} from '#src/libs/frontmatter.js';
+import { buildRecordDocument, parseNoteText } from '#src/libs/frontmatter.js';
 import {
   assertSafeServerFilePath,
   FilePathViolationError,
@@ -1036,13 +1032,13 @@ export const readMarkdown = (
     throw Error(`File not found: ${filePath}`);
   }
 
-  const rawContent = readFileSync(filePath, 'utf-8');
-  const { tags, tagsLineUnparseable } =
-    extractFrontmatterTagsWithDiagnostics(rawContent);
+  const { content, tags, tagsLineUnparseable } = parseNoteText(
+    readFileSync(filePath, 'utf-8'),
+  );
 
   return {
     title: basename(filePath, extname(filePath)),
-    content: stripFrontmatterDocument(rawContent),
+    content,
     tags,
     tagsLineUnparseable,
   };
