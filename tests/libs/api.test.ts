@@ -99,9 +99,9 @@ describe('getBaseUrl', () => {
   });
 
   it('lets an invalid BASE_URL escape logApiFailure instead of being swallowed', () => {
-    expect(() => logApiFailure('ctx', new InvalidBaseUrlError('bad'))).toThrow(
-      InvalidBaseUrlError,
-    );
+    expect(() =>
+      logApiFailure('ctx', new InvalidBaseUrlError('bad')),
+    ).toThrow(InvalidBaseUrlError);
   });
 
   it('never sends the bearer token when BASE_URL is unsafe', async () => {
@@ -1064,6 +1064,46 @@ describe('authedRequest retry', () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('does not retry a POST that hits an HTML 502', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(htmlFailure(502));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      authedRequest('/api/records', { method: 'POST' }, { sleep }),
+    ).rejects.toMatchObject({ statusCode: 502 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('gives up after the maximum attempts on a persistent HTML 503', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(htmlFailure(503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      authedRequest('/api/records', {}, { sleep }),
+    ).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      statusCode: 503,
+      message: 'The server returned a non-JSON error response (HTTP 503)',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS);
+  });
+
+  it('still reports a timeout that fires while reading a non-OK body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ...htmlFailure(503),
+        json: () =>
+          Promise.reject(new DOMException('timed out', 'TimeoutError')),
+      }),
+    );
+
+    await expect(
+      authedRequest('/api/records', {}, { sleep }),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
   it('still throws a SyntaxError for an OK response with an unparseable body', async () => {

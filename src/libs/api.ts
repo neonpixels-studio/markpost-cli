@@ -386,11 +386,18 @@ const resolveErrorMessage = (
     return formatErrorMessages(errors);
   }
 
-  if (body === undefined && !STATUS_FALLBACK_MESSAGES[status]) {
+  const statusFallback = STATUS_FALLBACK_MESSAGES[status];
+
+  if (statusFallback) {
+    return statusFallback;
+  }
+
+  // `apiFetch` only yields an `undefined` body for a non-OK, non-JSON response.
+  if (body === undefined) {
     return `The server returned a non-JSON error response (HTTP ${status})`;
   }
 
-  return STATUS_FALLBACK_MESSAGES[status] ?? formatErrorMessages(errors);
+  return formatErrorMessages(errors);
 };
 
 // An off-contract body can send `errors` as something other than an array
