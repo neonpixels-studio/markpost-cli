@@ -90,7 +90,7 @@ describe('isSourceEndpointRotatable', () => {
     },
   );
 
-  it('rejects only email, mirroring markpost', () => {
+  it('rejects email', () => {
     expect(isSourceEndpointRotatable('email')).toBe(false);
   });
 

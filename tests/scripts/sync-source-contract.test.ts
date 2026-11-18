@@ -168,8 +168,11 @@ describe('assertRequiredExportsPresent', () => {
   });
 });
 
+const SOURCE_TYPES_DECLARATION =
+  'export const SOURCE_TYPES = ["webhook", "email"] as const;';
+
 const SOURCE_TYPES_SOURCE = [
-  'export const SOURCE_TYPES = ["webhook", "email"] as const;',
+  SOURCE_TYPES_DECLARATION,
   'export function isSourceEndpointRotatable(sourceType: string): boolean {',
   '  return sourceType !== "email";',
   '}',
@@ -255,10 +258,7 @@ describe('resolveFilesToSync', () => {
   });
 
   it('throws when markpost drops isSourceEndpointRotatable', () => {
-    writeAndCommit(
-      'shared/utils/sourceTypes.ts',
-      'export const SOURCE_TYPES = ["webhook", "email"] as const;',
-    );
+    writeAndCommit('shared/utils/sourceTypes.ts', SOURCE_TYPES_DECLARATION);
     writeAndCommit('shared/utils/webhookSecrets.ts', WEBHOOK_SECRETS_SOURCE);
 
     expect(() => resolveFilesToSync(checkoutDir)).toThrow(
