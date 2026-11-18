@@ -127,7 +127,9 @@ describe('release workflow', () => {
 
   it('does not install dependencies or rebuild in the publish job', () => {
     const publish = jobBodies().publish;
-    expect(publish).not.toMatch(/npm (?:ci|install|run build|pack)/);
+    expect(publish).not.toMatch(
+      /\b(?:npm (?:ci|i|install\S*|run|pack|exec|rebuild)|npx|pnpm|yarn)\b/,
+    );
   });
 
   it('uploads the smoke-tested tarball from the verify job', () => {
@@ -139,6 +141,16 @@ describe('release workflow', () => {
     expect(verify).toMatch(/name: release-tarball\n/);
     expect(verify).toMatch(/path: \$\{\{ runner\.temp \}\}\/pack\/\*\.tgz/);
     expect(verify).toMatch(/if-no-files-found: error/);
+  });
+
+  it('uploads from the directory the smoke-test script packs into', () => {
+    const script = readFileSync(
+      `${REPO_ROOT}scripts/smoke-test-pack.sh`,
+      'utf-8',
+    );
+    expect(script).toContain('pack_dir="$temp_dir/pack"');
+    expect(script).toContain('temp_dir="${RUNNER_TEMP:-');
+    expect(script).not.toMatch(/rm -rf[^\n]*pack/);
   });
 
   it('publishes the downloaded tarball file, not the working tree', () => {
