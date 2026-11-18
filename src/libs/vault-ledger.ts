@@ -49,6 +49,10 @@ export const recordLedgerEntries = (newEntries: {
 export const removeLedgerEntries = (uuids: string[]): void => {
   const remaining = { ...getLedgerEntries() };
 
+  if (!uuids.some((uuid) => Object.hasOwn(remaining, uuid))) {
+    return;
+  }
+
   uuids.forEach((uuid) => {
     delete remaining[uuid];
   });

@@ -48,10 +48,20 @@ const buildDeletionsQuery = (since?: string, after?: string): string => {
   return params.toString();
 };
 
+// A row without a usable uuid cannot be matched to a file, and dropping it
+// would let the feed look complete, so it fails the whole read instead.
 const readTombstones = (page: RecordDeletionList): RecordDeletion[] => {
-  return (page.data ?? [])
-    .map((resource) => resource?.attributes)
-    .filter((attributes) => typeof attributes?.recordUuid === 'string');
+  return (page.data ?? []).map((resource) => {
+    const attributes = resource?.attributes;
+
+    if (typeof attributes?.recordUuid !== 'string') {
+      throw new Error(
+        'The deletions feed returned an entry without a recordUuid; refusing to treat the feed as complete.',
+      );
+    }
+
+    return attributes;
+  });
 };
 
 // The server pages by the last `recordUuid` returned. A page that claims more
@@ -183,20 +193,48 @@ export const planPrune = (
 
 // `unsafe` entries stay in the ledger so they keep showing up for a human;
 // everything else is settled (removed, already gone, or user-owned now).
+const isMissingFileError = (error: unknown): boolean =>
+  (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+
+const removeFile = (vault: string, path: string): void => {
+  try {
+    unlinkSync(resolveWithinVault(vault, path));
+  } catch (error) {
+    // Vanished between planning and applying: the goal is met.
+    if (!isMissingFileError(error)) {
+      throw error;
+    }
+  }
+};
+
+// Entries are settled one by one and the ledger is updated even when a later
+// file fails, so a partial run never leaves removed files tracked. Failures
+// are reported together after everything else was attempted.
 export const applyPrune = (plan: PrunePlan, vault: string): void => {
   const settled: string[] = [];
+  const failures: string[] = [];
 
   for (const item of plan.items) {
     if (item.outcome === 'unsafe') {
       continue;
     }
 
-    if (item.outcome === 'remove') {
-      unlinkSync(resolveWithinVault(vault, item.path));
-    }
+    try {
+      if (item.outcome === 'remove') {
+        removeFile(vault, item.path);
+      }
 
-    settled.push(item.uuid);
+      settled.push(item.uuid);
+    } catch (error) {
+      failures.push(`${item.path} (${(error as Error).message})`);
+    }
   }
 
   removeLedgerEntries(settled);
+
+  if (failures.length > 0) {
+    throw new Error(
+      `Removed ${settled.length} file(s) but could not remove: ${failures.join('; ')}`,
+    );
+  }
 };

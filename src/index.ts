@@ -66,7 +66,11 @@ import chalk from 'chalk';
 import { checkConfig } from '#src/libs/config.js';
 import { AUTH_FAILURE_NOTICE, hasSeenAuthFailure } from '#src/libs/alpha.js';
 import { warnMessage, messageFromError } from '#src/libs/errors.js';
-import { LedgerEntry, recordLedgerEntries } from '#src/libs/vault-ledger.js';
+import {
+  LedgerEntry,
+  recordLedgerEntries,
+  removeLedgerEntries,
+} from '#src/libs/vault-ledger.js';
 import { hasJsonFlag } from '#src/libs/output.js';
 import { sanitizeForTerminal } from '#src/libs/terminal.js';
 import { runSyncWithAutoSchedule } from '#src/libs/scheduler.js';
@@ -746,12 +750,14 @@ function rememberSettledFiles(
   for (const { record } of settled) {
     const state = writtenState.get(record.uuid);
 
-    if (state) {
-      entries[record.uuid] = {
-        path: toVaultRelativePath(state.path),
-        contentHash: state.contentHash,
-      };
+    if (!state) {
+      continue;
     }
+
+    entries[record.uuid] = {
+      path: toVaultRelativePath(state.path),
+      contentHash: state.contentHash,
+    };
   }
 
   if (Object.keys(entries).length === 0) {
@@ -763,6 +769,21 @@ function rememberSettledFiles(
   } catch (error) {
     warnMessage(
       `Could not record written files for \`records deletions\`: ${messageFromError(error)}`,
+    );
+  }
+}
+
+// A record the CLI is deleting (autoDelete) leaves a server tombstone, so it
+// must not stay in the ledger from an earlier autoDelete-off sync: a later
+// `records deletions --apply` would otherwise prune a file the user chose to
+// keep. Done before the outcome is known, since a delete that is reported as
+// failed may still have gone through.
+function forgetDeletedRecordsInLedger(records: WrittenRecord[]): void {
+  try {
+    removeLedgerEntries(records.map(({ record }) => record.uuid));
+  } catch (error) {
+    warnMessage(
+      `Could not update the written-files ledger: ${messageFromError(error)}`,
     );
   }
 }
@@ -785,6 +806,8 @@ function reportDeleteOutcome(
   writtenState: Map<string, WrittenRecordState>,
 ): void {
   const requested = settleableRecords.length;
+
+  forgetDeletedRecordsInLedger(settleableRecords);
 
   if (deleteMeta.deleted === requested) {
     forgetSettledRecords(

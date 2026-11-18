@@ -123,6 +123,19 @@ describe('fetchDeletionFeed', () => {
     );
   });
 
+  it('throws on an entry with no recordUuid instead of dropping it', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        data: [{ type: 'recordTombstones', id: 'x', attributes: {} }],
+        meta: { size: 100, hasMore: false, complete: true },
+      }),
+    );
+
+    await expect(fetchDeletionFeed('2026-11-10T00:00:00Z')).rejects.toThrow(
+      /without a recordUuid/,
+    );
+  });
+
   it('throws when a later page fails', async () => {
     fetchMock
       .mockResolvedValueOnce(page([UUID_A], true, true))
@@ -271,6 +284,34 @@ describe('planPrune / applyPrune', () => {
 
     expect(plan.items[0].outcome).toBe('unsafe');
     expect(existsSync(join(outside, 'target.md'))).toBe(true);
+  });
+
+  it('clears ledger entries for files already removed when a later removal fails', () => {
+    writeNote('a.md', 'alpha');
+    mkdirSync(join(vault, 'b.md'));
+    const entries = {
+      [UUID_A]: entryFor('a.md', 'alpha'),
+      [UUID_B]: entryFor('b.md', 'beta'),
+    };
+    const plan = planPrune(tombstones(UUID_A, UUID_B), vault, entries);
+    plan.items[1].outcome = 'remove';
+
+    expect(() => applyPrune(plan, vault)).toThrow(/could not remove: b\.md/);
+    expect(existsSync(join(vault, 'a.md'))).toBe(false);
+    expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A]);
+  });
+
+  it('treats a file that vanished before apply as already removed', () => {
+    const plan = {
+      items: [
+        { uuid: UUID_A, path: 'vanished.md', outcome: 'remove' as const },
+      ],
+      untrackedCount: 0,
+    };
+
+    applyPrune(plan, vault);
+
+    expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A]);
   });
 
   it('does not treat prototype keys as ledger entries', () => {

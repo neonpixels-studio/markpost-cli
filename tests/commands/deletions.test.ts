@@ -94,6 +94,35 @@ describe('records deletions', () => {
     );
   });
 
+  it('does not move the baseline when --since skips past the stored one', async () => {
+    const { setLastDeletionSync, getLastDeletionSync } =
+      await import('#src/libs/vault-ledger.js');
+    vi.mocked(getLastDeletionSync).mockReturnValue('2026-11-08T00:00:00.000Z');
+
+    await run('--apply', '--since', '2026-11-17T00:00:00Z');
+
+    expect(setLastDeletionSync).not.toHaveBeenCalled();
+  });
+
+  it('still advances the baseline when --since is earlier than the stored one', async () => {
+    const { setLastDeletionSync, getLastDeletionSync } =
+      await import('#src/libs/vault-ledger.js');
+    vi.mocked(getLastDeletionSync).mockReturnValue('2026-11-08T00:00:00.000Z');
+
+    await run('--apply', '--since', '2026-11-01T00:00:00Z');
+
+    expect(setLastDeletionSync).toHaveBeenCalledWith(ONE_MINUTE_BEFORE_NOW);
+  });
+
+  it('rejects an impossible --since date and extra arguments', async () => {
+    const { fetchDeletionFeed } = await import('#src/libs/deletions.js');
+
+    await run('--since', '2026-13-45T99:99:00Z');
+    await run('stray');
+
+    expect(fetchDeletionFeed).not.toHaveBeenCalled();
+  });
+
   it('reads deletions since the last applied sync', async () => {
     const { fetchDeletionFeed } = await import('#src/libs/deletions.js');
     const { getLastDeletionSync } = await import('#src/libs/vault-ledger.js');
@@ -153,6 +182,19 @@ describe('records deletions', () => {
     await run('--since', 'yesterday');
 
     expect(fetchDeletionFeed).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not advance the baseline when applying the prune fails', async () => {
+    const { applyPrune } = await import('#src/libs/deletions.js');
+    const { setLastDeletionSync } = await import('#src/libs/vault-ledger.js');
+    vi.mocked(applyPrune).mockImplementation(() => {
+      throw new Error('Removed 0 file(s) but could not remove: a.md');
+    });
+
+    await run('--apply');
+
+    expect(setLastDeletionSync).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 

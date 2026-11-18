@@ -58,7 +58,10 @@ const parseDeletionsArgs = (args: string[]): DeletionsArgs => {
 
   const { since } = values;
 
-  if (since !== undefined && !ISO_TIMESTAMP_PATTERN.test(since)) {
+  if (
+    since !== undefined &&
+    (!ISO_TIMESTAMP_PATTERN.test(since) || Number.isNaN(Date.parse(since)))
+  ) {
     throw new Error(
       '--since must be an ISO 8601 timestamp with a timezone, e.g. 2026-11-01T00:00:00Z.',
     );
@@ -134,23 +137,43 @@ const printJsonReport = (
   });
 };
 
+// Only a fully paged feed gets here (fetchDeletionFeed throws otherwise), but
+// an explicit --since later than the stored baseline skipped the deletions in
+// between, so moving the baseline to "now" would orphan those files for good.
+const advanceBaseline = (
+  explicitSince: string | undefined,
+  storedSince: string | undefined,
+  startedAt: number,
+): void => {
+  const skippedGap =
+    explicitSince !== undefined &&
+    storedSince !== undefined &&
+    Date.parse(explicitSince) > Date.parse(storedSince);
+
+  if (skippedGap) {
+    warnMessage(
+      `--since is later than the last recorded sync (${storedSince}), so that starting point was kept.`,
+    );
+    return;
+  }
+
+  setLastDeletionSync(new Date(startedAt - BASELINE_OVERLAP_MS).toISOString());
+};
+
 const runDeletions = async (
   { apply, since: explicitSince }: DeletionsArgs,
   json: boolean,
 ): Promise<void> => {
   const startedAt = Date.now();
-  const since = explicitSince ?? getLastDeletionSync();
+  const storedSince = getLastDeletionSync();
+  const since = explicitSince ?? storedSince;
   const feed = await fetchDeletionFeed(since);
   const vault = ensureOutputDirectory();
   const plan = planPrune(feed.tombstones, vault);
 
   if (apply) {
     applyPrune(plan, vault);
-    // Only a fully paged feed gets here (fetchDeletionFeed throws otherwise),
-    // so the baseline never advances past tombstones that were not read.
-    setLastDeletionSync(
-      new Date(startedAt - BASELINE_OVERLAP_MS).toISOString(),
-    );
+    advanceBaseline(explicitSince, storedSince, startedAt);
   }
 
   if (json) {
