@@ -38,18 +38,25 @@ import {
   printJsonError,
 } from '#src/libs/output.js';
 import { Record } from '#src/types/records.types.js';
+import {
+  DELETIONS_USAGE,
+  runDeletionsCommand,
+} from '#src/commands/deletions.js';
 
 const LIST_SUBCOMMAND = 'list';
 const UPDATE_SUBCOMMAND = 'update';
 const DELETE_SUBCOMMAND = 'delete';
+const DELETIONS_SUBCOMMAND = 'deletions';
 
-export const USAGE = `Usage: markpost records <list|update|delete> [options]
+export const USAGE = `Usage: markpost records <list|update|delete|deletions> [options]
 
   list              List records, optionally filtered by source, status, tag, or search text
   update <uuid>     Edit an existing record's title and/or content — requeues it to
                     pending (for resync) if the record was already synced
   delete <uuid...>  Delete one or more records from the server. Asks to confirm
                     first (this cannot be undone); pass --yes to skip the prompt
+  deletions         Find records deleted on the server and (with --apply) remove
+                    the vault files this CLI wrote for them. Dry run by default
 
 List options:
   --source <type>    Filter by source type (markpost reports the valid types if the value is rejected)
@@ -72,7 +79,9 @@ blank — pass a non-empty value):
 Delete options:
   --yes             Skip the confirmation prompt (required when not running in a
                     terminal, and with --json)
-  --json            Print the deleted count as JSON instead of formatted text`;
+  --json            Print the deleted count as JSON instead of formatted text
+
+${DELETIONS_USAGE}`;
 
 export const runRecordsCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
@@ -87,6 +96,11 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
 
   if (subcommand === DELETE_SUBCOMMAND) {
     await runDeleteCommand(args, json);
+    return;
+  }
+
+  if (subcommand === DELETIONS_SUBCOMMAND) {
+    await runDeletionsCommand(args, json, USAGE);
     return;
   }
 

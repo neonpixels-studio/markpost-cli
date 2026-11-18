@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
 
+import { DELETIONS_QUERY_KEYS } from '#src/libs/deletions.js';
 import {
   assertContractIsTypeOnly,
   // @ts-expect-error -- plain .mjs, not part of the typed src/ tree.
@@ -34,6 +35,7 @@ const EXPECTED_VENDORED_EXPORTS = [
   'ApiError',
   'ApiResourceObject',
   'ApiResponse',
+  'RecordDeletionListQuery',
 ];
 
 // Covers both `export type Foo = ...` and `export interface Foo { ... }` —
@@ -135,6 +137,36 @@ describe('markpost contract drift', () => {
 
     expect(actualExports).toEqual(
       expect.arrayContaining(EXPECTED_VENDORED_EXPORTS),
+    );
+  });
+
+  // The deletions feed's query params are sent as string literals; the type
+  // `satisfies` check in src/libs/deletions.ts catches a removed param at
+  // compile time, and this catches the reverse: a param markpost added that the
+  // CLI does not know about (e.g. a new filter that changes what is complete).
+  it('the CLI sends exactly the deletions query params the contract defines', () => {
+    const vendorSource = readFileSync(VENDOR_CONTRACT_PATH, 'utf-8');
+    const sourceFile = ts.createSourceFile(
+      'markpost-api.types.ts',
+      vendorSource,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const queryAlias = sourceFile.statements.find(
+      (node): node is ts.TypeAliasDeclaration =>
+        ts.isTypeAliasDeclaration(node) &&
+        node.name.text === 'RecordDeletionListQuery',
+    );
+
+    expect(queryAlias).toBeDefined();
+    const contractParams = ts.isTypeLiteralNode(queryAlias!.type)
+      ? queryAlias!.type.members.map(
+          (member) => (member.name as ts.StringLiteral).text,
+        )
+      : [];
+
+    expect(Object.values(DELETIONS_QUERY_KEYS).sort()).toEqual(
+      contractParams.sort(),
     );
   });
 
