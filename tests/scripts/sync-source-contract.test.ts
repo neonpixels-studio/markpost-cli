@@ -173,6 +173,12 @@ describe('assertRequiredExportsPresent', () => {
 // against a real checkout, rather than the vendor-directory-writing side of
 // syncFrom — resolveFilesToSync itself never touches disk, so this doesn't
 // risk mutating the real tests/types/vendor/ during a test run.
+const WEBHOOK_SECRETS_SOURCE = [
+  'export const MANUAL_SECRET_PROVIDER_IDS = ["stripe"] as const;',
+  'export const SECRET_BACKED_PROVIDER_IDS = ["github"] as const;',
+  'export const ROTATABLE_PROVIDER_IDS = ["stripe", "github"] as const;',
+].join('\n');
+
 describe('resolveFilesToSync', () => {
   let checkoutDir: string;
 
@@ -211,7 +217,10 @@ describe('resolveFilesToSync', () => {
   it('resolves both files when both are valid', () => {
     writeAndCommit(
       'shared/utils/sourceTypes.ts',
-      'export const SOURCE_TYPES = ["webhook", "email"] as const;',
+      [
+        'export const SOURCE_TYPES = ["webhook", "email"] as const;',
+        'export const isSourceEndpointRotatable = (t: string) => t !== "email";',
+      ].join('\n'),
     );
     writeAndCommit(
       'shared/utils/webhookSecrets.ts',
@@ -236,7 +245,10 @@ describe('resolveFilesToSync', () => {
   it('throws on the second file without returning any partial result', () => {
     writeAndCommit(
       'shared/utils/sourceTypes.ts',
-      'export const SOURCE_TYPES = ["webhook", "email"] as const;',
+      [
+        'export const SOURCE_TYPES = ["webhook", "email"] as const;',
+        'export const isSourceEndpointRotatable = (t: string) => t !== "email";',
+      ].join('\n'),
     );
     // Gains an import, which assertFileHasNoImports rejects — this is the
     // "markpost changes the second file" failure mode the atomicity
@@ -257,5 +269,17 @@ describe('resolveFilesToSync', () => {
       resolvedFiles = resolveFilesToSync(checkoutDir);
     }).toThrow(/now has an import/);
     expect(resolvedFiles).toBeUndefined();
+  });
+
+  it('throws when markpost drops isSourceEndpointRotatable', () => {
+    writeAndCommit(
+      'shared/utils/sourceTypes.ts',
+      'export const SOURCE_TYPES = ["webhook", "email"] as const;',
+    );
+    writeAndCommit('shared/utils/webhookSecrets.ts', WEBHOOK_SECRETS_SOURCE);
+
+    expect(() => resolveFilesToSync(checkoutDir)).toThrow(
+      /no longer exports: isSourceEndpointRotatable/,
+    );
   });
 });

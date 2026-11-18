@@ -59,7 +59,7 @@ const VENDORED_FILES = [
     sourceRelativePath: 'shared/utils/sourceTypes.ts',
     vendorFileName: 'markpost-source-types.generated.ts',
     description: "markpost's canonical source-type list",
-    requiredExports: ['SOURCE_TYPES'],
+    requiredExports: ['SOURCE_TYPES', 'isSourceEndpointRotatable'],
   },
   {
     sourceRelativePath: 'shared/utils/webhookSecrets.ts',
