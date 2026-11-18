@@ -120,6 +120,23 @@ const isTimeoutAbort = (error: unknown): boolean => {
 
 export type ApiFetchResult = { response: Response; body: unknown };
 
+// A gateway/CDN in front of the API (502/503/504) answers with an HTML page,
+// which makes `response.json()` throw a SyntaxError. For a non-OK response
+// that must not escape: return `undefined` so `assertApiSuccess` classifies
+// it by status and the retry loop still sees it. An OK response with an
+// unparseable body is genuinely off-contract, so it keeps throwing.
+const readBody = async (response: Response): Promise<unknown> => {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (!response.ok && error instanceof SyntaxError) {
+      return undefined;
+    }
+
+    throw error;
+  }
+};
+
 // Single seam wrapping `fetch` (and the JSON read) with a request timeout so
 // a stalled connection fails loud as `ApiTimeoutError` instead of hanging
 // forever. Owns only the timeout + transport concern: callers still attach
@@ -135,7 +152,7 @@ export const apiFetch = async (
       ...init,
       signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS),
     });
-    const body = await response.json();
+    const body = await readBody(response);
 
     return { response, body };
   } catch (error) {
@@ -360,9 +377,17 @@ const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   429: 'Rate limited — too many requests in a short window; retry shortly',
 };
 
-const resolveErrorMessage = (errors: ApiError[], status: number): string => {
+const resolveErrorMessage = (
+  errors: ApiError[],
+  status: number,
+  body: unknown,
+): string => {
   if (errors.length > 0) {
     return formatErrorMessages(errors);
+  }
+
+  if (body === undefined && !STATUS_FALLBACK_MESSAGES[status]) {
+    return `The server returned a non-JSON error response (HTTP ${status})`;
   }
 
   return STATUS_FALLBACK_MESSAGES[status] ?? formatErrorMessages(errors);
@@ -404,7 +429,7 @@ export const assertApiSuccess = (response: Response, body: unknown): void => {
   }
 
   throw new ApiRequestError(
-    resolveErrorMessage(errors, response.status),
+    resolveErrorMessage(errors, response.status, body),
     response.status,
   );
 };
