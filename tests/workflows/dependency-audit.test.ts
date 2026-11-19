@@ -1,16 +1,19 @@
 // The dependency-audit job must go through the allowlist-aware script, and
 // every allowlisted advisory must stay pinned to one install path.
-import { readFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const SCRIPT_URL = new URL('../../.github/scripts/audit.sh', import.meta.url);
 const WORKFLOW_URL = new URL(
   '../../.github/workflows/security.yml',
   import.meta.url,
 );
 const ENTRY_PATTERN = /^\s+"(GHSA-[\w-]+@node_modules\/[^"]+)"/gm;
-const EXECUTABLE_BITS = 0o111;
+const REPO_ROOT_URL = new URL('../../', import.meta.url);
+const SCRIPT_PATH = '.github/scripts/audit.sh';
+const SCRIPT_URL = new URL(SCRIPT_PATH, REPO_ROOT_URL);
+const GIT_EXECUTABLE_MODE = '100755';
 
 describe('dependency-audit gate', () => {
   it('runs the allowlist-aware script in the workflow', () => {
@@ -21,9 +24,17 @@ describe('dependency-audit gate', () => {
   });
 
   it('keeps the script executable', () => {
-    const mode = statSync(fileURLToPath(SCRIPT_URL)).mode;
+    // The git index mode is platform independent; Windows checkouts have no fs exec bit.
+    const indexEntry = execFileSync(
+      'git',
+      ['ls-files', '-s', '--error-unmatch', SCRIPT_PATH],
+      {
+        cwd: fileURLToPath(REPO_ROOT_URL),
+        encoding: 'utf8',
+      },
+    );
 
-    expect(mode & EXECUTABLE_BITS).not.toBe(0);
+    expect(indexEntry.split(' ')[0]).toBe(GIT_EXECUTABLE_MODE);
   });
 
   it('only allowlists picomatch GHSA-fc5q at its single install path', () => {
