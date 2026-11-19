@@ -5,6 +5,7 @@ import {
   buildRecordDocument,
   extractFrontmatterTags,
   extractFrontmatterTagsWithDiagnostics,
+  parseNoteText,
   serializeFrontmatter,
   stripFrontmatterDocument,
 } from '#src/libs/frontmatter.js';
@@ -754,5 +755,42 @@ describe('extractFrontmatterTagsWithDiagnostics', () => {
       tags: ['ci'],
       tagsLineUnparseable: false,
     });
+  });
+});
+
+describe('parseNoteText', () => {
+  const document = assembleMarkdownDocument({
+    frontmatter: { ...frontmatter, tags: ['ci', 'deploy'] },
+    title: frontmatter.title,
+    body: 'Shipped.',
+  });
+
+  it('strips the BOM, extracts tags, and strips the frontmatter block', () => {
+    const result = parseNoteText(`\uFEFF${document}`);
+
+    expect(result.rawContent).toBe(document);
+    expect(result.tags).toEqual(['ci', 'deploy']);
+    expect(result.content).toBe('Shipped.');
+    expect(result.tagsLineUnparseable).toBe(false);
+  });
+
+  it('returns plain text untouched with no tags', () => {
+    expect(parseNoteText('Just a note')).toEqual({
+      rawContent: 'Just a note',
+      content: 'Just a note',
+      tags: [],
+      tagsLineUnparseable: false,
+    });
+  });
+
+  it('removes only a leading BOM', () => {
+    expect(parseNoteText('a\uFEFFb').rawContent).toBe('a\uFEFFb');
+  });
+
+  it('flags a tags line that is present but unparseable', () => {
+    const broken = document.replace('tags: [ci, deploy]', 'tags: [unclosed');
+
+    expect(broken).not.toBe(document);
+    expect(parseNoteText(broken).tagsLineUnparseable).toBe(true);
   });
 });

@@ -1,7 +1,4 @@
-import {
-  extractFrontmatterTagsWithDiagnostics,
-  stripFrontmatterDocument,
-} from '#src/libs/frontmatter.js';
+import { parseNoteText } from '#src/libs/frontmatter.js';
 
 // The `markpost push` argument that means "read the note from stdin", the
 // standard CLI convention (`pbpaste | markpost push -`).
@@ -12,7 +9,6 @@ export const STDIN_ARGUMENT = '-';
 export const STDIN_LABEL = '<stdin>';
 
 const TITLE_HEADING_PATTERN = /^ {0,3}#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
-const BYTE_ORDER_MARK_PATTERN = /^\uFEFF/;
 const FRONTMATTER_FENCE = '---';
 const CODE_FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
@@ -133,18 +129,16 @@ export const parseStdinNote = (
   input: string,
   now: Date = new Date(),
 ): ParsedNote => {
-  const rawContent = input.replace(BYTE_ORDER_MARK_PATTERN, '');
+  const { rawContent, content, tags, tagsLineUnparseable } =
+    parseNoteText(input);
 
   if (rawContent.trim().length === 0) {
     throw new StdinInputError(EMPTY_ERROR);
   }
 
-  const { tags, tagsLineUnparseable } =
-    extractFrontmatterTagsWithDiagnostics(rawContent);
-
   return {
     title: deriveStdinTitle(rawContent, now),
-    content: stripFrontmatterDocument(rawContent),
+    content,
     tags,
     tagsLineUnparseable,
   };

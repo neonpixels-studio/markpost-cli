@@ -408,6 +408,34 @@ export const extractFrontmatterTagsWithDiagnostics = (
   return { tags, tagsLineUnparseable: unparseable };
 };
 
+const BYTE_ORDER_MARK_PATTERN = /^\uFEFF/;
+
+export interface ParsedNoteText {
+  // The note text with any UTF-8 BOM removed, before frontmatter stripping.
+  // Callers that derive a title from the text need this form.
+  rawContent: string;
+  content: string;
+  tags: string[];
+  tagsLineUnparseable: boolean;
+}
+
+// The text-level steps every push source shares (a file via readMarkdown,
+// piped input via parseStdinNote): strip a BOM, extract the frontmatter tags,
+// and strip the frontmatter block and mirrored heading. Callers differ only in
+// how they derive the title.
+export const parseNoteText = (text: string): ParsedNoteText => {
+  const rawContent = text.replace(BYTE_ORDER_MARK_PATTERN, '');
+  const { tags, tagsLineUnparseable } =
+    extractFrontmatterTagsWithDiagnostics(rawContent);
+
+  return {
+    rawContent,
+    content: stripFrontmatterDocument(rawContent),
+    tags,
+    tagsLineUnparseable,
+  };
+};
+
 const isPlainObject = (value: unknown): value is { [key: string]: unknown } => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
