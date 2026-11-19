@@ -215,10 +215,16 @@ describe('assertApiSuccess', () => {
     );
   });
 
-  it('throws "Unknown error occurred" when the response fails with no error body', () => {
+  it('throws "Unknown error occurred" when the response fails with an empty JSON body', () => {
     expect(() =>
-      assertApiSuccess({ ok: false } as Response, undefined),
+      assertApiSuccess({ ok: false, status: 400 } as Response, {}),
     ).toThrow('Unknown error occurred');
+  });
+
+  it('names the status when the response fails with no parsed body', () => {
+    expect(() =>
+      assertApiSuccess({ ok: false, status: 400 } as Response, undefined),
+    ).toThrow('The server returned a non-JSON error response (HTTP 400)');
   });
 
   it('throws when the response is ok but the body still carries errors', () => {
@@ -998,6 +1004,13 @@ describe('authedRequest retry', () => {
     headers: new Headers(),
     json: () => Promise.resolve({ data: 'ok' }),
   };
+  const htmlFailure = (status: number) => ({
+    ok: false,
+    status,
+    headers: new Headers(),
+    json: () =>
+      Promise.reject(new SyntaxError('Unexpected token \'<\', "<html>"...')),
+  });
   const sleep = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
@@ -1023,6 +1036,88 @@ describe('authedRequest retry', () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledExactlyOnceWith(3000);
+  });
+
+  it.each([502, 503, 504])(
+    'retries a GET on an HTML %i gateway body, then succeeds',
+    async (status) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(htmlFailure(status))
+        .mockResolvedValueOnce(success);
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        authedRequest('/api/records', {}, { sleep }),
+      ).resolves.toEqual({ data: 'ok' });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(sleep).toHaveBeenCalledExactlyOnceWith(BASE_RETRY_BACKOFF_MS);
+    },
+  );
+
+  it('surfaces a clear error for a non-retryable non-JSON status without retrying', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(htmlFailure(400));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(authedRequest('/api/records', {}, { sleep })).rejects.toThrow(
+      'The server returned a non-JSON error response (HTTP 400)',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('does not retry a POST that hits an HTML 502', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(htmlFailure(502));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      authedRequest('/api/records', { method: 'POST' }, { sleep }),
+    ).rejects.toMatchObject({ statusCode: 502 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('gives up after the maximum attempts on a persistent HTML 503', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(htmlFailure(503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      authedRequest('/api/records', {}, { sleep }),
+    ).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      statusCode: 503,
+      message: 'The server returned a non-JSON error response (HTTP 503)',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS);
+    expect(sleep).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS - 1);
+  });
+
+  it('still reports a timeout that fires while reading a non-OK body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ...htmlFailure(503),
+      json: () => Promise.reject(new DOMException('timed out', 'TimeoutError')),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      authedRequest('/api/records', {}, { sleep }),
+    ).rejects.toBeInstanceOf(ApiTimeoutError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('still throws a SyntaxError for an OK response with an unparseable body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ...success,
+        json: () => Promise.reject(new SyntaxError('bad json')),
+      }),
+    );
+
+    await expect(authedRequest('/api/records', {}, { sleep })).rejects.toThrow(
+      SyntaxError,
+    );
   });
 
   it('retries a GET on 503 and on a plain 500 with exponential backoff', async () => {
