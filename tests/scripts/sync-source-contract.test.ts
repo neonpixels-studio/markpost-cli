@@ -168,6 +168,22 @@ describe('assertRequiredExportsPresent', () => {
   });
 });
 
+const SOURCE_TYPES_DECLARATION =
+  'export const SOURCE_TYPES = ["webhook", "email"] as const;';
+
+const SOURCE_TYPES_SOURCE = [
+  SOURCE_TYPES_DECLARATION,
+  'export function isSourceEndpointRotatable(sourceType: string): boolean {',
+  '  return sourceType !== "email";',
+  '}',
+].join('\n');
+
+const WEBHOOK_SECRETS_SOURCE = [
+  'export const MANUAL_SECRET_PROVIDER_IDS = ["stripe"] as const;',
+  'export const SECRET_BACKED_PROVIDER_IDS = ["github"] as const;',
+  'export const ROTATABLE_PROVIDER_IDS = ["stripe", "github"] as const;',
+].join('\n');
+
 // Exercises the "validate everything before writing anything" guarantee
 // resolveFilesToSync exists for (see its comment in sync-source-contract.mjs)
 // against a real checkout, rather than the vendor-directory-writing side of
@@ -209,18 +225,8 @@ describe('resolveFilesToSync', () => {
   });
 
   it('resolves both files when both are valid', () => {
-    writeAndCommit(
-      'shared/utils/sourceTypes.ts',
-      'export const SOURCE_TYPES = ["webhook", "email"] as const;',
-    );
-    writeAndCommit(
-      'shared/utils/webhookSecrets.ts',
-      [
-        'export const MANUAL_SECRET_PROVIDER_IDS = ["stripe"] as const;',
-        'export const SECRET_BACKED_PROVIDER_IDS = ["github"] as const;',
-        'export const ROTATABLE_PROVIDER_IDS = ["stripe", "github"] as const;',
-      ].join('\n'),
-    );
+    writeAndCommit('shared/utils/sourceTypes.ts', SOURCE_TYPES_SOURCE);
+    writeAndCommit('shared/utils/webhookSecrets.ts', WEBHOOK_SECRETS_SOURCE);
 
     const resolvedFiles = resolveFilesToSync(checkoutDir);
 
@@ -234,21 +240,13 @@ describe('resolveFilesToSync', () => {
   });
 
   it('throws on the second file without returning any partial result', () => {
-    writeAndCommit(
-      'shared/utils/sourceTypes.ts',
-      'export const SOURCE_TYPES = ["webhook", "email"] as const;',
-    );
+    writeAndCommit('shared/utils/sourceTypes.ts', SOURCE_TYPES_SOURCE);
     // Gains an import, which assertFileHasNoImports rejects — this is the
     // "markpost changes the second file" failure mode the atomicity
     // guarantee protects against.
     writeAndCommit(
       'shared/utils/webhookSecrets.ts',
-      [
-        'import { z } from "zod";',
-        'export const MANUAL_SECRET_PROVIDER_IDS = ["stripe"] as const;',
-        'export const SECRET_BACKED_PROVIDER_IDS = ["github"] as const;',
-        'export const ROTATABLE_PROVIDER_IDS = ["stripe", "github"] as const;',
-      ].join('\n'),
+      ['import { z } from "zod";', WEBHOOK_SECRETS_SOURCE].join('\n'),
     );
 
     let resolvedFiles;
@@ -257,5 +255,14 @@ describe('resolveFilesToSync', () => {
       resolvedFiles = resolveFilesToSync(checkoutDir);
     }).toThrow(/now has an import/);
     expect(resolvedFiles).toBeUndefined();
+  });
+
+  it('throws when markpost drops isSourceEndpointRotatable', () => {
+    writeAndCommit('shared/utils/sourceTypes.ts', SOURCE_TYPES_DECLARATION);
+    writeAndCommit('shared/utils/webhookSecrets.ts', WEBHOOK_SECRETS_SOURCE);
+
+    expect(() => resolveFilesToSync(checkoutDir)).toThrow(
+      /no longer exports: isSourceEndpointRotatable/,
+    );
   });
 });

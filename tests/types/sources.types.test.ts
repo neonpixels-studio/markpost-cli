@@ -10,7 +10,10 @@ import {
   SOURCE_TYPES,
 } from '#src/types/sources.types.js';
 
-import { SOURCE_TYPES as MARKPOST_SOURCE_TYPES } from './vendor/markpost-source-types.generated.js';
+import {
+  isSourceEndpointRotatable as markpostIsSourceEndpointRotatable,
+  SOURCE_TYPES as MARKPOST_SOURCE_TYPES,
+} from './vendor/markpost-source-types.generated.js';
 import {
   MANUAL_SECRET_PROVIDER_IDS as MARKPOST_MANUAL_SECRET_PROVIDER_IDS,
   ROTATABLE_PROVIDER_IDS as MARKPOST_ROTATABLE_PROVIDER_IDS,
@@ -76,7 +79,18 @@ describe('rotatable provider sets', () => {
 });
 
 describe('isSourceEndpointRotatable', () => {
-  it('rejects only email, mirroring markpost', () => {
+  // Compares against the vendored markpost function for every type, so a new
+  // non-rotatable type on the server fails here instead of passing silently.
+  it.each(MARKPOST_SOURCE_TYPES)(
+    'agrees with markpost for %s',
+    (sourceType) => {
+      expect(isSourceEndpointRotatable(sourceType)).toBe(
+        markpostIsSourceEndpointRotatable(sourceType),
+      );
+    },
+  );
+
+  it('rejects email', () => {
     expect(isSourceEndpointRotatable('email')).toBe(false);
   });
 
