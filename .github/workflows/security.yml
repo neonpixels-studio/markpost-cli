@@ -51,4 +51,4 @@ jobs:
       - name: Print full advisory summary (non-blocking)
         run: npm audit || true
       - name: Fail on high or critical advisories
-        run: npm audit --audit-level=high
+        run: .github/scripts/audit.sh
