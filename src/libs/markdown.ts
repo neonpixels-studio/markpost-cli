@@ -102,7 +102,7 @@ export type WrittenRecordState = {
 // Hash of the exact bytes writeMarkdown put on disk, used only to compare one
 // piece of the CLI's own output against another (baseline vs. re-render, or
 // baseline vs. on-disk). Not a security check.
-const hashContent = (content: string): string => {
+export const hashContent = (content: string): string => {
   return createHash(CONTENT_HASH_ALGORITHM).update(content).digest('hex');
 };
 

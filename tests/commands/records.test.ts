@@ -4,6 +4,7 @@ import { ERROR_STATUS } from '#src/libs/records.js';
 import { Record } from '#src/types/records.types.js';
 
 vi.mock('#src/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('#src/libs/vault-ledger.js', () => ({ removeLedgerEntries: vi.fn() }));
 vi.mock('#src/libs/records.js', async () => {
   // Pulls the real ERROR_STATUS through (via importActual, not a full-module
   // spread) rather than restating the literal, so these tests stay pinned to

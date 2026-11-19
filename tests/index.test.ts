@@ -36,6 +36,12 @@ vi.mock('#src/libs/markdown.js', () => ({
   toVaultRelativePath: vi.fn((path: string) => path),
 }));
 vi.mock('#src/libs/settings.js', () => ({ fetchSettings: vi.fn() }));
+// The ledger is a conf-backed store under the developer's real config
+// directory; stub its writer so sync tests never touch it.
+vi.mock('#src/libs/vault-ledger.js', () => ({
+  recordLedgerEntries: vi.fn(),
+  removeLedgerEntries: vi.fn(),
+}));
 // Run the sync once synchronously instead of arming a real timer: the
 // scheduling decision itself is covered in tests/libs/scheduler.test.ts.
 vi.mock('#src/libs/scheduler.js', () => ({
@@ -3216,6 +3222,114 @@ describe('index', () => {
       });
       return filePath;
     };
+
+  it('records mark-synced files in the vault ledger for `records deletions`', async () => {
+    const { fetchAllRecords, markRecordsSynced } =
+      await import('#src/libs/records.js');
+    const { writeMarkdown } = await import('#src/libs/markdown.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
+    const { recordLedgerEntries } = await import('#src/libs/vault-ledger.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
+
+    await import('#src/index.js');
+
+    expect(recordLedgerEntries).toHaveBeenCalledWith({
+      'abc-123': { path: '/mock/output/abc-123.md', contentHash: 'hash' },
+    });
+  });
+
+  it('does not ledger a record whose mark-synced failed', async () => {
+    const { fetchAllRecords, markRecordsSynced } =
+      await import('#src/libs/records.js');
+    const { writeMarkdown } = await import('#src/libs/markdown.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
+    const { recordLedgerEntries } = await import('#src/libs/vault-ledger.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: false }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
+    vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_FAILED));
+
+    await import('#src/index.js');
+
+    expect(recordLedgerEntries).not.toHaveBeenCalled();
+  });
+
+  it('drops a record from the ledger when autoDelete deletes it', async () => {
+    const { fetchAllRecords, deleteRecords } =
+      await import('#src/libs/records.js');
+    const { writeMarkdown } = await import('#src/libs/markdown.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
+    const { removeLedgerEntries } = await import('#src/libs/vault-ledger.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: true }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
+    vi.mocked(deleteRecords).mockResolvedValue({
+      meta: { deleted: 1 },
+      permanentlyFailed: false,
+    });
+
+    await import('#src/index.js');
+
+    expect(removeLedgerEntries).toHaveBeenCalledWith(['abc-123']);
+  });
+
+  it('never ledgers records the CLI deleted itself (autoDelete)', async () => {
+    const { fetchAllRecords, deleteRecords } =
+      await import('#src/libs/records.js');
+    const { writeMarkdown } = await import('#src/libs/markdown.js');
+    const { fetchSettings } = await import('#src/libs/settings.js');
+    const { recordLedgerEntries } = await import('#src/libs/vault-ledger.js');
+    const { default: yoctoSpinner } = await import('yocto-spinner');
+
+    vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
+    vi.mocked(fetchSettings).mockResolvedValue(
+      mockSettings({ autoDelete: true }),
+    );
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord],
+      partial: false,
+    });
+    vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
+    vi.mocked(deleteRecords).mockResolvedValue({
+      meta: { deleted: 1 },
+      permanentlyFailed: false,
+    });
+
+    await import('#src/index.js');
+
+    expect(recordLedgerEntries).not.toHaveBeenCalled();
+  });
 
   it('passes the same writtenPaths map instance to every autoSync pass', async () => {
     const passTwoRecord: Record = {

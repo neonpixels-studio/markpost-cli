@@ -65,6 +65,12 @@ import cliSpinners from 'cli-spinners';
 import chalk from 'chalk';
 import { checkConfig } from '#src/libs/config.js';
 import { AUTH_FAILURE_NOTICE, hasSeenAuthFailure } from '#src/libs/alpha.js';
+import { warnMessage, messageFromError } from '#src/libs/errors.js';
+import {
+  LedgerEntry,
+  recordLedgerEntries,
+  removeLedgerEntries,
+} from '#src/libs/vault-ledger.js';
 import { hasJsonFlag } from '#src/libs/output.js';
 import { sanitizeForTerminal } from '#src/libs/terminal.js';
 import { runSyncWithAutoSchedule } from '#src/libs/scheduler.js';
@@ -729,6 +735,59 @@ function forgetSettledRecords(
   uuids.forEach((uuid) => writtenState.delete(uuid));
 }
 
+// Persists which vault file each mark-synced record landed in (the
+// written-state map is process-memory only), so `markpost records deletions`
+// can later remove exactly the files this CLI wrote. Only mark-synced records
+// qualify: a record the CLI itself deleted (autoDelete) also leaves a server
+// tombstone, and must never be pruned. A ledger failure warns instead of
+// failing a sync whose real work already succeeded.
+function rememberSettledFiles(
+  writtenState: Map<string, WrittenRecordState>,
+  settled: WrittenRecord[],
+): void {
+  const entries: { [uuid: string]: LedgerEntry } = {};
+
+  for (const { record } of settled) {
+    const state = writtenState.get(record.uuid);
+
+    if (!state) {
+      continue;
+    }
+
+    entries[record.uuid] = {
+      path: toVaultRelativePath(state.path),
+      contentHash: state.contentHash,
+    };
+  }
+
+  if (Object.keys(entries).length === 0) {
+    return;
+  }
+
+  try {
+    recordLedgerEntries(entries);
+  } catch (error) {
+    warnMessage(
+      `Could not record written files for \`records deletions\`: ${messageFromError(error)}`,
+    );
+  }
+}
+
+// A record the CLI is deleting (autoDelete) leaves a server tombstone, so it
+// must not stay in the ledger from an earlier autoDelete-off sync: a later
+// `records deletions --apply` would otherwise prune a file the user chose to
+// keep. Done before the outcome is known, since a delete that is reported as
+// failed may still have gone through.
+function forgetDeletedRecordsInLedger(records: WrittenRecord[]): void {
+  try {
+    removeLedgerEntries(records.map(({ record }) => record.uuid));
+  } catch (error) {
+    warnMessage(
+      `Could not update the written-files ledger: ${messageFromError(error)}`,
+    );
+  }
+}
+
 // Reports the outcome of a delete call and decides whether the written-path
 // map may forget these uuids. deleteRecords returns a bare count, not
 // per-uuid results, so only an exact match (`deleted === requested`) confirms
@@ -807,6 +866,7 @@ async function markWrittenRecordsSynced(
     (_written, index) => outcomes[index] !== MARK_SYNCED,
   );
 
+  rememberSettledFiles(writtenState, settled);
   forgetSettledRecords(
     writtenState,
     settled.map(({ record }) => record.uuid),
@@ -1277,6 +1337,8 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // wrong and fails identically every pass (`permanentlyFailed`, #204). A
     // transient failure (rate-limit/5xx, timeout, a plain per-chunk failure) is
     // worth another pass, so it keeps autoSync alive.
+    forgetDeletedRecordsInLedger(settleableRecords);
+
     const deleteResult = await deleteRecords(
       settleableRecords.map(({ record }) => record.uuid),
     ).catch((error: unknown): DeleteRecordsResult => {

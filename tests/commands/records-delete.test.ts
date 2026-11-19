@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('#src/libs/config.js', () => ({ checkConfig: vi.fn() }));
+vi.mock('#src/libs/vault-ledger.js', () => ({ removeLedgerEntries: vi.fn() }));
 vi.mock('#src/libs/records.js', async () => {
   // Real MAX_DELETE_BATCH_SIZE so the chunking assertions track the lib's cap.
   const { MAX_DELETE_BATCH_SIZE } = await vi.importActual<
@@ -87,6 +88,18 @@ describe('records delete', () => {
     expect(deleteRecords).toHaveBeenCalledWith([UUID_A]);
     expect(console.log).toHaveBeenCalledWith('Deleted 1 record(s).');
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it('drops the deleted records from the written-files ledger before deleting', async () => {
+    const { confirm } = await import('@inquirer/prompts');
+    const { deleteRecords } = await import('#src/libs/records.js');
+    const { removeLedgerEntries } = await import('#src/libs/vault-ledger.js');
+    vi.mocked(confirm).mockResolvedValue(true);
+    vi.mocked(deleteRecords).mockResolvedValue(outcome(1));
+
+    await run([UUID_A]);
+
+    expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A]);
   });
 
   it('dedupes uuids (case-insensitively) and shows the deduped count in the prompt', async () => {

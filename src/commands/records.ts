@@ -19,7 +19,13 @@ import {
   isPerRecordRejection,
 } from '#src/libs/api.js';
 import { checkConfig } from '#src/libs/config.js';
-import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
+import {
+  failWithMessage,
+  messageFromError,
+  warnMessage,
+  warnPartialRead,
+} from '#src/libs/errors.js';
+import { removeLedgerEntries } from '#src/libs/vault-ledger.js';
 import {
   confirmRefusal,
   isInteractiveTerminal,
@@ -38,18 +44,25 @@ import {
   printJsonError,
 } from '#src/libs/output.js';
 import { Record } from '#src/types/records.types.js';
+import {
+  DELETIONS_USAGE,
+  runDeletionsCommand,
+} from '#src/commands/deletions.js';
 
 const LIST_SUBCOMMAND = 'list';
 const UPDATE_SUBCOMMAND = 'update';
 const DELETE_SUBCOMMAND = 'delete';
+const DELETIONS_SUBCOMMAND = 'deletions';
 
-export const USAGE = `Usage: markpost records <list|update|delete> [options]
+export const USAGE = `Usage: markpost records <list|update|delete|deletions> [options]
 
   list              List records, optionally filtered by source, status, tag, or search text
   update <uuid>     Edit an existing record's title and/or content — requeues it to
                     pending (for resync) if the record was already synced
   delete <uuid...>  Delete one or more records from the server. Asks to confirm
                     first (this cannot be undone); pass --yes to skip the prompt
+  deletions         Find records deleted on the server and (with --apply) remove
+                    the vault files this CLI wrote for them. Dry run by default
 
 List options:
   --source <type>    Filter by source type (markpost reports the valid types if the value is rejected)
@@ -72,7 +85,9 @@ blank — pass a non-empty value):
 Delete options:
   --yes             Skip the confirmation prompt (required when not running in a
                     terminal, and with --json)
-  --json            Print the deleted count as JSON instead of formatted text`;
+  --json            Print the deleted count as JSON instead of formatted text
+
+${DELETIONS_USAGE}`;
 
 export const runRecordsCommand = async (args: string[]): Promise<void> => {
   // Read `--json` straight from argv so every failure below is rendered in
@@ -87,6 +102,11 @@ export const runRecordsCommand = async (args: string[]): Promise<void> => {
 
   if (subcommand === DELETE_SUBCOMMAND) {
     await runDeleteCommand(args, json);
+    return;
+  }
+
+  if (subcommand === DELETIONS_SUBCOMMAND) {
+    await runDeletionsCommand(args, json, USAGE);
     return;
   }
 
@@ -760,6 +780,19 @@ const reportDeleteSuccess = (
   }
 };
 
+// A record deleted here leaves a server tombstone; a vault file the user kept
+// from an earlier sync must not be pruned because of it. Done before the
+// request, since a failed-looking delete may still have gone through.
+const forgetDeletedRecordsInLedger = (uuids: string[]): void => {
+  try {
+    removeLedgerEntries(uuids);
+  } catch (error) {
+    warnMessage(
+      `Could not update the written-files ledger: ${messageFromError(error)}`,
+    );
+  }
+};
+
 const deleteRecordsAndReport = async (
   { uuids, skipConfirm }: DeleteRecordsArgs,
   json: boolean,
@@ -770,6 +803,8 @@ const deleteRecordsAndReport = async (
     console.log('Deletion cancelled.');
     return;
   }
+
+  forgetDeletedRecordsInLedger(uuids);
 
   const run = await deleteInChunks(uuids);
 

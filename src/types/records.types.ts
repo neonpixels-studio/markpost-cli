@@ -95,3 +95,33 @@ export type RecordExportRow = {
   syncedAt: string | null;
   errorMessage: string | null;
 };
+
+// Mirrors markpost's tombstone resource (`RecordTombstoneAttributes` /
+// `recordTombstoneSerializer` in server/utils/response.ts): one entry per record
+// deleted server-side, served by GET /api/records/deletions. That file is not
+// part of the vendored `server/types/api.types.ts` contract, so this shape is
+// copied by hand; only the query type (`RecordDeletionListQuery`) is vendored
+// and drift-tested. `filePath` is null when the record had no local file.
+export type RecordDeletion = {
+  recordUuid: string;
+  filePath: string | null;
+  deletedAt: string;
+};
+
+export type RecordDeletionResource = ApiResourceObject & {
+  type: 'recordTombstones';
+  attributes: RecordDeletion;
+};
+
+// `meta.complete` is false when `filter[since]` was omitted or predates the
+// server's tombstone retention window, i.e. older deletions may be missing.
+export type RecordDeletionListMeta = {
+  size: number;
+  hasMore: boolean;
+  complete: boolean;
+};
+
+export type RecordDeletionList = ApiResponse<RecordDeletionResource[]> & {
+  meta: RecordDeletionListMeta;
+  links: { next: string | null };
+};
