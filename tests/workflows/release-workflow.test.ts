@@ -125,9 +125,45 @@ describe('release workflow', () => {
     );
   });
 
-  it('does not run dependency install scripts in the publish job', () => {
-    expect(jobBodies().publish).toContain('npm ci --ignore-scripts');
-    expect(jobBodies().publish).not.toMatch(/npm ci\s*$/m);
+  it('does not install dependencies or rebuild in the publish job', () => {
+    const publish = jobBodies().publish;
+    expect(publish).not.toMatch(
+      /\b(?:npm (?:ci|clean-install|i|in|it|add|install\S*|run\S*|pack|exec|x|rebuild)|npx|pnpm|yarn|bun|corepack)\b/,
+    );
+  });
+
+  it('uploads the smoke-tested tarball from the verify job', () => {
+    const verify = jobBodies().verify;
+    const smokeTest = verify.indexOf('bash scripts/smoke-test-pack.sh');
+    const upload = verify.indexOf('actions/upload-artifact@');
+    expect(smokeTest).toBeGreaterThan(-1);
+    expect(upload).toBeGreaterThan(smokeTest);
+    expect(verify).toMatch(/name: release-tarball\n/);
+    expect(verify).toMatch(/path: \$\{\{ runner\.temp \}\}\/pack\/\*\.tgz/);
+    expect(verify).toMatch(/if-no-files-found: error/);
+  });
+
+  it('uploads from the directory the smoke-test script packs into', () => {
+    const script = readFileSync(
+      `${REPO_ROOT}scripts/smoke-test-pack.sh`,
+      'utf-8',
+    );
+    expect(script).toContain('pack_dir="$temp_dir/pack"');
+    expect(script).toContain('temp_dir="${RUNNER_TEMP:-');
+    expect(script).not.toMatch(/rm -rf[^\n]*pack/);
+  });
+
+  it('publishes the downloaded tarball file, not the working tree', () => {
+    const publish = jobBodies().publish;
+    expect(publish).toMatch(
+      /actions\/download-artifact@[^\n]*\n\s+with:\n\s+name: release-tarball\n\s+path: \$\{\{ runner\.temp \}\}\/release-tarball/,
+    );
+    expect(publish).toMatch(
+      /npm stage publish "\$RUNNER_TEMP"\/release-tarball\/\*\.tgz /,
+    );
+    expect(publish.indexOf('download-artifact')).toBeLessThan(
+      publish.indexOf('npm stage publish'),
+    );
   });
 
   it('runs lint, typecheck, test:ci and the pack smoke test', () => {

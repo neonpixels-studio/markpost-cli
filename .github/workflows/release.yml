@@ -39,6 +39,14 @@ jobs:
         run: bash scripts/smoke-test-pack.sh
         env:
           XDG_CONFIG_HOME: ${{ runner.temp }}/markpost-config
+      # The publish job ships this exact tarball, not a rebuild of the source.
+      - name: Upload the smoke-tested tarball
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-tarball
+          path: ${{ runner.temp }}/pack/*.tgz
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
     needs: verify
@@ -55,9 +63,13 @@ jobs:
         with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
-      # --ignore-scripts: dependency install scripts must not run in the job
-      # that holds the OIDC publish token. npm stage publish still runs prepack.
-      - run: npm ci --ignore-scripts
+      # No dependency install and no build here: the job that holds the OIDC
+      # publish token only handles the tarball the verify job smoke-tested.
+      - name: Download the smoke-tested tarball
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-tarball
+          path: ${{ runner.temp }}/release-tarball
       # Trusted publishing (OIDC): no stored npm token. The trusted publisher
       # only allows `npm stage publish`, so this stages the release and a
       # maintainer approves it with 2FA (`npm stage approve <stage-id>`); a
@@ -65,6 +77,6 @@ jobs:
       # with the Node version in .nvmrc (11.19.1 has `npm stage`). The dist-tag
       # is always explicit (latest for X.Y.Z, the preid for prereleases) so a
       # prerelease never lands on latest and publishConfig.tag can't override it.
-      - run: npm stage publish --provenance --access public --tag "$DIST_TAG"
+      - run: npm stage publish "$RUNNER_TEMP"/release-tarball/*.tgz --provenance --access public --tag "$DIST_TAG"
         env:
           DIST_TAG: ${{ needs.verify.outputs.dist-tag }}
