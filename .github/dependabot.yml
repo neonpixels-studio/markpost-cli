@@ -1,8 +1,11 @@
 version: 2
+# Do not set target-branch: when it is set, this config (for example assignees)
+# stops applying to Dependabot security update PRs. Omitting it targets the
+# default branch (main) and applies the config to both. The groups below only
+# cover version updates (applies-to defaults to version-updates).
 updates:
   - package-ecosystem: npm
     directory: "/"
-    target-branch: main
     schedule:
       interval: weekly
     assignees:
@@ -14,13 +17,12 @@ updates:
           - patch
   - package-ecosystem: github-actions
     directory: "/"
-    target-branch: main
     schedule:
       interval: weekly
     assignees:
       - grimicorn
     groups:
-      minor-and-patch:
+      actions:
         update-types:
           - minor
           - patch
