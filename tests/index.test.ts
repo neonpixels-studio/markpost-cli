@@ -1000,7 +1000,6 @@ describe("index", () => {
       record: Record,
       _conflictStrategy?: ConflictStrategy,
       seenSlugs?: Map<string, string>,
-      _includeFrontmatter?: boolean,
     ): string | null => {
       ownerAtCall.push(seenSlugs?.get(SHARED_SLUG));
       if (seenSlugs && !seenSlugs.has(SHARED_SLUG)) {

@@ -1734,7 +1734,8 @@ describe("runSourcesCommand", () => {
     it("sends the clear when the list response omits fieldMapping entirely", async () => {
       const { fetchSources, updateSource } =
         await import("#src/libs/sources.js");
-      const { fieldMapping: _omitted, ...sourceWithoutMapping } = webhookSource;
+      const sourceWithoutMapping: Partial<Source> = { ...webhookSource };
+      delete sourceWithoutMapping.fieldMapping;
       vi.mocked(fetchSources).mockResolvedValue([
         sourceWithoutMapping as unknown as Source,
       ]);

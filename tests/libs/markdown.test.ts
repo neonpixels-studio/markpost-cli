@@ -1502,7 +1502,6 @@ describe("writeMarkdown", () => {
     it("writes into the current output directory when it changed between passes, not the tracked old one", () => {
       const newDirectory = "/mock/output-2";
       mockWriteFileSyncRejectingExistingPaths();
-      const oldBasePath = resolve(outputDirectory, "test-title.md");
       const newBasePath = resolve(newDirectory, "test-title.md");
       const writtenState = new Map<string, WrittenRecordState>();
       // The old file is still a regular file on the simulated disk, so a naive

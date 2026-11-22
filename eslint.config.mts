@@ -3,12 +3,25 @@ import tseslint from "typescript-eslint";
 import prettierPlugin from "eslint-plugin-prettier/recommended";
 
 export default tseslint.config(
-  // Vendored verbatim from markpost by scripts/sync-contract.mjs; not
-  // hand-edited, so it shouldn't be linted to this repo's rules.
-  { ignores: ["src/types/vendor/**"] },
+  // `dist` is build output. The vendored files are copied verbatim from
+  // markpost by the scripts/sync-*.mjs scripts and are not hand-edited, so
+  // they shouldn't be linted to this repo's rules.
+  { ignores: ["dist", "src/types/vendor/**", "tests/libs/vendor/**"] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   prettierPlugin,
+  // The `.mjs` scripts run under Node; ESLint's core `no-undef` doesn't know
+  // its globals (TypeScript files are covered by the TypeScript checker).
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
   // Every API request must go through `apiFetch` (src/libs/api.ts) so it
   // carries the shared request timeout; a bare `fetch` would reintroduce the
   // hang this guards against. `api.ts` itself is the one allowed caller.
