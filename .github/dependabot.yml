@@ -1,7 +1,7 @@
 version: 2
-# No target-branch override: updates go to the default branch (main), which also
-# keeps Dependabot security update PRs enabled (those only run on the default
-# branch when no target-branch is set).
+# Do not set target-branch: when it is set, the options below (assignees,
+# groups) stop applying to Dependabot security update PRs. Omitting it targets
+# the default branch (main) and applies them to both.
 updates:
   - package-ecosystem: npm
     directory: "/"
