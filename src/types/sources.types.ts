@@ -52,7 +52,7 @@ export const isRotatableProvider = (
   provider !== null &&
   (ROTATABLE_PROVIDERS as readonly string[]).includes(provider);
 
-export const EMAIL_SOURCE_TYPE: SourceType = "email";
+const EMAIL_SOURCE_TYPE: SourceType = "email";
 
 // Mirrors markpost's isSourceEndpointRotatable (shared/utils/sourceTypes.ts):
 // email-in addresses are a mailbox handed to senders, not a URL credential, so

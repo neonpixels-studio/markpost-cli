@@ -29,15 +29,14 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import ts from "typescript";
 
-export const MARKPOST_REPO_URL =
-  "https://github.com/neonpixels-studio/markpost";
+const MARKPOST_REPO_URL = "https://github.com/neonpixels-studio/markpost";
 
 // Full history (`--filter=blob:none`, not `--depth 1`) so `readCommitHash`
 // below can actually walk a path's log instead of every path reporting HEAD
 // (the only commit a shallow clone has). Blobless keeps the clone cheap —
 // only the commit graph and trees download eagerly, file contents fetch
 // on demand for the paths actually read.
-export function cloneMarkpostInto(cloneDir) {
+function cloneMarkpostInto(cloneDir) {
   execFileSync(
     "git",
     ["clone", "--filter=blob:none", MARKPOST_REPO_URL, cloneDir],

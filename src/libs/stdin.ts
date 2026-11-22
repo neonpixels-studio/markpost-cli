@@ -21,11 +21,11 @@ export interface ParsedNote {
   tagsLineUnparseable?: boolean;
 }
 
-export class StdinInputError extends Error {}
+class StdinInputError extends Error {}
 
-export const TTY_ERROR =
+const TTY_ERROR =
   "Nothing piped to stdin. Pipe a note in (e.g. `pbpaste | markpost push -`) or pass a file path.";
-export const EMPTY_ERROR = "Stdin was empty; there is no note to push.";
+const EMPTY_ERROR = "Stdin was empty; there is no note to push.";
 
 export interface ReadableInput {
   isTTY?: boolean;

@@ -16,11 +16,11 @@ import { sanitizeForTerminal } from "#src/libs/terminal.js";
 
 export type CheckResult = { name: string; ok: boolean; detail: string };
 
-export const CHECK_CONFIG = "config";
-export const CHECK_BASE_URL = "base-url";
+const CHECK_CONFIG = "config";
+const CHECK_BASE_URL = "base-url";
 export const CHECK_REACHABLE = "api-reachable";
 export const CHECK_TOKEN = "token";
-export const CHECK_OUTPUT_DIRECTORY = "output-directory";
+const CHECK_OUTPUT_DIRECTORY = "output-directory";
 
 const HTTP_UNAUTHORIZED = 401;
 const HTTP_FORBIDDEN = 403;
@@ -28,7 +28,7 @@ const HTTP_FORBIDDEN = 403;
 // The cheapest authed read that has no side effects (GET /api/settings would
 // create a default settings row for a fresh account). It needs `records:read`,
 // which every sync needs too, so a token lacking it is worth flagging.
-export const TOKEN_PROBE_PATH = "/api/records/stats";
+const TOKEN_PROBE_PATH = "/api/records/stats";
 
 const pass = (name: string, detail: string): CheckResult => ({
   name,
@@ -54,7 +54,7 @@ const fail = (name: string, detail: string): CheckResult => ({
   detail: sanitizeForTerminal(detail),
 });
 
-export const getConfiguredOutputDirectory = (): string | undefined => {
+const getConfiguredOutputDirectory = (): string | undefined => {
   return process.env.OUTPUT_DIRECTORY ?? getConfigValue("outputDirectory");
 };
 
@@ -92,7 +92,7 @@ export const checkBaseUrl = (baseUrl: string): CheckResult => {
 // network error or timeout counts as unreachable.
 export type ReachabilityProbe = (baseUrl: string) => Promise<number>;
 
-export const probeReachability: ReachabilityProbe = async (baseUrl) => {
+const probeReachability: ReachabilityProbe = async (baseUrl) => {
   // apiFetch would also parse the body as JSON, which the HTML landing page
   // is not; the timeout it exists to enforce is applied here directly.
   // eslint-disable-next-line no-restricted-globals
@@ -136,7 +136,7 @@ export const checkApiReachable = async (
 
 export type TokenProbe = () => Promise<unknown>;
 
-export const probeToken: TokenProbe = () => authedRequest(TOKEN_PROBE_PATH);
+const probeToken: TokenProbe = () => authedRequest(TOKEN_PROBE_PATH);
 
 const describeTokenFailure = (error: unknown): string => {
   if (

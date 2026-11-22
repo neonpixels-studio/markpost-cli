@@ -32,7 +32,7 @@ jobs:
         id: tag-check
         run: node scripts/check-release-tag.mjs "$GITHUB_REF_NAME"
       - run: npm ci
-      - run: npm run lint
+      - run: npm run lint:ci
       - run: npm run typecheck
       - run: npm run test:ci
       - name: Pack and smoke-test the installed CLI artifact
