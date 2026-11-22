@@ -1,8 +1,10 @@
 version: 2
+# No target-branch override: updates go to the default branch (main), which also
+# keeps Dependabot security update PRs enabled (those only run on the default
+# branch when no target-branch is set).
 updates:
   - package-ecosystem: npm
     directory: "/"
-    target-branch: main
     schedule:
       interval: weekly
     assignees:
@@ -14,13 +16,12 @@ updates:
           - patch
   - package-ecosystem: github-actions
     directory: "/"
-    target-branch: main
     schedule:
       interval: weekly
     assignees:
       - grimicorn
     groups:
-      minor-and-patch:
+      actions:
         update-types:
           - minor
           - patch
