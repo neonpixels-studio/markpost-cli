@@ -1,7 +1,8 @@
 version: 2
-# Do not set target-branch: when it is set, the options below (assignees,
-# groups) stop applying to Dependabot security update PRs. Omitting it targets
-# the default branch (main) and applies them to both.
+# Do not set target-branch: when it is set, this config (for example assignees)
+# stops applying to Dependabot security update PRs. Omitting it targets the
+# default branch (main) and applies the config to both. The groups below only
+# cover version updates (applies-to defaults to version-updates).
 updates:
   - package-ecosystem: npm
     directory: "/"
