@@ -1,0 +1,14 @@
+set -e
+
+# Mirrors the `ci` job in .github/workflows/ci.yml (minus npm ci and the
+# pack smoke test). Keep the two in sync.
+if git rev-parse --verify --quiet "refs/remotes/origin/main^{commit}" >/dev/null; then
+  lint_script="lint:ci"
+else
+  echo "origin/main not found - falling back to full lint instead of lint:ci." >&2
+  lint_script="lint"
+fi
+
+npm run "$lint_script"
+npm run typecheck
+npm run test:ci

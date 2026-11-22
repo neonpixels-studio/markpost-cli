@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "ignorePatterns": ["**/*.generated.ts", "src/types/vendor/**"],
+  "ignoreExports": [
+    { "file": "**/*.generated.ts", "exports": ["*"] },
+    { "file": "src/types/vendor/**", "exports": ["*"] },
+    { "file": "src/commands/*.ts", "exports": ["USAGE"] }
+  ]
+}

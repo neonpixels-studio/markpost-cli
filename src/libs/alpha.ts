@@ -34,7 +34,3 @@ export const recordAuthFailure = (): void => {
 };
 
 export const hasSeenAuthFailure = (): boolean => authFailureSeen;
-
-export const resetAuthFailure = (): void => {
-  authFailureSeen = false;
-};
