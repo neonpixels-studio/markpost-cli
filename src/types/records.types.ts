@@ -1,4 +1,4 @@
-import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
+import type { ApiResourceObject, ApiResponse } from "#src/types/api.types.js";
 
 // Mirrors markpost's frontmatter shape (server/utils/markdown.ts
 // `FrontmatterObject`): the object markpost assembles at ingestion and stores
@@ -66,7 +66,7 @@ export type PaginatedRecordsMeta = {
 // (`server/utils/response.ts`) actually produces for a record: `attributes`
 // plus the `type`/`id`/`links` envelope fields the old `ApiData` type dropped.
 export type RecordResource = ApiResourceObject & {
-  type: 'records';
+  type: "records";
   attributes: Record;
 };
 
@@ -109,7 +109,7 @@ export type RecordDeletion = {
 };
 
 export type RecordDeletionResource = ApiResourceObject & {
-  type: 'recordTombstones';
+  type: "recordTombstones";
   attributes: RecordDeletion;
 };
 

@@ -9,19 +9,19 @@
 // network: the vendored constants are refreshed by hand via
 // `npm run sync:source-endpoints` and reviewed like any other diff (see
 // README.md#source-endpoint-sync).
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
 import {
   EMAIL_DOMAIN as cliEmailDomain,
   WEBHOOK_INGEST_BASE as cliWebhookIngestBase,
-} from '#src/commands/sources.js';
+} from "#src/commands/sources.js";
 
 // Imported as a namespace (rather than destructuring the two names directly)
 // so the "exports exactly the expected constants" check below can inspect
 // every key the module actually has, not just the two this file already
 // knows to ask for.
-import * as generatedModule from './vendor/markpost-source-endpoints.generated.js';
-import manifest from './vendor/markpost-source-endpoints.manifest.json' with { type: 'json' };
+import * as generatedModule from "./vendor/markpost-source-endpoints.generated.js";
+import manifest from "./vendor/markpost-source-endpoints.manifest.json" with { type: "json" };
 
 // The two names scripts/sync-source-endpoints.mjs's REQUIRED_CONSTANT_NAMES
 // vendors. Kept independent of the manifest (which only records provenance,
@@ -29,20 +29,20 @@ import manifest from './vendor/markpost-source-endpoints.manifest.json' with { t
 // scripts/lib/markpost-checkout.mjs#writeManifest schema) so the two checks
 // below each have their own source of truth to compare against instead of
 // both deriving from the same value.
-const EXPECTED_EXPORTS = ['WEBHOOK_INGEST_BASE', 'EMAIL_DOMAIN'];
+const EXPECTED_EXPORTS = ["WEBHOOK_INGEST_BASE", "EMAIL_DOMAIN"];
 
-describe('source endpoint drift', () => {
-  it('the manifest records the vendored constants provenance', () => {
+describe("source endpoint drift", () => {
+  it("the manifest records the vendored constants provenance", () => {
     // The generated-module and manifest imports above are static ESM
     // imports: either one being missing fails this file's module
     // resolution before any test body runs, so there is nothing further to
     // assert about presence here — only about the manifest's contents.
     expect(manifest.sourceFiles).toHaveLength(1);
-    expect(manifest.sourceFiles[0].path).toBe('app/composables/useSources.ts');
+    expect(manifest.sourceFiles[0].path).toBe("app/composables/useSources.ts");
     expect(manifest.sourceFiles[0].sourceCommit).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it('the generated file exports exactly the expected constants', () => {
+  it("the generated file exports exactly the expected constants", () => {
     // Catches a sync that leaves a stale extra export in the generated file
     // (or drops one) — the byte-for-byte checks below only prove the
     // *named* constants this test file expects still exist, not that
@@ -52,11 +52,11 @@ describe('source endpoint drift', () => {
     );
   });
 
-  it('WEBHOOK_INGEST_BASE matches markpost byte-for-byte', () => {
+  it("WEBHOOK_INGEST_BASE matches markpost byte-for-byte", () => {
     expect(cliWebhookIngestBase).toBe(generatedModule.WEBHOOK_INGEST_BASE);
   });
 
-  it('EMAIL_DOMAIN matches markpost byte-for-byte', () => {
+  it("EMAIL_DOMAIN matches markpost byte-for-byte", () => {
     expect(cliEmailDomain).toBe(generatedModule.EMAIL_DOMAIN);
   });
 });

@@ -1,4 +1,4 @@
-import { hasSeenAuthFailure, withWaitlistSentence } from '#src/libs/alpha.js';
+import { hasSeenAuthFailure, withWaitlistSentence } from "#src/libs/alpha.js";
 
 // DEL (0x7f) and the C1 control range (0x80–0x9f). JSON.stringify escapes the
 // C0 range (0x00–0x1f) but leaves these untouched, and some terminals decode
@@ -32,8 +32,8 @@ const escapeResidualControls = (json: string): string =>
       return character;
     }
 
-    return `\\u${codePoint.toString(16).padStart(4, '0')}`;
-  }).join('');
+    return `\\u${codePoint.toString(16).padStart(4, "0")}`;
+  }).join("");
 
 // Shared `--json` output for the read commands (`get`, `records list`,
 // `sources list`): emit a value as clean, indented JSON on stdout and nothing
@@ -50,7 +50,7 @@ export const printJson = (value: unknown): void => {
   // the `unknown` signature invites it, so fail with a clear message rather
   // than letting `escapeResidualControls(undefined)` throw an opaque TypeError.
   if (json === undefined) {
-    throw new Error('Cannot print a non-serializable value as JSON.');
+    throw new Error("Cannot print a non-serializable value as JSON.");
   }
 
   console.log(escapeResidualControls(json));
@@ -61,16 +61,16 @@ export const printJson = (value: unknown): void => {
 // contract and must stay stable — see README "JSON failure contract". Every
 // failure classifies into exactly one: a missing/unconfigured value, a bad
 // argument or usage, a failed request/result, or a truncated-but-usable read.
-export const JSON_ERROR_CONFIG_REQUIRED = 'config_required';
-export const JSON_ERROR_USAGE = 'usage';
-export const JSON_ERROR_FETCH_FAILED = 'fetch_failed';
+export const JSON_ERROR_CONFIG_REQUIRED = "config_required";
+export const JSON_ERROR_USAGE = "usage";
+export const JSON_ERROR_FETCH_FAILED = "fetch_failed";
 // Distinct from `fetch_failed`: a partial read still writes its (truncated)
 // data to stdout, unlike every other code, which writes nothing there. A
 // script that reflexively discards stdout on ANY `--json` failure would
 // throw away valid, if incomplete, data — the separate code lets it choose.
-export const JSON_ERROR_PARTIAL_READ = 'partial_read';
+export const JSON_ERROR_PARTIAL_READ = "partial_read";
 
-const JSON_FLAG = '--json';
+const JSON_FLAG = "--json";
 
 // Detect `--json` straight from argv, independent of a command's `parseArgs`
 // (which throws on an unrelated bad flag before it can report whether `--json`

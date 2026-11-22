@@ -1,4 +1,4 @@
-import chalk from 'chalk';
+import chalk from "chalk";
 import {
   CONFIG_KEYS,
   ConfigKey,
@@ -6,10 +6,10 @@ import {
   getConfigValue,
   isConfigKey,
   setConfigValue,
-} from '#src/libs/config.js';
-import { failWithMessage } from '#src/libs/errors.js';
-import { hasJsonFlag, printJson, withoutJsonFlag } from '#src/libs/output.js';
-import { failWithSubcommandUsage, failWithUsage } from '#src/libs/usage.js';
+} from "#src/libs/config.js";
+import { failWithMessage } from "#src/libs/errors.js";
+import { hasJsonFlag, printJson, withoutJsonFlag } from "#src/libs/output.js";
+import { failWithSubcommandUsage, failWithUsage } from "#src/libs/usage.js";
 
 export const USAGE = `Usage: markpost config <get|set|path> [key] [value] [--json]
 
@@ -18,22 +18,22 @@ export const USAGE = `Usage: markpost config <get|set|path> [key] [value] [--jso
   set <key> <value>  Store <value> under <key>
   path           Print the location of the config file
 
-  keys: ${CONFIG_KEYS.join(', ')}`;
+  keys: ${CONFIG_KEYS.join(", ")}`;
 
 // apiToken is a secret, so it's never printed in full. outputDirectory is a
 // plain path and shown as-is.
-const SENSITIVE_KEYS = new Set<ConfigKey>(['apiToken']);
+const SENSITIVE_KEYS = new Set<ConfigKey>(["apiToken"]);
 
-const NOT_SET_LABEL = '(not set)';
-const GET_SUBCOMMAND = 'get';
-const CONFIG_READ_FAILED_MESSAGE = 'Could not read config.';
-const JSON_ONLY_ON_GET_MESSAGE = '--json is only supported by `config get`.';
+const NOT_SET_LABEL = "(not set)";
+const GET_SUBCOMMAND = "get";
+const CONFIG_READ_FAILED_MESSAGE = "Could not read config.";
+const JSON_ONLY_ON_GET_MESSAGE = "--json is only supported by `config get`.";
 
 // A fixed-width middle mask keeps the redacted token from leaking its real
 // length, while the visible edges still let a user confirm which token is
 // stored.
 const VISIBLE_EDGE_LENGTH = 4;
-const MASK_SEGMENT = '****';
+const MASK_SEGMENT = "****";
 
 // Require at least as many hidden characters as revealed ones before showing
 // the edges (both edges reveal VISIBLE_EDGE_LENGTH * 2) — otherwise a short
@@ -44,9 +44,9 @@ const MIN_LENGTH_TO_REVEAL_EDGES = VISIBLE_EDGE_LENGTH * 4;
 // More than this means an unquoted value with spaces was split, so fail rather
 // than silently store (or read from) a truncated value.
 const MAX_ARGS_BY_SUBCOMMAND = new Map<string, number>([
-  ['get', 2],
-  ['set', 3],
-  ['path', 1],
+  ["get", 2],
+  ["set", 3],
+  ["path", 1],
 ]);
 
 const maskToken = (token: string): string => {
@@ -149,7 +149,7 @@ const setConfig = (key?: string, value?: string): void => {
   const trimmedValue = value?.trim();
 
   if (!key || !trimmedValue) {
-    failWithUsage('Both a key and a non-empty value are required.', USAGE);
+    failWithUsage("Both a key and a non-empty value are required.", USAGE);
     return;
   }
 
@@ -186,7 +186,7 @@ export const runConfigCommand = async (rawArgs: string[]): Promise<void> => {
 
   // `set` and `path` have no JSON rendering; reject the flag instead of
   // silently dropping it (or, for `set`, storing "--json" as a value).
-  if (json && !MAX_ARGS_BY_SUBCOMMAND.has(subcommand ?? '')) {
+  if (json && !MAX_ARGS_BY_SUBCOMMAND.has(subcommand ?? "")) {
     failWithSubcommandUsage(subcommand, USAGE, json);
     return;
   }
@@ -196,7 +196,7 @@ export const runConfigCommand = async (rawArgs: string[]): Promise<void> => {
     return;
   }
 
-  const maxArgs = MAX_ARGS_BY_SUBCOMMAND.get(subcommand ?? '');
+  const maxArgs = MAX_ARGS_BY_SUBCOMMAND.get(subcommand ?? "");
 
   if (maxArgs !== undefined && args.length > maxArgs) {
     failWithUsage(
@@ -212,12 +212,12 @@ export const runConfigCommand = async (rawArgs: string[]): Promise<void> => {
     return;
   }
 
-  if (subcommand === 'set') {
+  if (subcommand === "set") {
     setConfig(key, value);
     return;
   }
 
-  if (subcommand === 'path') {
+  if (subcommand === "path") {
     printPath();
     return;
   }

@@ -16,7 +16,7 @@
 // copy that skip the credential-stripping in `stripCredentials` below. Any
 // *new* sync script should build on this module rather than add another
 // copy of anything in it.
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -24,13 +24,13 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import ts from 'typescript';
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import ts from "typescript";
 
 export const MARKPOST_REPO_URL =
-  'https://github.com/neonpixels-studio/markpost';
+  "https://github.com/neonpixels-studio/markpost";
 
 // Full history (`--filter=blob:none`, not `--depth 1`) so `readCommitHash`
 // below can actually walk a path's log instead of every path reporting HEAD
@@ -39,9 +39,9 @@ export const MARKPOST_REPO_URL =
 // on demand for the paths actually read.
 export function cloneMarkpostInto(cloneDir) {
   execFileSync(
-    'git',
-    ['clone', '--filter=blob:none', MARKPOST_REPO_URL, cloneDir],
-    { stdio: 'inherit' },
+    "git",
+    ["clone", "--filter=blob:none", MARKPOST_REPO_URL, cloneDir],
+    { stdio: "inherit" },
   );
 }
 
@@ -50,9 +50,9 @@ export function cloneMarkpostInto(cloneDir) {
 // actually contain what was just vendored.
 export function assertPathIsCommitted(checkoutDir, relativePath) {
   const status = execFileSync(
-    'git',
-    ['status', '--porcelain', '--', relativePath],
-    { cwd: checkoutDir, encoding: 'utf-8' },
+    "git",
+    ["status", "--porcelain", "--", relativePath],
+    { cwd: checkoutDir, encoding: "utf-8" },
   ).trim();
 
   if (!status) {
@@ -61,7 +61,7 @@ export function assertPathIsCommitted(checkoutDir, relativePath) {
 
   throw new Error(
     `${relativePath} has uncommitted changes in ${checkoutDir} — ` +
-      'commit them first so the manifest records the commit the vendored copy actually came from',
+      "commit them first so the manifest records the commit the vendored copy actually came from",
   );
 }
 
@@ -77,9 +77,9 @@ export function assertCheckoutIsNotShallow(checkoutDir) {
   let isShallow;
 
   try {
-    isShallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+    isShallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
       cwd: checkoutDir,
-      encoding: 'utf-8',
+      encoding: "utf-8",
     }).trim();
   } catch {
     // Not a git repo at all (e.g. --from pointed at a plain directory) — that
@@ -91,12 +91,12 @@ export function assertCheckoutIsNotShallow(checkoutDir) {
     );
   }
 
-  if (isShallow === 'true') {
+  if (isShallow === "true") {
     throw new Error(
       `${checkoutDir} is a shallow git clone — per-path commit history would ` +
-        'be wrong for every file (every path would report HEAD). Run ' +
+        "be wrong for every file (every path would report HEAD). Run " +
         '"git fetch --unshallow" in it, or omit --from to let the sync ' +
-        'script clone fresh.',
+        "script clone fresh.",
     );
   }
 }
@@ -112,15 +112,15 @@ export function assertCheckoutIsNotShallow(checkoutDir) {
 // to fail on, not silently record as `sourceCommit: ""`.
 export function readCommitHash(checkoutDir, relativePath) {
   const commitHash = execFileSync(
-    'git',
-    ['log', '-1', '--format=%H', '--', relativePath],
-    { cwd: checkoutDir, encoding: 'utf-8' },
+    "git",
+    ["log", "-1", "--format=%H", "--", relativePath],
+    { cwd: checkoutDir, encoding: "utf-8" },
   ).trim();
 
   if (!commitHash) {
     throw new Error(
       `No commit history found for ${relativePath} in ${checkoutDir} — ` +
-        'is this a markpost git checkout?',
+        "is this a markpost git checkout?",
     );
   }
 
@@ -137,8 +137,8 @@ function stripCredentials(remoteUrl) {
   try {
     const parsed = new URL(remoteUrl);
 
-    parsed.username = '';
-    parsed.password = '';
+    parsed.username = "";
+    parsed.password = "";
 
     return parsed.toString();
   } catch {
@@ -153,9 +153,9 @@ function stripCredentials(remoteUrl) {
 // when the checkout has no `origin` remote (e.g. a bare local clone).
 export function resolveSourceRepo(checkoutDir) {
   try {
-    const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
+    const remoteUrl = execFileSync("git", ["remote", "get-url", "origin"], {
       cwd: checkoutDir,
-      encoding: 'utf-8',
+      encoding: "utf-8",
     }).trim();
 
     return stripCredentials(remoteUrl);
@@ -176,7 +176,7 @@ export function readSource(checkoutDir, relativePath) {
     );
   }
 
-  return readFileSync(sourcePath, 'utf-8');
+  return readFileSync(sourcePath, "utf-8");
 }
 
 // Shared by every sync script's AST-based assertions/extractors

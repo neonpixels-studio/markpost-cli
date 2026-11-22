@@ -1,9 +1,9 @@
-import chalk from 'chalk';
+import chalk from "chalk";
 import {
   JSON_ERROR_FETCH_FAILED,
   JSON_ERROR_PARTIAL_READ,
   printJsonError,
-} from '#src/libs/output.js';
+} from "#src/libs/output.js";
 
 export const logErrorMessage = (title: string, message: string) => {
   return console.error(chalk.redBright(`${title}\n${message}`));
@@ -61,7 +61,7 @@ export const failWithMessage = (message: string, json = false): void => {
 // valid (if truncated) data here, and a script needs to tell that apart from
 // a request that returned nothing at all.
 const PARTIAL_READ_MESSAGE =
-  'A later page failed to fetch — this list may be incomplete.';
+  "A later page failed to fetch — this list may be incomplete.";
 
 export const warnPartialRead = (
   json: boolean,

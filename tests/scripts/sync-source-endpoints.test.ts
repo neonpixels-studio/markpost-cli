@@ -4,12 +4,12 @@
 // tests/libs/source-endpoints-drift.test.ts; this only proves the extractor
 // pulls the right constants — and refuses to silently vendor something it
 // can't — while ignoring everything around them.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
 import {
   extractEndpointConstants,
   // @ts-expect-error -- plain .mjs, not part of the typed src/ tree.
-} from '../../scripts/sync-source-endpoints.mjs';
+} from "../../scripts/sync-source-endpoints.mjs";
 
 // A trimmed stand-in for markpost's useSources.ts: the two ingest-endpoint
 // constants the extractor must pull, wrapped in the surrounding
@@ -52,8 +52,8 @@ function replaceOnce(
   return source.replace(find, replacement);
 }
 
-describe('extractEndpointConstants', () => {
-  it('pulls both ingest-endpoint constants', () => {
+describe("extractEndpointConstants", () => {
+  it("pulls both ingest-endpoint constants", () => {
     const constants = extractEndpointConstants(MARKPOST_SOURCE);
 
     expect(constants).toContain(
@@ -62,35 +62,35 @@ describe('extractEndpointConstants', () => {
     expect(constants).toContain('EMAIL_DOMAIN = "in.markpost.io"');
   });
 
-  it('exports both constants even if markpost does not export them', () => {
+  it("exports both constants even if markpost does not export them", () => {
     const constants = extractEndpointConstants(MARKPOST_SOURCE);
 
-    expect(constants).toContain('export const WEBHOOK_INGEST_BASE');
-    expect(constants).toContain('export const EMAIL_DOMAIN');
+    expect(constants).toContain("export const WEBHOOK_INGEST_BASE");
+    expect(constants).toContain("export const EMAIL_DOMAIN");
   });
 
-  it('leaves unrelated composable code behind', () => {
+  it("leaves unrelated composable code behind", () => {
     const constants = extractEndpointConstants(MARKPOST_SOURCE);
 
-    expect(constants).not.toContain('buildEndpointUrl');
-    expect(constants).not.toContain('formatLastHit');
-    expect(constants).not.toContain('computeElapsedBuckets');
+    expect(constants).not.toContain("buildEndpointUrl");
+    expect(constants).not.toContain("formatLastHit");
+    expect(constants).not.toContain("computeElapsedBuckets");
   });
 
-  it('does not duplicate an existing export keyword', () => {
+  it("does not duplicate an existing export keyword", () => {
     const withExport = replaceOnce(
       MARKPOST_SOURCE,
-      'const WEBHOOK_INGEST_BASE',
-      'export const WEBHOOK_INGEST_BASE',
+      "const WEBHOOK_INGEST_BASE",
+      "export const WEBHOOK_INGEST_BASE",
     );
 
     const constants = extractEndpointConstants(withExport);
 
-    expect(constants).not.toContain('export export const WEBHOOK_INGEST_BASE');
-    expect(constants).toContain('export const WEBHOOK_INGEST_BASE');
+    expect(constants).not.toContain("export export const WEBHOOK_INGEST_BASE");
+    expect(constants).toContain("export const WEBHOOK_INGEST_BASE");
   });
 
-  it('extracts only the matching declarator when both constants share one statement', () => {
+  it("extracts only the matching declarator when both constants share one statement", () => {
     const combinedStatement = replaceOnce(
       MARKPOST_SOURCE,
       'const WEBHOOK_INGEST_BASE = "https://ingest.markpost.io/v1/hooks";\nconst EMAIL_DOMAIN = "in.markpost.io";',
@@ -114,7 +114,7 @@ describe('extractEndpointConstants', () => {
     );
   });
 
-  it('ignores an unrelated sibling declarator in the same statement', () => {
+  it("ignores an unrelated sibling declarator in the same statement", () => {
     const withSibling = replaceOnce(
       MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
@@ -123,18 +123,18 @@ describe('extractEndpointConstants', () => {
 
     const constants = extractEndpointConstants(withSibling);
 
-    expect(constants).not.toContain('runtimeConfig');
-    expect(constants).not.toContain('useRuntimeConfig');
+    expect(constants).not.toContain("runtimeConfig");
+    expect(constants).not.toContain("useRuntimeConfig");
     expect(constants).toContain(
       'export const EMAIL_DOMAIN = "in.markpost.io";',
     );
   });
 
-  it('throws loudly when a constant is not a plain string literal', () => {
+  it("throws loudly when a constant is not a plain string literal", () => {
     const templated = replaceOnce(
       MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
-      'const EMAIL_DOMAIN = `${INGEST_HOST}`;',
+      "const EMAIL_DOMAIN = `${INGEST_HOST}`;",
     );
 
     expect(() => extractEndpointConstants(templated)).toThrow(
@@ -142,7 +142,7 @@ describe('extractEndpointConstants', () => {
     );
   });
 
-  it('unwraps value-preserving TypeScript wrappers around the string literal', () => {
+  it("unwraps value-preserving TypeScript wrappers around the string literal", () => {
     const asConst = replaceOnce(
       MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
@@ -170,11 +170,11 @@ describe('extractEndpointConstants', () => {
     );
   });
 
-  it('accepts a no-substitution template literal as a plain string value', () => {
+  it("accepts a no-substitution template literal as a plain string value", () => {
     const backtickValue = replaceOnce(
       MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
-      'const EMAIL_DOMAIN = `in.markpost.io`;',
+      "const EMAIL_DOMAIN = `in.markpost.io`;",
     );
 
     const constants = extractEndpointConstants(backtickValue);
@@ -184,7 +184,7 @@ describe('extractEndpointConstants', () => {
     );
   });
 
-  it('throws loudly, distinct from a missing constant, when markpost uses a reassignable binding', () => {
+  it("throws loudly, distinct from a missing constant, when markpost uses a reassignable binding", () => {
     const letBinding = replaceOnce(
       MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
@@ -201,11 +201,11 @@ describe('extractEndpointConstants', () => {
     );
   });
 
-  it('throws loudly when markpost drops one of the constants', () => {
+  it("throws loudly when markpost drops one of the constants", () => {
     const withoutEmailDomain = replaceOnce(
       MARKPOST_SOURCE,
       'const EMAIL_DOMAIN = "in.markpost.io";',
-      '',
+      "",
     );
 
     expect(() => extractEndpointConstants(withoutEmailDomain)).toThrow(

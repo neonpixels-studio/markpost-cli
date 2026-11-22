@@ -1,20 +1,20 @@
-import { getConfigValue } from '#src/libs/config.js';
+import { getConfigValue } from "#src/libs/config.js";
 import {
   ApiError,
   ApiErrorEnvelope,
   ApiResponse,
-} from '#src/types/api.types.js';
-import { logErrorMessage, messageFromError } from '#src/libs/errors.js';
-import { recordAuthFailure } from '#src/libs/alpha.js';
+} from "#src/types/api.types.js";
+import { logErrorMessage, messageFromError } from "#src/libs/errors.js";
+import { recordAuthFailure } from "#src/libs/alpha.js";
 
-const DEFAULT_BASE_URL = 'https://markpost.io';
-const HTTPS_PROTOCOL = 'https:';
-const HTTP_PROTOCOL = 'http:';
+const DEFAULT_BASE_URL = "https://markpost.io";
+const HTTPS_PROTOCOL = "https:";
+const HTTP_PROTOCOL = "http:";
 // `URL.hostname` keeps the brackets on an IPv6 literal.
 const LOOPBACK_HOSTNAMES: readonly string[] = [
-  'localhost',
-  '127.0.0.1',
-  '[::1]',
+  "localhost",
+  "127.0.0.1",
+  "[::1]",
 ];
 
 // Thrown when BASE_URL would send the bearer token somewhere unsafe (cleartext
@@ -24,7 +24,7 @@ export class InvalidBaseUrlError extends Error {
     super(
       `Refusing to use BASE_URL: ${reason} The API token was not sent. Use an https:// URL, or http:// only for localhost, 127.0.0.1, or [::1].`,
     );
-    this.name = 'InvalidBaseUrlError';
+    this.name = "InvalidBaseUrlError";
   }
 }
 
@@ -32,7 +32,7 @@ const parseBaseUrl = (baseUrl: string): URL => {
   try {
     return new URL(baseUrl);
   } catch {
-    throw new InvalidBaseUrlError('it is not a valid URL.');
+    throw new InvalidBaseUrlError("it is not a valid URL.");
   }
 };
 
@@ -68,7 +68,7 @@ export const getBaseUrl = () => {
 };
 
 export const getApiToken = (): string | undefined => {
-  return process.env.API_TOKEN ?? getConfigValue('apiToken');
+  return process.env.API_TOKEN ?? getConfigValue("apiToken");
 };
 
 // How long any API request may stall before it's aborted. Without this a
@@ -82,7 +82,7 @@ export const API_REQUEST_TIMEOUT_MS = 30_000;
 export class ApiTimeoutError extends Error {
   constructor(url: string) {
     super(`Request to ${url} timed out after ${API_REQUEST_TIMEOUT_MS}ms`);
-    this.name = 'ApiTimeoutError';
+    this.name = "ApiTimeoutError";
   }
 }
 
@@ -98,7 +98,7 @@ const MAX_CAUSE_DEPTH = 8;
 // ("terminated") with the real reason on `.cause`, and some paths report a
 // plain `AbortError`. Match either abort name, walking the (bounded) cause
 // chain, and let every unrelated rejection pass through untouched.
-const ABORT_ERROR_NAMES = new Set(['TimeoutError', 'AbortError']);
+const ABORT_ERROR_NAMES = new Set(["TimeoutError", "AbortError"]);
 
 const isTimeoutAbort = (error: unknown): boolean => {
   let current: unknown = error;
@@ -145,7 +145,7 @@ const readBody = async (response: Response): Promise<unknown> => {
 // override the timeout.
 export const apiFetch = async (
   url: string,
-  init: Omit<RequestInit, 'signal'> = {},
+  init: Omit<RequestInit, "signal"> = {},
 ): Promise<ApiFetchResult> => {
   try {
     const response = await fetch(url, {
@@ -222,7 +222,7 @@ export class ApiRequestError extends Error {
 
   constructor(message: string, statusCode: number) {
     super(message);
-    this.name = 'ApiRequestError';
+    this.name = "ApiRequestError";
     this.statusCode = statusCode;
   }
 
@@ -304,18 +304,18 @@ export const isFatalRequestError = (error: unknown): error is ApiRequestError =>
 // generic label if handed a non-systemic error, so a mislabel can't happen.
 const failureKind = (error: ApiRequestError): string => {
   if (error.isAuthFailure) {
-    return 'Authentication failed';
+    return "Authentication failed";
   }
 
   if (error.isRateLimited) {
-    return 'Rate limited';
+    return "Rate limited";
   }
 
   if (error.isServerError) {
-    return 'Server error';
+    return "Server error";
   }
 
-  return 'Request failed';
+  return "Request failed";
 };
 
 // Human-readable summary of a systemic failure for the abort message.
@@ -361,10 +361,10 @@ export const formatErrorMessages = (errors: ApiError[]) => {
   if (errors.length > 1) {
     return errors
       .map((error) => `- ${error.title}: ${error.detail}`)
-      .join('\n');
+      .join("\n");
   }
 
-  return 'Unknown error occurred';
+  return "Unknown error occurred";
 };
 
 // markpost's systemic failures often carry no `data.errors` body (e.g.
@@ -372,9 +372,9 @@ export const formatErrorMessages = (errors: ApiError[]) => {
 // useless "Unknown error occurred". These give the user something to act on
 // when the body is empty; a populated `data.errors` still wins over them.
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
-  401: 'Invalid or missing API token — run `markpost config` to set a valid one',
-  403: 'Access forbidden — your account may be at its plan limit or sign-ups are disabled',
-  429: 'Rate limited — too many requests in a short window; retry shortly',
+  401: "Invalid or missing API token — run `markpost config` to set a valid one",
+  403: "Access forbidden — your account may be at its plan limit or sign-ups are disabled",
+  429: "Rate limited — too many requests in a short window; retry shortly",
 };
 
 const resolveErrorMessage = (
@@ -451,7 +451,7 @@ export const MAX_GET_ATTEMPTS = 3;
 // stall an unattended sync for minutes.
 export const MAX_RETRY_WAIT_MS = 10_000;
 export const BASE_RETRY_BACKOFF_MS = 500;
-const RETRY_AFTER_HEADER = 'Retry-After';
+const RETRY_AFTER_HEADER = "Retry-After";
 const IMF_FIXDATE_PATTERN =
   /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 const MS_PER_SECOND = 1000;
@@ -472,7 +472,7 @@ const defaultSleep = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const isGetRequest = (init: { method?: string }): boolean =>
-  (init.method ?? 'GET').toUpperCase() === 'GET';
+  (init.method ?? "GET").toUpperCase() === "GET";
 
 const isRetryableStatus = (status: number): boolean =>
   status === HTTP_TOO_MANY_REQUESTS || status >= SERVER_ERROR_MIN_STATUS;
@@ -521,7 +521,7 @@ export type AuthedRequestResult = { body: unknown; headers: Headers };
 // Adds the base URL and bearer token to one `apiFetch` call.
 const sendAuthedRequest = (
   path: string,
-  init: Omit<RequestInit, 'headers' | 'signal'> & {
+  init: Omit<RequestInit, "headers" | "signal"> & {
     headers?: Record<string, string>;
   },
 ): Promise<ApiFetchResult> =>
@@ -550,7 +550,7 @@ const sendAuthedRequest = (
 // method is sent exactly once. Network errors and timeouts are not retried.
 export const authedRequestWithHeaders = async (
   path: string,
-  init: Omit<RequestInit, 'headers' | 'signal'> & {
+  init: Omit<RequestInit, "headers" | "signal"> & {
     headers?: Record<string, string>;
   } = {},
   options: AuthedRequestOptions = {},
@@ -576,7 +576,7 @@ export const authedRequestWithHeaders = async (
 // opt-in for the one caller that also needs a response header.
 export const authedRequest = async (
   path: string,
-  init: Omit<RequestInit, 'headers' | 'signal'> & {
+  init: Omit<RequestInit, "headers" | "signal"> & {
     headers?: Record<string, string>;
   } = {},
   options: AuthedRequestOptions = {},
@@ -597,7 +597,7 @@ export const unwrapResourceAttributes = <
   TResource extends { attributes: unknown },
 >(
   body: ApiResponse<TResource | null>,
-): TResource['attributes'] | null => body.data?.attributes ?? null;
+): TResource["attributes"] | null => body.data?.attributes ?? null;
 
 // Reads the `attributes` off every resource in a list-success response,
 // dropping (and loudly logging) any resource that's off-contract — no
@@ -611,7 +611,7 @@ export const unwrapResourceCollection = <
   context: string,
   body: ApiResponse<TResource[]>,
   label: string,
-): TResource['attributes'][] => {
+): TResource["attributes"][] => {
   const resources = body.data ?? [];
   const usableResources = resources.filter(
     (resource) => resource?.attributes != null,

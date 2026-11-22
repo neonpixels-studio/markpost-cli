@@ -26,12 +26,12 @@
 //   npm run sync:settings-contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:settings-contract -- --from=<path>    # same, `=` form
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
-import { parseFromPathArg } from './sync-contract.mjs';
+import { parseFromPathArg } from "./sync-contract.mjs";
 import {
   assertPathIsCommitted,
   hasExportModifier,
@@ -41,30 +41,30 @@ import {
   resolveSourceRepo,
   withMarkpostCheckout,
   writeManifest,
-} from './lib/markpost-checkout.mjs';
+} from "./lib/markpost-checkout.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(SCRIPT_DIR, '..');
-const VENDOR_DIR = join(REPO_ROOT, 'tests/types/vendor');
-const VENDOR_FILE = join(VENDOR_DIR, 'markpost-settings-contract.generated.ts');
+const REPO_ROOT = join(SCRIPT_DIR, "..");
+const VENDOR_DIR = join(REPO_ROOT, "tests/types/vendor");
+const VENDOR_FILE = join(VENDOR_DIR, "markpost-settings-contract.generated.ts");
 const MANIFEST_FILE = join(
   VENDOR_DIR,
-  'markpost-settings-contract.manifest.json',
+  "markpost-settings-contract.manifest.json",
 );
 
-const CONFLICT_STRATEGIES_SOURCE_PATH = 'server/utils/response.ts';
-const CONFLICT_STRATEGIES_DECLARATION_NAME = 'CONFLICT_STRATEGIES';
+const CONFLICT_STRATEGIES_SOURCE_PATH = "server/utils/response.ts";
+const CONFLICT_STRATEGIES_DECLARATION_NAME = "CONFLICT_STRATEGIES";
 
-const SCHEMA_SOURCE_PATH = 'server/db/schema.ts';
-const USER_SETTINGS_TABLE_VARIABLE = 'userSettings';
+const SCHEMA_SOURCE_PATH = "server/db/schema.ts";
+const USER_SETTINGS_TABLE_VARIABLE = "userSettings";
 // The subset of `user_settings` columns settings.types.ts actually mirrors a
 // default for (vaultDir/filenameTemplate/theme/accentColor are plain strings
 // the CLI never falls back on — see the comment on UpdateSettingsInput).
 const DEFAULT_COLUMN_NAMES = [
-  'autoSync',
-  'autoDelete',
-  'frontmatter',
-  'conflictStrategy',
+  "autoSync",
+  "autoDelete",
+  "frontmatter",
+  "conflictStrategy",
 ];
 
 const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
@@ -124,11 +124,11 @@ function assertConflictStrategiesIsSelfContained(declaration) {
   if (!isArrayOfStringLiterals) {
     throw new Error(
       `${CONFLICT_STRATEGIES_SOURCE_PATH}'s ${CONFLICT_STRATEGIES_DECLARATION_NAME} ` +
-        'is no longer a plain array of string literals (e.g. it now references ' +
-        'another identifier, spreads another array, or is computed) — vendoring ' +
-        'it verbatim would produce a vendored file with a dangling reference. ' +
-        'Update scripts/sync-settings-contract.mjs to extract the referenced ' +
-        'identifier(s) too.',
+        "is no longer a plain array of string literals (e.g. it now references " +
+        "another identifier, spreads another array, or is computed) — vendoring " +
+        "it verbatim would produce a vendored file with a dangling reference. " +
+        "Update scripts/sync-settings-contract.mjs to extract the referenced " +
+        "identifier(s) too.",
     );
   }
 }
@@ -158,8 +158,8 @@ export function extractConflictStrategiesDeclaration(source) {
     throw new Error(
       `${CONFLICT_STRATEGIES_SOURCE_PATH} no longer declares ` +
         `${CONFLICT_STRATEGIES_DECLARATION_NAME} — markpost renamed or removed ` +
-        'the conflict-strategy enum; update scripts/sync-settings-contract.mjs ' +
-        'and src/types/settings.types.ts to match',
+        "the conflict-strategy enum; update scripts/sync-settings-contract.mjs " +
+        "and src/types/settings.types.ts to match",
     );
   }
 
@@ -167,9 +167,9 @@ export function extractConflictStrategiesDeclaration(source) {
     throw new Error(
       `${CONFLICT_STRATEGIES_SOURCE_PATH} now declares ` +
         `${CONFLICT_STRATEGIES_DECLARATION_NAME} alongside another declarator in ` +
-        'the same statement — vendoring the whole statement verbatim would carry ' +
-        'that declarator along too. Update scripts/sync-settings-contract.mjs to ' +
-        'extract just the one declaration.',
+        "the same statement — vendoring the whole statement verbatim would carry " +
+        "that declarator along too. Update scripts/sync-settings-contract.mjs to " +
+        "extract just the one declaration.",
     );
   }
 
@@ -193,7 +193,7 @@ function findDefaultCall(expression) {
 
   if (
     ts.isPropertyAccessExpression(expression.expression) &&
-    expression.expression.name.text === 'default'
+    expression.expression.name.text === "default"
   ) {
     return expression;
   }
@@ -220,8 +220,8 @@ function literalToJsValue(node, columnName) {
 
   throw new Error(
     `${SCHEMA_SOURCE_PATH} column "${columnName}" has a .default(...) value ` +
-      'that is neither a boolean nor a string literal — update ' +
-      'scripts/sync-settings-contract.mjs to handle it',
+      "that is neither a boolean nor a string literal — update " +
+      "scripts/sync-settings-contract.mjs to handle it",
   );
 }
 
@@ -285,8 +285,8 @@ export function extractUserSettingsDefaults(source) {
   if (!columns) {
     throw new Error(
       `${SCHEMA_SOURCE_PATH} has no \`${USER_SETTINGS_TABLE_VARIABLE} = pgTable(...)\` ` +
-        'definition — markpost renamed or restructured the settings table; ' +
-        'update scripts/sync-settings-contract.mjs to match',
+        "definition — markpost renamed or restructured the settings table; " +
+        "update scripts/sync-settings-contract.mjs to match",
     );
   }
 
@@ -315,10 +315,10 @@ export function extractUserSettingsDefaults(source) {
   if (missingColumns.length > 0) {
     throw new Error(
       `${SCHEMA_SOURCE_PATH}'s ${USER_SETTINGS_TABLE_VARIABLE} table is missing a ` +
-        `.default(...) for column(s): ${missingColumns.join(', ')} — markpost ` +
-        'renamed, removed, or stopped defaulting a column the CLI falls back ' +
-        'on; update scripts/sync-settings-contract.mjs and ' +
-        'src/types/settings.types.ts to match',
+        `.default(...) for column(s): ${missingColumns.join(", ")} — markpost ` +
+        "renamed, removed, or stopped defaulting a column the CLI falls back " +
+        "on; update scripts/sync-settings-contract.mjs and " +
+        "src/types/settings.types.ts to match",
     );
   }
 
@@ -331,18 +331,18 @@ function renderUserSettingsDefaults(defaults) {
   );
 
   return [
-    'export const USER_SETTINGS_DEFAULTS = {',
+    "export const USER_SETTINGS_DEFAULTS = {",
     ...lines,
-    '} as const;',
-  ].join('\n');
+    "} as const;",
+  ].join("\n");
 }
 
 function writeVendoredFile(conflictStrategiesDeclaration, defaults) {
   const body = [
     conflictStrategiesDeclaration,
-    '',
+    "",
     renderUserSettingsDefaults(defaults),
-  ].join('\n');
+  ].join("\n");
 
   mkdirSync(VENDOR_DIR, { recursive: true });
   writeFileSync(VENDOR_FILE, `${VENDOR_FILE_HEADER}${body}\n`);
@@ -390,12 +390,12 @@ function main() {
 
   withMarkpostCheckout(
     fromPath,
-    'markpost-settings-contract-sync-',
+    "markpost-settings-contract-sync-",
     (checkoutDir) => {
       syncFrom(checkoutDir);
       console.log(`Synced ${VENDOR_FILE} from ${checkoutDir}`);
       console.log(
-        'Review the diff, then run `npm run build` and `npm test` before committing.',
+        "Review the diff, then run `npm run build` and `npm test` before committing.",
       );
     },
   );

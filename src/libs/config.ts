@@ -1,21 +1,21 @@
-import Conf from 'conf';
-import envPaths from 'env-paths';
-import path from 'node:path';
-import packageJson from './../../package.json' with { type: 'json' };
-import { input } from '@inquirer/prompts';
-import chalk from 'chalk';
+import Conf from "conf";
+import envPaths from "env-paths";
+import path from "node:path";
+import packageJson from "./../../package.json" with { type: "json" };
+import { input } from "@inquirer/prompts";
+import chalk from "chalk";
 import {
   JSON_ERROR_CONFIG_REQUIRED,
   printJsonError,
-} from '#src/libs/output.js';
-import { FIRST_RUN_NOTICE, withWaitlistSentence } from '#src/libs/alpha.js';
+} from "#src/libs/output.js";
+import { FIRST_RUN_NOTICE, withWaitlistSentence } from "#src/libs/alpha.js";
 
 const schema = {
   apiToken: {
-    type: 'string',
+    type: "string",
   },
   outputDirectory: {
-    type: 'string',
+    type: "string",
   },
 };
 
@@ -25,15 +25,15 @@ const schema = {
 // upgrading doesn't strand existing users' API token and settings. env-paths
 // is called with a safe placeholder that is then swapped for the scoped path,
 // which keeps each platform's layout (e.g. Windows' trailing `Config`).
-const CONFIG_DIRECTORY_PLACEHOLDER = 'markpost-config-directory';
+const CONFIG_DIRECTORY_PLACEHOLDER = "markpost-config-directory";
 const LEGACY_CONFIG_DIRECTORY = path.join(
-  ...`${packageJson.name}-nodejs`.split('/'),
+  ...`${packageJson.name}-nodejs`.split("/"),
 );
 
 const resolveConfigDirectory = (): string => {
   const { config: placeholderDirectory } = envPaths(
     CONFIG_DIRECTORY_PLACEHOLDER,
-    { suffix: '' },
+    { suffix: "" },
   );
 
   return placeholderDirectory.replace(
@@ -54,8 +54,8 @@ export const config = new Conf({
 // source of truth so the `config` command can iterate and validate against it
 // rather than hard-coding the key list a second time.
 export const CONFIG_KEYS = [
-  'apiToken',
-  'outputDirectory',
+  "apiToken",
+  "outputDirectory",
 ] as const satisfies readonly (keyof typeof schema)[];
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -90,15 +90,15 @@ type ConfigField = {
 };
 
 const API_TOKEN_FIELD: ConfigField = {
-  key: 'apiToken',
-  envVar: 'API_TOKEN',
-  promptMessage: 'Sync API Token',
+  key: "apiToken",
+  envVar: "API_TOKEN",
+  promptMessage: "Sync API Token",
 };
 
 const OUTPUT_DIRECTORY_FIELD: ConfigField = {
-  key: 'outputDirectory',
-  envVar: 'OUTPUT_DIRECTORY',
-  promptMessage: 'Output Directory',
+  key: "outputDirectory",
+  envVar: "OUTPUT_DIRECTORY",
+  promptMessage: "Output Directory",
 };
 
 // Every field checkConfig requires, in resolution order. Kept as data (like

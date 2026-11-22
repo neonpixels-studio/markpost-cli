@@ -5,23 +5,23 @@
 // README.md#contract-sync) and reviewed like any other diff; this test only
 // checks that the *currently committed* vendored copy still exports what the
 // CLI expects, and that the CLI's own source compiles against it.
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
-import ts from 'typescript';
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import ts from "typescript";
 
-import { DELETIONS_QUERY_KEYS } from '#src/libs/deletions.js';
+import { DELETIONS_QUERY_KEYS } from "#src/libs/deletions.js";
 import {
   assertContractIsTypeOnly,
   // @ts-expect-error -- plain .mjs, not part of the typed src/ tree.
-} from '../../scripts/sync-contract.mjs';
+} from "../../scripts/sync-contract.mjs";
 
-const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const TSCONFIG_PATH = fileURLToPath(
-  new URL('../../tsconfig.json', import.meta.url),
+  new URL("../../tsconfig.json", import.meta.url),
 );
 const VENDOR_CONTRACT_PATH = fileURLToPath(
-  new URL('../../src/types/vendor/markpost-api.types.ts', import.meta.url),
+  new URL("../../src/types/vendor/markpost-api.types.ts", import.meta.url),
 );
 
 // The exact set of type names the CLI's own types (records.types.ts,
@@ -32,10 +32,10 @@ const VENDOR_CONTRACT_PATH = fileURLToPath(
 // including cases (a renamed export becoming an interface, a re-export)
 // this name list wouldn't catch on its own.
 const EXPECTED_VENDORED_EXPORTS = [
-  'ApiError',
-  'ApiResourceObject',
-  'ApiResponse',
-  'RecordDeletionListQuery',
+  "ApiError",
+  "ApiResourceObject",
+  "ApiResponse",
+  "RecordDeletionListQuery",
 ];
 
 // Covers both `export type Foo = ...` and `export interface Foo { ... }` —
@@ -43,7 +43,7 @@ const EXPECTED_VENDORED_EXPORTS = [
 // CLI's usage at all, and this check shouldn't raise a false alarm if it does.
 function exportedTypeNames(sourceText: string): string[] {
   const sourceFile = ts.createSourceFile(
-    'markpost-api.types.ts',
+    "markpost-api.types.ts",
     sourceText,
     ts.ScriptTarget.Latest,
     true,
@@ -60,7 +60,9 @@ function exportedTypeNames(sourceText: string): string[] {
   return names;
 }
 
-function isExported(node: ts.TypeAliasDeclaration | ts.InterfaceDeclaration): boolean {
+function isExported(
+  node: ts.TypeAliasDeclaration | ts.InterfaceDeclaration,
+): boolean {
   return (
     node.modifiers?.some(
       (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
@@ -81,7 +83,7 @@ function parseProjectConfig(): ts.ParsedCommandLine {
 
   if (configFile.error) {
     throw new Error(
-      ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'),
+      ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n"),
     );
   }
 
@@ -126,13 +128,13 @@ function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]): string {
   return ts.formatDiagnosticsWithColorAndContext(diagnostics, {
     getCurrentDirectory: () => process.cwd(),
     getCanonicalFileName: (fileName) => fileName,
-    getNewLine: () => '\n',
+    getNewLine: () => "\n",
   });
 }
 
-describe('markpost contract drift', () => {
-  it('the vendored contract still exports what the CLI depends on', () => {
-    const vendorSource = readFileSync(VENDOR_CONTRACT_PATH, 'utf-8');
+describe("markpost contract drift", () => {
+  it("the vendored contract still exports what the CLI depends on", () => {
+    const vendorSource = readFileSync(VENDOR_CONTRACT_PATH, "utf-8");
     const actualExports = exportedTypeNames(vendorSource);
 
     expect(actualExports).toEqual(
@@ -144,10 +146,10 @@ describe('markpost contract drift', () => {
   // `satisfies` check in src/libs/deletions.ts catches a removed param at
   // compile time, and this catches the reverse: a param markpost added that the
   // CLI does not know about (e.g. a new filter that changes what is complete).
-  it('the CLI sends exactly the deletions query params the contract defines', () => {
-    const vendorSource = readFileSync(VENDOR_CONTRACT_PATH, 'utf-8');
+  it("the CLI sends exactly the deletions query params the contract defines", () => {
+    const vendorSource = readFileSync(VENDOR_CONTRACT_PATH, "utf-8");
     const sourceFile = ts.createSourceFile(
-      'markpost-api.types.ts',
+      "markpost-api.types.ts",
       vendorSource,
       ts.ScriptTarget.Latest,
       true,
@@ -155,7 +157,7 @@ describe('markpost contract drift', () => {
     const queryAlias = sourceFile.statements.find(
       (node): node is ts.TypeAliasDeclaration =>
         ts.isTypeAliasDeclaration(node) &&
-        node.name.text === 'RecordDeletionListQuery',
+        node.name.text === "RecordDeletionListQuery",
     );
 
     expect(queryAlias).toBeDefined();
@@ -175,8 +177,8 @@ describe('markpost contract drift', () => {
   // in tests/scripts/sync-contract.test.ts — a hand-edit, a bad merge, or a
   // copy vendored before this guard existed would otherwise put executable
   // code into the published CLI with only a human diff read to catch it.
-  it('the committed vendored contract contains no runtime statements', () => {
-    const vendorSource = readFileSync(VENDOR_CONTRACT_PATH, 'utf-8');
+  it("the committed vendored contract contains no runtime statements", () => {
+    const vendorSource = readFileSync(VENDOR_CONTRACT_PATH, "utf-8");
 
     expect(() => assertContractIsTypeOnly(vendorSource)).not.toThrow();
   });

@@ -14,7 +14,7 @@
 //   npm run sync:contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:contract -- --from=<path>    # same, `=` form
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -22,22 +22,22 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
-import { resolveSourceRepo } from './lib/markpost-checkout.mjs';
+import { resolveSourceRepo } from "./lib/markpost-checkout.mjs";
 
-const MARKPOST_REPO_URL = 'https://github.com/neonpixels-studio/markpost';
-const CONTRACT_RELATIVE_PATH = 'server/types/api.types.ts';
+const MARKPOST_REPO_URL = "https://github.com/neonpixels-studio/markpost";
+const CONTRACT_RELATIVE_PATH = "server/types/api.types.ts";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(SCRIPT_DIR, '..');
-const VENDOR_DIR = join(REPO_ROOT, 'src/types/vendor');
-const VENDOR_FILE = join(VENDOR_DIR, 'markpost-api.types.ts');
-const MANIFEST_FILE = join(VENDOR_DIR, 'manifest.json');
+const REPO_ROOT = join(SCRIPT_DIR, "..");
+const VENDOR_DIR = join(REPO_ROOT, "src/types/vendor");
+const VENDOR_FILE = join(VENDOR_DIR, "markpost-api.types.ts");
+const MANIFEST_FILE = join(VENDOR_DIR, "manifest.json");
 
 const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 //
@@ -65,45 +65,45 @@ const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 // on the no-`--from` path) so `--from ../markpost --dry-run` doesn't
 // silently ignore the typo'd `--dry-run` and proceed.
 function parseFromPathArg(argv) {
-  const spaceFlagIndex = argv.indexOf('--from');
+  const spaceFlagIndex = argv.indexOf("--from");
   // The index directly after a bare `--from` is its path value, not a
   // separate argument to validate — but only when `--from` is actually
   // present (`-1 + 1 === 0` would otherwise wrongly exempt argv[0]).
   const pathValueIndex = spaceFlagIndex === -1 ? undefined : spaceFlagIndex + 1;
   const unrecognized = argv.filter(
     (argument, index) =>
-      argument !== '--from' &&
-      !argument.startsWith('--from=') &&
+      argument !== "--from" &&
+      !argument.startsWith("--from=") &&
       index !== pathValueIndex,
   );
 
   if (unrecognized.length > 0) {
-    throw new Error(`Unrecognized argument(s): ${unrecognized.join(', ')}`);
+    throw new Error(`Unrecognized argument(s): ${unrecognized.join(", ")}`);
   }
 
   // A duplicated `--from` (either form, or a mix of both) must not silently
   // pick one occurrence and drop the other — that's the same
   // wrong-checkout-gets-vendored risk the whitelist above exists to prevent.
   const fromOccurrences = argv.filter(
-    (argument) => argument === '--from' || argument.startsWith('--from='),
+    (argument) => argument === "--from" || argument.startsWith("--from="),
   ).length;
 
   if (fromOccurrences > 1) {
-    throw new Error('--from may only be given once');
+    throw new Error("--from may only be given once");
   }
 
-  const equalsFlag = argv.find((argument) => argument.startsWith('--from='));
+  const equalsFlag = argv.find((argument) => argument.startsWith("--from="));
 
   if (!equalsFlag && spaceFlagIndex === -1) {
     return undefined;
   }
 
   const fromPath = equalsFlag
-    ? equalsFlag.slice('--from='.length)
+    ? equalsFlag.slice("--from=".length)
     : argv[spaceFlagIndex + 1];
 
-  if (!fromPath || fromPath.startsWith('--')) {
-    throw new Error('--from requires a path to a local markpost checkout');
+  if (!fromPath || fromPath.startsWith("--")) {
+    throw new Error("--from requires a path to a local markpost checkout");
   }
 
   if (!existsSync(fromPath)) {
@@ -121,17 +121,17 @@ function parseFromPathArg(argv) {
 // trees download eagerly.
 function cloneMarkpostInto(cloneDir) {
   execFileSync(
-    'git',
-    ['clone', '--filter=blob:none', MARKPOST_REPO_URL, cloneDir],
-    { stdio: 'inherit' },
+    "git",
+    ["clone", "--filter=blob:none", MARKPOST_REPO_URL, cloneDir],
+    { stdio: "inherit" },
   );
 }
 
 function assertContractIsCommitted(checkoutDir) {
   const status = execFileSync(
-    'git',
-    ['status', '--porcelain', '--', CONTRACT_RELATIVE_PATH],
-    { cwd: checkoutDir, encoding: 'utf-8' },
+    "git",
+    ["status", "--porcelain", "--", CONTRACT_RELATIVE_PATH],
+    { cwd: checkoutDir, encoding: "utf-8" },
   ).trim();
 
   if (!status) {
@@ -140,7 +140,7 @@ function assertContractIsCommitted(checkoutDir) {
 
   throw new Error(
     `${CONTRACT_RELATIVE_PATH} has uncommitted changes in ${checkoutDir} — ` +
-      'commit them first so manifest.json records the commit the vendored file actually came from',
+      "commit them first so manifest.json records the commit the vendored file actually came from",
   );
 }
 
@@ -153,15 +153,15 @@ function assertContractIsCommitted(checkoutDir) {
 // needs to fail on, not silently record as `sourceCommit: ""`.
 function readCommitHash(checkoutDir) {
   const commitHash = execFileSync(
-    'git',
-    ['log', '-1', '--format=%H', '--', CONTRACT_RELATIVE_PATH],
-    { cwd: checkoutDir, encoding: 'utf-8' },
+    "git",
+    ["log", "-1", "--format=%H", "--", CONTRACT_RELATIVE_PATH],
+    { cwd: checkoutDir, encoding: "utf-8" },
   ).trim();
 
   if (!commitHash) {
     throw new Error(
       `No commit history found for ${CONTRACT_RELATIVE_PATH} in ${checkoutDir} — ` +
-        'is this a markpost git checkout?',
+        "is this a markpost git checkout?",
     );
   }
 
@@ -177,7 +177,7 @@ function readContractSource(checkoutDir) {
     );
   }
 
-  return readFileSync(contractSourcePath, 'utf-8');
+  return readFileSync(contractSourcePath, "utf-8");
 }
 
 // True for an `import` statement that carries no runtime value: either the
@@ -265,7 +265,7 @@ function assertContractIsTypeOnly(contractSource) {
               sourceFile.getLineAndCharacterOfPosition(statement.getStart())
                 .line + 1,
           )
-          .join(', ')} — refusing to vendor a file that isn't type-only`,
+          .join(", ")} — refusing to vendor a file that isn't type-only`,
     );
   }
 }
@@ -313,7 +313,7 @@ function main() {
   // below covers a clone that fails partway through, not just a successful one.
   const temporaryCloneDir = fromPath
     ? undefined
-    : mkdtempSync(join(tmpdir(), 'markpost-contract-sync-'));
+    : mkdtempSync(join(tmpdir(), "markpost-contract-sync-"));
 
   try {
     if (temporaryCloneDir) {
@@ -325,7 +325,7 @@ function main() {
     syncFrom(checkoutDir);
     console.log(`Synced ${VENDOR_FILE} from ${checkoutDir}`);
     console.log(
-      'Review the diff, then run `npm run build` and `npm test` before committing.',
+      "Review the diff, then run `npm run build` and `npm test` before committing.",
     );
   } finally {
     if (temporaryCloneDir) {

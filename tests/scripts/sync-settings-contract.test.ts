@@ -4,13 +4,13 @@
 // tests/types/settings.types.test.ts; this only proves the extractor pulls
 // the right declaration/defaults and fails loudly when markpost renames or
 // drops one.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
 import {
   extractConflictStrategiesDeclaration,
   extractUserSettingsDefaults,
   // @ts-expect-error -- plain .mjs, not part of the typed src/ tree.
-} from '../../scripts/sync-settings-contract.mjs';
+} from "../../scripts/sync-settings-contract.mjs";
 
 const RESPONSE_SOURCE = `
 import type { ApiResourceObject, ApiResponse } from "../types/api.types";
@@ -42,8 +42,8 @@ export const userSettings = pgTable("user_settings", {
 });
 `;
 
-describe('extractConflictStrategiesDeclaration', () => {
-  it('pulls the CONFLICT_STRATEGIES declaration verbatim', () => {
+describe("extractConflictStrategiesDeclaration", () => {
+  it("pulls the CONFLICT_STRATEGIES declaration verbatim", () => {
     const declaration = extractConflictStrategiesDeclaration(RESPONSE_SOURCE);
 
     expect(declaration).toContain(
@@ -51,27 +51,27 @@ describe('extractConflictStrategiesDeclaration', () => {
     );
   });
 
-  it('leaves the unrelated RecordAttributes type behind', () => {
+  it("leaves the unrelated RecordAttributes type behind", () => {
     const declaration = extractConflictStrategiesDeclaration(RESPONSE_SOURCE);
 
-    expect(declaration).not.toContain('RecordAttributes');
+    expect(declaration).not.toContain("RecordAttributes");
   });
 
-  it('exports the declaration even if markpost stops exporting it', () => {
+  it("exports the declaration even if markpost stops exporting it", () => {
     const withoutExport = RESPONSE_SOURCE.replace(
-      'export const CONFLICT_STRATEGIES',
-      'const CONFLICT_STRATEGIES',
+      "export const CONFLICT_STRATEGIES",
+      "const CONFLICT_STRATEGIES",
     );
 
     expect(extractConflictStrategiesDeclaration(withoutExport)).toContain(
-      'export const CONFLICT_STRATEGIES',
+      "export const CONFLICT_STRATEGIES",
     );
   });
 
-  it('throws loudly when markpost renames or removes CONFLICT_STRATEGIES', () => {
+  it("throws loudly when markpost renames or removes CONFLICT_STRATEGIES", () => {
     const renamed = RESPONSE_SOURCE.replace(
-      'CONFLICT_STRATEGIES',
-      'SYNC_CONFLICT_STRATEGIES',
+      "CONFLICT_STRATEGIES",
+      "SYNC_CONFLICT_STRATEGIES",
     );
 
     expect(() => extractConflictStrategiesDeclaration(renamed)).toThrow(
@@ -84,7 +84,7 @@ describe('extractConflictStrategiesDeclaration', () => {
   // writing CONFLICT_STRATEGIES as a plain array of string literals (e.g. it
   // starts referencing another constant), a verbatim copy would compile to a
   // dangling reference in the vendored file.
-  it('throws loudly when CONFLICT_STRATEGIES references another identifier instead of a string literal', () => {
+  it("throws loudly when CONFLICT_STRATEGIES references another identifier instead of a string literal", () => {
     const referencesAnotherConst = RESPONSE_SOURCE.replace(
       'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
       'const SUFFIX = "suffix";\nexport const CONFLICT_STRATEGIES = [SUFFIX, "overwrite", "skip"] as const;',
@@ -95,7 +95,7 @@ describe('extractConflictStrategiesDeclaration', () => {
     ).toThrow(/plain array of string literals/);
   });
 
-  it('throws loudly when CONFLICT_STRATEGIES is no longer an array literal', () => {
+  it("throws loudly when CONFLICT_STRATEGIES is no longer an array literal", () => {
     const notAnArray = RESPONSE_SOURCE.replace(
       'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
       'export const CONFLICT_STRATEGIES = Object.freeze(["suffix", "overwrite", "skip"]);',
@@ -106,7 +106,7 @@ describe('extractConflictStrategiesDeclaration', () => {
     );
   });
 
-  it('throws loudly when CONFLICT_STRATEGIES shares a statement with another declarator', () => {
+  it("throws loudly when CONFLICT_STRATEGIES shares a statement with another declarator", () => {
     const withSiblingDeclarator = RESPONSE_SOURCE.replace(
       'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
       'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const, OTHER = 1;',
@@ -121,7 +121,7 @@ describe('extractConflictStrategiesDeclaration', () => {
   // wrapper markpost could reasonably write — `satisfies` and redundant
   // parens are just as self-contained and must not be misdiagnosed as "now
   // references another identifier".
-  it('accepts CONFLICT_STRATEGIES wrapped in both as const and satisfies', () => {
+  it("accepts CONFLICT_STRATEGIES wrapped in both as const and satisfies", () => {
     const withSatisfies = RESPONSE_SOURCE.replace(
       'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
       'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const satisfies readonly string[];',
@@ -132,7 +132,7 @@ describe('extractConflictStrategiesDeclaration', () => {
     ).not.toThrow();
   });
 
-  it('accepts CONFLICT_STRATEGIES wrapped in redundant parens', () => {
+  it("accepts CONFLICT_STRATEGIES wrapped in redundant parens", () => {
     const withParens = RESPONSE_SOURCE.replace(
       'export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;',
       'export const CONFLICT_STRATEGIES = (["suffix", "overwrite", "skip"] as const);',
@@ -144,24 +144,24 @@ describe('extractConflictStrategiesDeclaration', () => {
   });
 });
 
-describe('extractUserSettingsDefaults', () => {
-  it('extracts the boolean and string defaults for the tracked columns', () => {
+describe("extractUserSettingsDefaults", () => {
+  it("extracts the boolean and string defaults for the tracked columns", () => {
     expect(extractUserSettingsDefaults(SCHEMA_SOURCE)).toEqual({
       autoSync: true,
       autoDelete: true,
       frontmatter: true,
-      conflictStrategy: 'suffix',
+      conflictStrategy: "suffix",
     });
   });
 
-  it('ignores untracked columns (vaultDir, theme) and other tables (users)', () => {
+  it("ignores untracked columns (vaultDir, theme) and other tables (users)", () => {
     const defaults = extractUserSettingsDefaults(SCHEMA_SOURCE);
 
-    expect(defaults).not.toHaveProperty('vaultDir');
-    expect(defaults).not.toHaveProperty('theme');
+    expect(defaults).not.toHaveProperty("vaultDir");
+    expect(defaults).not.toHaveProperty("theme");
   });
 
-  it('throws loudly when the userSettings table is missing', () => {
+  it("throws loudly when the userSettings table is missing", () => {
     const withoutTable = SCHEMA_SOURCE.replace(
       'export const userSettings = pgTable("user_settings", {',
       'export const renamedSettings = pgTable("user_settings", {',
@@ -172,7 +172,7 @@ describe('extractUserSettingsDefaults', () => {
     );
   });
 
-  it('throws loudly when a tracked column loses its default', () => {
+  it("throws loudly when a tracked column loses its default", () => {
     const withoutDefault = SCHEMA_SOURCE.replace(
       'autoSync: boolean("auto_sync").notNull().default(true),',
       'autoSync: boolean("auto_sync").notNull(),',
@@ -183,10 +183,10 @@ describe('extractUserSettingsDefaults', () => {
     );
   });
 
-  it('throws loudly when a tracked column is removed entirely', () => {
+  it("throws loudly when a tracked column is removed entirely", () => {
     const withoutColumn = SCHEMA_SOURCE.replace(
       'conflictStrategy: text("conflict_strategy").notNull().default("suffix"),',
-      '',
+      "",
     );
 
     expect(() => extractUserSettingsDefaults(withoutColumn)).toThrow(
@@ -198,7 +198,7 @@ describe('extractUserSettingsDefaults', () => {
   // (`.default(...).notNull()` as well as `.notNull().default(...)`) — the
   // extractor's recursive walk must find `.default(...)` regardless of which
   // side of `.notNull()` it lands on.
-  it('finds the default when .default(...) comes before .notNull()', () => {
+  it("finds the default when .default(...) comes before .notNull()", () => {
     const reordered = SCHEMA_SOURCE.replace(
       'autoSync: boolean("auto_sync").notNull().default(true),',
       'autoSync: boolean("auto_sync").default(true).notNull(),',
@@ -211,7 +211,7 @@ describe('extractUserSettingsDefaults', () => {
   // a table's second argument (`pgTable("x", (t) => ({ ... }))`, used to
   // reference the table's own columns e.g. for composite indexes) alongside
   // the plain object literal form SCHEMA_SOURCE otherwise uses.
-  it('finds columns when the table uses the callback form', () => {
+  it("finds columns when the table uses the callback form", () => {
     const callbackForm = SCHEMA_SOURCE.replace(
       'export const userSettings = pgTable("user_settings", {',
       'export const userSettings = pgTable("user_settings", (t) => ({',
@@ -224,11 +224,11 @@ describe('extractUserSettingsDefaults', () => {
       autoSync: true,
       autoDelete: true,
       frontmatter: true,
-      conflictStrategy: 'suffix',
+      conflictStrategy: "suffix",
     });
   });
 
-  it('throws loudly when a tracked column has a non-literal default', () => {
+  it("throws loudly when a tracked column has a non-literal default", () => {
     const nonLiteralDefault = SCHEMA_SOURCE.replace(
       'conflictStrategy: text("conflict_strategy").notNull().default("suffix"),',
       'conflictStrategy: text("conflict_strategy").notNull().default(DEFAULT_STRATEGY),',

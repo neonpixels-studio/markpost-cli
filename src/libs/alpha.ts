@@ -3,20 +3,20 @@
 // points them at the waitlist; the copy lives here so it's defined once.
 // `/sign-up` (not `/waitlist`) on purpose: the site redirects it to the
 // waitlist today and can point it at real sign-up later without a CLI release.
-export const WAITLIST_URL = 'https://markpost.io/sign-up';
+export const WAITLIST_URL = "https://markpost.io/sign-up";
 
 export const WAITLIST_SENTENCE = `No account yet? Join the waitlist: ${WAITLIST_URL}`;
 
 export const FIRST_RUN_NOTICE = [
-  'Markpost is in invite-only alpha. You need an API token from an invited account.',
+  "Markpost is in invite-only alpha. You need an API token from an invited account.",
   WAITLIST_SENTENCE,
-].join('\n');
+].join("\n");
 
 export const AUTH_FAILURE_NOTICE = [
-  'Authentication failed. Markpost is in invite-only alpha.',
+  "Authentication failed. Markpost is in invite-only alpha.",
   WAITLIST_SENTENCE,
-  'Already invited? Check your token with `markpost config get apiToken`.',
-].join('\n');
+  "Already invited? Check your token with `markpost config get apiToken`.",
+].join("\n");
 
 // Appends the waitlist sentence to a single-line message (the `--json`
 // `message` field), keeping it one line so a consumer's parser is unaffected.

@@ -1,6 +1,6 @@
-import Conf from 'conf';
-import { dirname } from 'node:path';
-import { getConfigPath } from '#src/libs/config.js';
+import Conf from "conf";
+import { dirname } from "node:path";
+import { getConfigPath } from "#src/libs/config.js";
 
 // What the CLI knows about a note it left in the vault: where it landed
 // (vault-relative, forward slashes) and a hash of the exact bytes written, so a
@@ -27,7 +27,7 @@ let ledgerStore: Conf<LedgerStore> | undefined;
 const openLedger = (): Conf<LedgerStore> => {
   ledgerStore ??= new Conf<LedgerStore>({
     cwd: dirname(getConfigPath()),
-    configName: 'vault-ledger',
+    configName: "vault-ledger",
     configFileMode: LEDGER_FILE_MODE,
     defaults: { entries: {} },
   });
@@ -36,14 +36,14 @@ const openLedger = (): Conf<LedgerStore> => {
 };
 
 // Thin seams over the store (like config.ts) so callers mock them in isolation.
-export const getLedgerEntries = (): LedgerStore['entries'] => {
-  return openLedger().get('entries');
+export const getLedgerEntries = (): LedgerStore["entries"] => {
+  return openLedger().get("entries");
 };
 
 export const recordLedgerEntries = (newEntries: {
   [uuid: string]: LedgerEntry;
 }): void => {
-  openLedger().set('entries', { ...getLedgerEntries(), ...newEntries });
+  openLedger().set("entries", { ...getLedgerEntries(), ...newEntries });
 };
 
 export const removeLedgerEntries = (uuids: string[]): void => {
@@ -56,13 +56,13 @@ export const removeLedgerEntries = (uuids: string[]): void => {
   uuids.forEach((uuid) => {
     delete remaining[uuid];
   });
-  openLedger().set('entries', remaining);
+  openLedger().set("entries", remaining);
 };
 
 export const getLastDeletionSync = (): string | undefined => {
-  return openLedger().get('lastDeletionSync');
+  return openLedger().get("lastDeletionSync");
 };
 
 export const setLastDeletionSync = (isoTimestamp: string): void => {
-  openLedger().set('lastDeletionSync', isoTimestamp);
+  openLedger().set("lastDeletionSync", isoTimestamp);
 };

@@ -1,5 +1,5 @@
-import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
-import type { ScopeName } from '#src/types/vendor/markpost-scopes.generated.js';
+import type { ApiResourceObject, ApiResponse } from "#src/types/api.types.js";
+import type { ScopeName } from "#src/types/vendor/markpost-scopes.generated.js";
 
 // Mirrors markpost's API token contract by hand (markpost is the source of
 // truth): the resource shape from `tokenSerializer`
@@ -54,14 +54,14 @@ export type UpdateTokenScopesInput = {
 // The JSON:API resource object markpost's `tokenSerializer` produces:
 // `attributes` plus the `type`/`id`/`links` envelope fields.
 export type TokenResource = ApiResourceObject & {
-  type: 'api_tokens';
+  type: "api_tokens";
   attributes: Token;
 };
 
 // The mint response is the only place `attributes` carries the one-time
 // `token` secret alongside the rest of the resource.
 export type CreatedTokenResource = ApiResourceObject & {
-  type: 'api_tokens';
+  type: "api_tokens";
   attributes: CreatedToken;
 };
 

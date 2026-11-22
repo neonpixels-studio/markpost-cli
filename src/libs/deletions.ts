@@ -1,29 +1,29 @@
-import { lstatSync, readFileSync, unlinkSync } from 'node:fs';
-import { authedRequest } from '#src/libs/api.js';
-import { messageFromError } from '#src/libs/errors.js';
-import { resolveWithinVault } from '#src/libs/filePathSafety.js';
-import { hashContent } from '#src/libs/markdown.js';
+import { lstatSync, readFileSync, unlinkSync } from "node:fs";
+import { authedRequest } from "#src/libs/api.js";
+import { messageFromError } from "#src/libs/errors.js";
+import { resolveWithinVault } from "#src/libs/filePathSafety.js";
+import { hashContent } from "#src/libs/markdown.js";
 import {
   getLedgerEntries,
   LedgerEntry,
   removeLedgerEntries,
-} from '#src/libs/vault-ledger.js';
+} from "#src/libs/vault-ledger.js";
 import {
   RecordDeletion,
   RecordDeletionList,
-} from '#src/types/records.types.js';
-import type { RecordDeletionListQuery } from '#src/types/vendor/markpost-api.types.js';
+} from "#src/types/records.types.js";
+import type { RecordDeletionListQuery } from "#src/types/vendor/markpost-api.types.js";
 
-const DELETIONS_PATH = '/api/records/deletions';
+const DELETIONS_PATH = "/api/records/deletions";
 const DELETIONS_PAGE_SIZE = 100;
 
 // Typed against the vendored `RecordDeletionListQuery`, so a renamed or removed
 // server query param fails the build (and the drift test) instead of silently
 // sending a param the server ignores.
 export const DELETIONS_QUERY_KEYS = {
-  size: 'page[size]',
-  after: 'page[after]',
-  since: 'filter[since]',
+  size: "page[size]",
+  after: "page[after]",
+  since: "filter[since]",
 } as const satisfies { [name: string]: keyof RecordDeletionListQuery };
 
 export type DeletionFeed = {
@@ -54,16 +54,16 @@ const buildDeletionsQuery = (since?: string, after?: string): string => {
 const readTombstones = (page: RecordDeletionList): RecordDeletion[] => {
   if (!Array.isArray(page.data)) {
     throw new Error(
-      'The deletions feed returned no data array; refusing to treat it as complete.',
+      "The deletions feed returned no data array; refusing to treat it as complete.",
     );
   }
 
   return page.data.map((resource) => {
     const attributes = resource?.attributes;
 
-    if (typeof attributes?.recordUuid !== 'string') {
+    if (typeof attributes?.recordUuid !== "string") {
       throw new Error(
-        'The deletions feed returned an entry without a recordUuid; refusing to treat the feed as complete.',
+        "The deletions feed returned an entry without a recordUuid; refusing to treat the feed as complete.",
       );
     }
 
@@ -87,7 +87,7 @@ const nextCursor = (
 
   if (!cursor || seenCursors.has(cursor)) {
     throw new Error(
-      'The deletions feed reports more pages but gave no new cursor; refusing to treat it as complete.',
+      "The deletions feed reports more pages but gave no new cursor; refusing to treat it as complete.",
     );
   }
 
@@ -121,10 +121,10 @@ export const fetchDeletionFeed = async (
 };
 
 export type PruneOutcome =
-  | 'remove' // tracked, untouched since the CLI wrote it
-  | 'missing' // tracked, but the file is already gone
-  | 'modified' // tracked, but edited since the CLI wrote it: left alone
-  | 'unsafe'; // tracked, but not a plain file inside the vault: left alone
+  | "remove" // tracked, untouched since the CLI wrote it
+  | "missing" // tracked, but the file is already gone
+  | "modified" // tracked, but edited since the CLI wrote it: left alone
+  | "unsafe"; // tracked, but not a plain file inside the vault: left alone
 
 export type PruneItem = {
   uuid: string;
@@ -157,25 +157,25 @@ const classifyTrackedFile = (
   const absolutePath = resolveOrUndefined(vault, entry.path);
 
   if (!absolutePath) {
-    return 'unsafe';
+    return "unsafe";
   }
 
   const stats = lstatSync(absolutePath, { throwIfNoEntry: false });
 
   if (!stats) {
-    return 'missing';
+    return "missing";
   }
 
   if (!stats.isFile()) {
-    return 'unsafe';
+    return "unsafe";
   }
 
   // A read error (EACCES, EIO) is deliberately not caught: it fails the plan
   // loudly rather than settling the entry, so a transient error cannot make
   // the file permanently untracked.
-  const currentHash = hashContent(readFileSync(absolutePath, 'utf-8'));
+  const currentHash = hashContent(readFileSync(absolutePath, "utf-8"));
 
-  return currentHash === entry.contentHash ? 'remove' : 'modified';
+  return currentHash === entry.contentHash ? "remove" : "modified";
 };
 
 // Only uuids present in the ledger (files this CLI wrote and left on the
@@ -210,7 +210,7 @@ export const planPrune = (
 };
 
 const isMissingFileError = (error: unknown): boolean =>
-  (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+  (error as NodeJS.ErrnoException)?.code === "ENOENT";
 
 const removeFile = (vault: string, path: string): void => {
   try {
@@ -224,7 +224,7 @@ const removeFile = (vault: string, path: string): void => {
 };
 
 const settleItem = (vault: string, item: PruneItem): void => {
-  if (item.outcome === 'remove') {
+  if (item.outcome === "remove") {
     removeFile(vault, item.path);
   }
 };
@@ -253,7 +253,7 @@ export const applyPrune = (plan: PrunePlan, vault: string): void => {
 
   if (failures.length > 0) {
     throw new Error(
-      `Removed ${settled.length} file(s) but could not remove: ${failures.join('; ')}`,
+      `Removed ${settled.length} file(s) but could not remove: ${failures.join("; ")}`,
     );
   }
 };

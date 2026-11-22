@@ -1,32 +1,32 @@
-import { parseArgs } from 'node:util';
-import chalk from 'chalk';
+import { parseArgs } from "node:util";
+import chalk from "chalk";
 import {
   EVENT_FILTER_PARSE_OPTIONS,
   filterEventRows,
   resolveEventFilters,
-} from '#src/libs/event-filters.js';
-import { fetchAllEvents } from '#src/libs/events.js';
-import { fetchEventExport } from '#src/libs/export.js';
+} from "#src/libs/event-filters.js";
+import { fetchAllEvents } from "#src/libs/events.js";
+import { fetchEventExport } from "#src/libs/export.js";
 import {
   parseExportArgs,
   reportIncompleteExport,
   writeToOutputFile,
-} from '#src/libs/export-command.js';
-import { describeApiError } from '#src/libs/api.js';
-import { checkConfig } from '#src/libs/config.js';
-import { failWithMessage, warnPartialRead } from '#src/libs/errors.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
+} from "#src/libs/export-command.js";
+import { describeApiError } from "#src/libs/api.js";
+import { checkConfig } from "#src/libs/config.js";
+import { failWithMessage, warnPartialRead } from "#src/libs/errors.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
 import {
   failWithSubcommandUsage,
   parseOrFailWithUsage,
-} from '#src/libs/usage.js';
-import { hasJsonFlag, printJson } from '#src/libs/output.js';
+} from "#src/libs/usage.js";
+import { hasJsonFlag, printJson } from "#src/libs/output.js";
 import {
   EVENT_KINDS,
   EventExportRow,
   EventFilters,
   EventKind,
-} from '#src/types/events.types.js';
+} from "#src/types/events.types.js";
 
 export const USAGE = `Usage: markpost events <list|export> [options]
 
@@ -55,12 +55,12 @@ export const runEventsCommand = async (args: string[]): Promise<void> => {
 
   // Validate before the config check so a bad subcommand fails on usage
   // alone, without needing a configured account.
-  if (subcommand === 'export') {
+  if (subcommand === "export") {
     await runEventsExport(args.slice(1), json);
     return;
   }
 
-  if (subcommand !== 'list') {
+  if (subcommand !== "list") {
     failWithSubcommandUsage(subcommand, USAGE, json);
     return;
   }
@@ -102,7 +102,7 @@ const parseListArgs = (args: string[]): { filters: EventFilters } => {
     args,
     allowPositionals: true,
     options: {
-      json: { type: 'boolean' },
+      json: { type: "boolean" },
       ...EVENT_FILTER_PARSE_OPTIONS,
     },
   });
@@ -139,7 +139,7 @@ const isEventKind = (kind: string): kind is EventKind =>
 // not throw and take down the whole list. An off-contract *string* value
 // (neither ok/dim/warn/err) still prints, just uncolored.
 const colorizeKind = (kind: unknown): string => {
-  const kindText = String(kind ?? '');
+  const kindText = String(kind ?? "");
   const label = sanitizeForTerminal(kindText.toUpperCase());
 
   if (!isEventKind(kindText)) {
@@ -180,7 +180,7 @@ const listEvents = async (
   // command's catch reports it loudly and exits non-zero, rather than
   // printing the same message an empty log would produce.
   if (!result.ok) {
-    throw new Error('Failed to fetch events from the server.');
+    throw new Error("Failed to fetch events from the server.");
   }
 
   const { events, partial } = result;
@@ -205,8 +205,8 @@ const listEvents = async (
   if (events.length === 0) {
     console.log(
       partial
-        ? 'No events fetched — the read failed partway through.'
-        : 'No events found.',
+        ? "No events fetched — the read failed partway through."
+        : "No events found.",
     );
     return;
   }
@@ -250,7 +250,7 @@ const parseEventExportArgs = (
 } => {
   const { extraValues, ...exportOptions } = parseExportArgs(
     exportArgs,
-    'events export',
+    "events export",
     EVENT_FILTER_PARSE_OPTIONS,
   );
 
@@ -273,7 +273,7 @@ const exportEvents = async (
   // Thrown before any write, so a failed fetch can never touch (or clobber) a
   // previous export file.
   if (!result.ok) {
-    throw new Error('Failed to fetch the events export from the server.');
+    throw new Error("Failed to fetch the events export from the server.");
   }
 
   const { truncated, skippedCount } = result;
@@ -281,7 +281,7 @@ const exportEvents = async (
   reportIncompleteExport(truncated, skippedCount, json);
 
   if (outputPath) {
-    writeToOutputFile(outputPath, rows, force, skippedCount, 'event');
+    writeToOutputFile(outputPath, rows, force, skippedCount, "event");
     return;
   }
 
@@ -291,7 +291,7 @@ const exportEvents = async (
   }
 
   if (rows.length === 0) {
-    console.log('No events to export.');
+    console.log("No events to export.");
     return;
   }
 

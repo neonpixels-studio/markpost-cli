@@ -4,14 +4,14 @@
 // allowlist that includes `dist` and a `prepack`/`prepublishOnly` hook that
 // cleans and rebuilds it, `npm pack`/`npm publish` packs the repo's source
 // tree instead and installers get a package with no working `dist/index.js`.
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
-const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const PACKAGE_JSON_PATH = fileURLToPath(
-  new URL('../package.json', import.meta.url),
+  new URL("../package.json", import.meta.url),
 );
 
 function readPackageJson(): {
@@ -19,7 +19,7 @@ function readPackageJson(): {
   files?: string[];
   scripts?: Record<string, string>;
 } {
-  return JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf-8'));
+  return JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf-8"));
 }
 
 // npm allows `bin` as either a map of command name -> path, or a bare string
@@ -28,7 +28,7 @@ function readPackageJson(): {
 function binTargets(
   bin: Record<string, string> | string | undefined,
 ): string[] {
-  if (typeof bin === 'string') {
+  if (typeof bin === "string") {
     return [bin];
   }
 
@@ -46,7 +46,7 @@ function binRootDirectories(
 
   return [
     ...new Set(
-      targets.map((target) => target.replace(/^\.\//, '').split('/')[0]),
+      targets.map((target) => target.replace(/^\.\//, "").split("/")[0]),
     ),
   ];
 }
@@ -57,11 +57,11 @@ function binRootDirectories(
 // are excludes, not something that should ever satisfy the allowlist check,
 // so they're dropped rather than normalized.
 function normalizeFilesEntry(entry: string): string | undefined {
-  if (entry.startsWith('!')) {
+  if (entry.startsWith("!")) {
     return undefined;
   }
 
-  return entry.replace(/^[./]+/, '').split('/')[0];
+  return entry.replace(/^[./]+/, "").split("/")[0];
 }
 
 function packedTopLevelRoots(files: string[] | undefined): string[] {
@@ -75,15 +75,15 @@ function packedTopLevelRoots(files: string[] | undefined): string[] {
 // appearing anywhere in the script — a hook like `"echo dist && npm run
 // build"` should fail this check, not satisfy it.
 function cleanCommandPattern(binRoot: string): RegExp {
-  const escapedRoot = binRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedRoot = binRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   return new RegExp(
     String.raw`(rm\s+-rf?\s+\.?/?${escapedRoot}\b|rimraf\s+\.?/?${escapedRoot}\b|rmSync\(\s*['"]\.?/?${escapedRoot}['"])`,
   );
 }
 
-describe('package.json publish configuration', () => {
-  it('allowlists every bin target directory via the files field', () => {
+describe("package.json publish configuration", () => {
+  it("allowlists every bin target directory via the files field", () => {
     const packageJson = readPackageJson();
     const packedRoots = packedTopLevelRoots(packageJson.files);
     const binRoots = binRootDirectories(packageJson.bin);
@@ -97,7 +97,7 @@ describe('package.json publish configuration', () => {
     }
   });
 
-  it('cleans and rebuilds every bin target directory before publish', () => {
+  it("cleans and rebuilds every bin target directory before publish", () => {
     const packageJson = readPackageJson();
     const scripts = packageJson.scripts ?? {};
     const buildHook = scripts.prepack ?? scripts.prepublishOnly;
@@ -107,7 +107,7 @@ describe('package.json publish configuration', () => {
     expect(buildHook).toBeDefined();
 
     const hookScript = buildHook as string;
-    const buildIndex = hookScript.indexOf('npm run build');
+    const buildIndex = hookScript.indexOf("npm run build");
 
     expect(hookScript).toMatch(/\bnpm run build\b/);
 
@@ -132,13 +132,13 @@ describe('package.json publish configuration', () => {
   const PACK_TEST_TIMEOUT_MS = 30_000;
 
   it(
-    'actually includes every bin target in the packed tarball',
+    "actually includes every bin target in the packed tarball",
     () => {
-      const packOutput = execFileSync('npm', ['pack', '--dry-run', '--json'], {
+      const packOutput = execFileSync("npm", ["pack", "--dry-run", "--json"], {
         cwd: REPO_ROOT,
-        encoding: 'utf-8',
+        encoding: "utf-8",
         // npm is npm.cmd on Windows, which spawn can only run through a shell.
-        shell: process.platform === 'win32',
+        shell: process.platform === "win32",
       });
       const [packResult] = JSON.parse(packOutput) as [
         { files: { path: string }[] },
@@ -147,7 +147,7 @@ describe('package.json publish configuration', () => {
       const packageJson = readPackageJson();
 
       for (const binTarget of binTargets(packageJson.bin)) {
-        expect(packedPaths).toContain(binTarget.replace(/^\.\//, ''));
+        expect(packedPaths).toContain(binTarget.replace(/^\.\//, ""));
       }
     },
     PACK_TEST_TIMEOUT_MS,

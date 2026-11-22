@@ -2,7 +2,7 @@ import {
   EVENT_KINDS,
   EventFilters,
   EventKind,
-} from '#src/types/events.types.js';
+} from "#src/types/events.types.js";
 
 // The `events list` / `events export` filter flags. Both are declared
 // `multiple: true` so a repeat (`--kind err --kind warn`) can be rejected
@@ -10,8 +10,8 @@ import {
 // the first `filter[kind]` / `filter[sourceId]` value, so repeats are not a
 // supported feature.
 export const EVENT_FILTER_PARSE_OPTIONS = {
-  kind: { type: 'string', multiple: true },
-  source: { type: 'string', multiple: true },
+  kind: { type: "string", multiple: true },
+  source: { type: "string", multiple: true },
 } as const;
 
 // Same shape markpost validates `filter[sourceId]` against
@@ -47,7 +47,7 @@ const singleValue = (
 const parseKind = (
   occurrences: string[] | undefined,
 ): EventKind | undefined => {
-  const kind = singleValue('kind', occurrences);
+  const kind = singleValue("kind", occurrences);
 
   if (kind === undefined) {
     return undefined;
@@ -55,7 +55,7 @@ const parseKind = (
 
   if (!isEventKind(kind)) {
     throw new Error(
-      `--kind must be one of: ${EVENT_KINDS.join(', ')} (got "${kind}").`,
+      `--kind must be one of: ${EVENT_KINDS.join(", ")} (got "${kind}").`,
     );
   }
 
@@ -65,7 +65,7 @@ const parseKind = (
 const parseSourceId = (
   occurrences: string[] | undefined,
 ): string | undefined => {
-  const sourceId = singleValue('source', occurrences);
+  const sourceId = singleValue("source", occurrences);
 
   if (sourceId !== undefined && !UUID_PATTERN.test(sourceId)) {
     throw new Error(

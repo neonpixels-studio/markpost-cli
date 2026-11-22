@@ -3,9 +3,9 @@ import {
   logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
-} from '#src/libs/api.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
-import { ApiResponse } from '#src/types/api.types.js';
+} from "#src/libs/api.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
+import { ApiResponse } from "#src/types/api.types.js";
 import {
   CreatedToken,
   CreatedTokenResource,
@@ -14,10 +14,10 @@ import {
   TokenListApiResponse,
   TokenResource,
   UpdateTokenScopesInput,
-} from '#src/types/tokens.types.js';
+} from "#src/types/tokens.types.js";
 
-const JSON_API_CONTENT_TYPE = 'application/vnd.api+json';
-const TOKENS_PATH = '/api/tokens';
+const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
+const TOKENS_PATH = "/api/tokens";
 
 // Deliberately does not swallow a failed fetch into `[]`: a failure must not
 // masquerade as "no tokens" the way `sources list` currently lets it — see
@@ -28,7 +28,7 @@ const TOKENS_PATH = '/api/tokens';
 export const fetchTokens = async (): Promise<Token[]> => {
   const body = (await authedRequest(TOKENS_PATH)) as TokenListApiResponse;
 
-  return unwrapResourceCollection('fetchTokens', body, 'token');
+  return unwrapResourceCollection("fetchTokens", body, "token");
 };
 
 // Mints a token via markpost's POST /api/tokens. The response reveals the raw
@@ -39,13 +39,13 @@ export const createToken = async (
 ): Promise<CreatedToken | null> => {
   try {
     const body = (await authedRequest(TOKENS_PATH, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': JSON_API_CONTENT_TYPE,
+        "Content-Type": JSON_API_CONTENT_TYPE,
       },
       body: JSON.stringify({
         data: {
-          type: 'api_tokens',
+          type: "api_tokens",
           attributes: input,
         },
       }),
@@ -73,13 +73,13 @@ export const updateTokenScopes = async (
     const body = (await authedRequest(
       `${TOKENS_PATH}/${encodeURIComponent(id)}`,
       {
-        method: 'PATCH',
+        method: "PATCH",
         headers: {
-          'Content-Type': JSON_API_CONTENT_TYPE,
+          "Content-Type": JSON_API_CONTENT_TYPE,
         },
         body: JSON.stringify({
           data: {
-            type: 'api_tokens',
+            type: "api_tokens",
             id,
             attributes: input,
           },
@@ -102,7 +102,7 @@ export const updateTokenScopes = async (
 export const revokeToken = async (id: string): Promise<boolean> => {
   try {
     await authedRequest(`${TOKENS_PATH}/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
 
     return true;

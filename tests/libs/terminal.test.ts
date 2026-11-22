@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   confirmRefusal,
@@ -6,7 +6,7 @@ import {
   isPromptAbort,
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
-} from '#src/libs/terminal.js';
+} from "#src/libs/terminal.js";
 
 // Control characters are built via fromCharCode so no raw control byte lives in
 // the source file (mirrors the convention in index.test.ts).
@@ -19,66 +19,68 @@ const TAB = String.fromCharCode(0x09);
 const LINE_FEED = String.fromCharCode(0x0a);
 const CARRIAGE_RETURN = String.fromCharCode(0x0d);
 
-describe('sanitizeForTerminal', () => {
-  it('leaves ordinary printable text untouched', () => {
-    expect(sanitizeForTerminal('Meeting notes 2024')).toBe('Meeting notes 2024');
+describe("sanitizeForTerminal", () => {
+  it("leaves ordinary printable text untouched", () => {
+    expect(sanitizeForTerminal("Meeting notes 2024")).toBe(
+      "Meeting notes 2024",
+    );
   });
 
-  it('replaces an ANSI escape (ESC) with a space', () => {
+  it("replaces an ANSI escape (ESC) with a space", () => {
     const clearScreen = `${ESC}[2J`;
-    expect(sanitizeForTerminal(`A${clearScreen}B`)).toBe('A [2JB');
+    expect(sanitizeForTerminal(`A${clearScreen}B`)).toBe("A [2JB");
   });
 
   it.each([
-    ['NULL (0x00)', NULL],
-    ['BELL (0x07)', BELL],
-    ['ESC (0x1b)', ESC],
-    ['DEL (0x7f)', DELETE],
-    ['C1 CSI (0x9b)', C1_CSI],
-  ])('strips the %s control character', (_label, control) => {
+    ["NULL (0x00)", NULL],
+    ["BELL (0x07)", BELL],
+    ["ESC (0x1b)", ESC],
+    ["DEL (0x7f)", DELETE],
+    ["C1 CSI (0x9b)", C1_CSI],
+  ])("strips the %s control character", (_label, control) => {
     const result = sanitizeForTerminal(`X${control}Y`);
-    expect(result).toBe('X Y');
+    expect(result).toBe("X Y");
     expect(result.includes(control)).toBe(false);
   });
 
-  it('preserves multi-byte characters above the C1 range', () => {
-    expect(sanitizeForTerminal('café — 日本語')).toBe('café — 日本語');
+  it("preserves multi-byte characters above the C1 range", () => {
+    expect(sanitizeForTerminal("café — 日本語")).toBe("café — 日本語");
   });
 
-  it('strips newlines and tabs too (single-line fields stay single-line)', () => {
-    expect(sanitizeForTerminal(`a${LINE_FEED}b${TAB}c`)).toBe('a b c');
+  it("strips newlines and tabs too (single-line fields stay single-line)", () => {
+    expect(sanitizeForTerminal(`a${LINE_FEED}b${TAB}c`)).toBe("a b c");
   });
 
-  it('returns an empty string for an empty input', () => {
-    expect(sanitizeForTerminal('')).toBe('');
+  it("returns an empty string for an empty input", () => {
+    expect(sanitizeForTerminal("")).toBe("");
   });
 
   it.each([
-    ['null', null],
-    ['undefined', undefined],
-  ])('coerces %s to an empty string instead of throwing', (_label, value) => {
-    expect(sanitizeForTerminal(value)).toBe('');
+    ["null", null],
+    ["undefined", undefined],
+  ])("coerces %s to an empty string instead of throwing", (_label, value) => {
+    expect(sanitizeForTerminal(value)).toBe("");
   });
 
-  it('coerces a non-string (e.g. a number) before sanitizing', () => {
-    expect(sanitizeForTerminal(42)).toBe('42');
+  it("coerces a non-string (e.g. a number) before sanitizing", () => {
+    expect(sanitizeForTerminal(42)).toBe("42");
   });
 });
 
-describe('sanitizeBlockForTerminal', () => {
-  it('preserves newlines and tabs so multi-line content keeps its structure', () => {
+describe("sanitizeBlockForTerminal", () => {
+  it("preserves newlines and tabs so multi-line content keeps its structure", () => {
     expect(sanitizeBlockForTerminal(`line one${LINE_FEED}${TAB}line two`)).toBe(
       `line one${LINE_FEED}${TAB}line two`,
     );
   });
 
-  it('still strips a carriage return (line-overwrite spoofing vector)', () => {
+  it("still strips a carriage return (line-overwrite spoofing vector)", () => {
     const result = sanitizeBlockForTerminal(`real${CARRIAGE_RETURN}fake`);
-    expect(result).toBe('realfake');
+    expect(result).toBe("realfake");
     expect(result.includes(CARRIAGE_RETURN)).toBe(false);
   });
 
-  it('drops CR from a CRLF body without leaving a trailing space', () => {
+  it("drops CR from a CRLF body without leaving a trailing space", () => {
     const crlfBody = `line one${CARRIAGE_RETURN}${LINE_FEED}line two`;
     expect(sanitizeBlockForTerminal(crlfBody)).toBe(
       `line one${LINE_FEED}line two`,
@@ -86,19 +88,19 @@ describe('sanitizeBlockForTerminal', () => {
   });
 
   it.each([
-    ['NULL (0x00)', NULL],
-    ['BELL (0x07)', BELL],
-    ['ESC (0x1b)', ESC],
-    ['DEL (0x7f)', DELETE],
-    ['C1 CSI (0x9b)', C1_CSI],
-  ])('still strips the %s control character', (_label, control) => {
+    ["NULL (0x00)", NULL],
+    ["BELL (0x07)", BELL],
+    ["ESC (0x1b)", ESC],
+    ["DEL (0x7f)", DELETE],
+    ["C1 CSI (0x9b)", C1_CSI],
+  ])("still strips the %s control character", (_label, control) => {
     const result = sanitizeBlockForTerminal(`X${control}Y`);
-    expect(result).toBe('X Y');
+    expect(result).toBe("X Y");
     expect(result.includes(control)).toBe(false);
   });
 });
 
-describe('isInteractiveTerminal', () => {
+describe("isInteractiveTerminal", () => {
   const originalStdinIsTTY = process.stdin.isTTY;
   const originalStdoutIsTTY = process.stdout.isTTY;
 
@@ -107,28 +109,28 @@ describe('isInteractiveTerminal', () => {
     process.stdout.isTTY = originalStdoutIsTTY;
   });
 
-  it('is true when both stdin and stdout are a TTY', () => {
+  it("is true when both stdin and stdout are a TTY", () => {
     process.stdin.isTTY = true;
     process.stdout.isTTY = true;
 
     expect(isInteractiveTerminal()).toBe(true);
   });
 
-  it('is false when stdin is redirected', () => {
+  it("is false when stdin is redirected", () => {
     process.stdin.isTTY = false;
     process.stdout.isTTY = true;
 
     expect(isInteractiveTerminal()).toBe(false);
   });
 
-  it('is false when stdout is redirected', () => {
+  it("is false when stdout is redirected", () => {
     process.stdin.isTTY = true;
     process.stdout.isTTY = false;
 
     expect(isInteractiveTerminal()).toBe(false);
   });
 
-  it('is false when neither stream is a TTY', () => {
+  it("is false when neither stream is a TTY", () => {
     process.stdin.isTTY = false;
     process.stdout.isTTY = false;
 
@@ -136,80 +138,80 @@ describe('isInteractiveTerminal', () => {
   });
 });
 
-describe('confirmRefusal', () => {
+describe("confirmRefusal", () => {
   const options = {
-    command: 'sources',
-    subcommand: 'delete',
-    argument: '<uuid>',
-    verb: 'delete',
-    requirement: 'a uuid with --yes',
+    command: "sources",
+    subcommand: "delete",
+    argument: "<uuid>",
+    verb: "delete",
+    requirement: "a uuid with --yes",
   };
 
-  it('refuses without --yes on a non-interactive terminal', () => {
+  it("refuses without --yes on a non-interactive terminal", () => {
     expect(
       confirmRefusal(options, { skipConfirm: false, isInteractive: false }),
     ).toBe(
-      '`sources delete` needs an interactive terminal to confirm; pass a uuid with --yes (`markpost sources delete <uuid> --yes`) to delete without a prompt.',
+      "`sources delete` needs an interactive terminal to confirm; pass a uuid with --yes (`markpost sources delete <uuid> --yes`) to delete without a prompt.",
     );
   });
 
-  it('allows --yes on a non-interactive terminal', () => {
+  it("allows --yes on a non-interactive terminal", () => {
     expect(
       confirmRefusal(options, { skipConfirm: true, isInteractive: false }),
     ).toBeNull();
   });
 
-  it('allows an interactive terminal without --yes', () => {
+  it("allows an interactive terminal without --yes", () => {
     expect(
       confirmRefusal(options, { skipConfirm: false, isInteractive: true }),
     ).toBeNull();
   });
 
-  it('uses the caller-supplied requirement wording', () => {
+  it("uses the caller-supplied requirement wording", () => {
     expect(
       confirmRefusal(
         {
-          command: 'tokens',
-          subcommand: 'revoke',
-          argument: '<id>',
-          verb: 'revoke',
-          requirement: 'an id with --yes',
+          command: "tokens",
+          subcommand: "revoke",
+          argument: "<id>",
+          verb: "revoke",
+          requirement: "an id with --yes",
         },
         { skipConfirm: false, isInteractive: false },
       ),
     ).toBe(
-      '`tokens revoke` needs an interactive terminal to confirm; pass an id with --yes (`markpost tokens revoke <id> --yes`) to revoke without a prompt.',
+      "`tokens revoke` needs an interactive terminal to confirm; pass an id with --yes (`markpost tokens revoke <id> --yes`) to revoke without a prompt.",
     );
   });
 
-  it('defaults to plain --yes when no requirement is given', () => {
+  it("defaults to plain --yes when no requirement is given", () => {
     expect(
       confirmRefusal(
         {
-          command: 'records',
-          subcommand: 'delete',
-          argument: '<uuid...>',
-          verb: 'delete',
+          command: "records",
+          subcommand: "delete",
+          argument: "<uuid...>",
+          verb: "delete",
         },
         { skipConfirm: false, isInteractive: false },
       ),
     ).toBe(
-      '`records delete` needs an interactive terminal to confirm; pass --yes (`markpost records delete <uuid...> --yes`) to delete without a prompt.',
+      "`records delete` needs an interactive terminal to confirm; pass --yes (`markpost records delete <uuid...> --yes`) to delete without a prompt.",
     );
   });
 });
 
-describe('isPromptAbort', () => {
-  it('is true for an ExitPromptError', () => {
-    const error = new Error('aborted');
-    error.name = 'ExitPromptError';
+describe("isPromptAbort", () => {
+  it("is true for an ExitPromptError", () => {
+    const error = new Error("aborted");
+    error.name = "ExitPromptError";
 
     expect(isPromptAbort(error)).toBe(true);
   });
 
-  it('is false for other errors and non-errors', () => {
-    expect(isPromptAbort(new Error('boom'))).toBe(false);
-    expect(isPromptAbort('ExitPromptError')).toBe(false);
+  it("is false for other errors and non-errors", () => {
+    expect(isPromptAbort(new Error("boom"))).toBe(false);
+    expect(isPromptAbort("ExitPromptError")).toBe(false);
     expect(isPromptAbort(null)).toBe(false);
   });
 });

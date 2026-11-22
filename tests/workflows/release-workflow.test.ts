@@ -1,24 +1,24 @@
 // Guards the supply-chain properties of the tag-triggered release workflow.
 // The YAML is checked as text (no YAML parser dependency) because the
 // properties are simple, line-level invariants.
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 
 const workflow = readFileSync(
   `${REPO_ROOT}.github/workflows/release.yml`,
-  'utf-8',
+  "utf-8",
 );
 
 // Splits the `jobs:` block into `{ name: body }` using the 2-space job keys.
 function jobBodies(): Record<string, string> {
-  const jobsBlock = workflow.split(/^jobs:\n/m)[1] ?? '';
+  const jobsBlock = workflow.split(/^jobs:\n/m)[1] ?? "";
   const bodies: Record<string, string> = {};
   const parts = jobsBlock.split(/^ {2}([a-z-]+):\n/m);
   for (let index = 1; index < parts.length; index += 2) {
@@ -33,61 +33,61 @@ function runTagCheck(...args: string[]) {
 }
 
 function runTagCheckWithEnv(env: NodeJS.ProcessEnv, ...args: string[]) {
-  return spawnSync('node', ['scripts/check-release-tag.mjs', ...args], {
+  return spawnSync("node", ["scripts/check-release-tag.mjs", ...args], {
     cwd: REPO_ROOT,
-    encoding: 'utf-8',
-    env: { ...process.env, GITHUB_OUTPUT: '', ...env },
+    encoding: "utf-8",
+    env: { ...process.env, GITHUB_OUTPUT: "", ...env },
   });
 }
 
-describe('release workflow', () => {
-  it('triggers only on version tags', () => {
-    expect(workflow).toMatch(/on:\n {2}push:\n {4}tags: \['v\*\.\*\.\*'\]/);
+describe("release workflow", () => {
+  it("triggers only on version tags", () => {
+    expect(workflow).toMatch(/on:\n {2}push:\n {4}tags: \["v\*\.\*\.\*"\]/);
     expect(workflow).not.toMatch(
       /workflow_dispatch|pull_request|schedule:|branches:|release:/,
     );
   });
 
-  it('pins every action to a full commit SHA', () => {
+  it("pins every action to a full commit SHA", () => {
     const uses = [...workflow.matchAll(/uses:\s*(\S+)/g)].map(
       (match) => match[1],
     );
     expect(uses.length).toBeGreaterThan(0);
     for (const reference of uses) {
-      expect(reference.split('@')[1]).toMatch(SHA_PATTERN);
+      expect(reference.split("@")[1]).toMatch(SHA_PATTERN);
     }
   });
 
-  it('sets timeout-minutes on every job', () => {
+  it("sets timeout-minutes on every job", () => {
     const bodies = jobBodies();
-    expect(Object.keys(bodies).sort()).toEqual(['publish', 'verify']);
+    expect(Object.keys(bodies).sort()).toEqual(["publish", "verify"]);
     for (const body of Object.values(bodies)) {
       expect(body).toMatch(/^ {4}timeout-minutes: \d+$/m);
     }
   });
 
-  it('has minimal top-level permissions and a concurrency guard', () => {
+  it("has minimal top-level permissions and a concurrency guard", () => {
     const header = workflow.split(/^jobs:/m)[0];
     expect(header).toMatch(/^permissions:\n {2}contents: read\n/m);
     expect(header).not.toMatch(/id-token/);
     expect(header).toMatch(/^concurrency:/m);
   });
 
-  it('grants id-token: write only to the publish job', () => {
+  it("grants id-token: write only to the publish job", () => {
     const bodies = jobBodies();
     expect(bodies.publish).toMatch(/id-token: write/);
     expect(bodies.verify).not.toMatch(/id-token/);
     expect(bodies.publish).toMatch(/needs: verify/);
   });
 
-  it('publishes with provenance and no long-lived token', () => {
+  it("publishes with provenance and no long-lived token", () => {
     expect(jobBodies().publish).toMatch(/npm stage publish[^\n]*--provenance/);
     expect(workflow).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN/);
   });
 
   // The npm trusted publisher is configured stage-only (a human approves
   // each release with 2FA), so a direct `npm publish` would be rejected.
-  it('stages the release instead of publishing it directly', () => {
+  it("stages the release instead of publishing it directly", () => {
     const publishCommands = [
       ...jobBodies().publish.matchAll(
         /^\s+- run: (npm (?:stage )?publish.*)$/gm,
@@ -98,7 +98,7 @@ describe('release workflow', () => {
     expect(publishCommands[0]).toMatch(/^npm stage publish /);
   });
 
-  it('publishes under the dist-tag computed by the verify job', () => {
+  it("publishes under the dist-tag computed by the verify job", () => {
     const bodies = jobBodies();
     expect(bodies.verify).toMatch(
       /dist-tag: \$\{\{ steps\.tag-check\.outputs\.dist-tag \}\}/,
@@ -112,30 +112,30 @@ describe('release workflow', () => {
     );
   });
 
-  it('checks the tag against package.json before installing dependencies', () => {
+  it("checks the tag against package.json before installing dependencies", () => {
     const verify = jobBodies().verify;
-    const tagCheck = verify.indexOf('scripts/check-release-tag.mjs');
+    const tagCheck = verify.indexOf("scripts/check-release-tag.mjs");
     expect(tagCheck).toBeGreaterThan(-1);
-    expect(tagCheck).toBeLessThan(verify.indexOf('npm ci'));
+    expect(tagCheck).toBeLessThan(verify.indexOf("npm ci"));
   });
 
-  it('requires the tagged commit to be an ancestor of main', () => {
+  it("requires the tagged commit to be an ancestor of main", () => {
     expect(jobBodies().verify).toContain(
       'git merge-base --is-ancestor "$GITHUB_SHA" origin/main',
     );
   });
 
-  it('does not install dependencies or rebuild in the publish job', () => {
+  it("does not install dependencies or rebuild in the publish job", () => {
     const publish = jobBodies().publish;
     expect(publish).not.toMatch(
       /\b(?:npm (?:ci|clean-install|i|in|it|add|install\S*|run\S*|pack|exec|x|rebuild)|npx|pnpm|yarn|bun|corepack)\b/,
     );
   });
 
-  it('uploads the smoke-tested tarball from the verify job', () => {
+  it("uploads the smoke-tested tarball from the verify job", () => {
     const verify = jobBodies().verify;
-    const smokeTest = verify.indexOf('bash scripts/smoke-test-pack.sh');
-    const upload = verify.indexOf('actions/upload-artifact@');
+    const smokeTest = verify.indexOf("bash scripts/smoke-test-pack.sh");
+    const upload = verify.indexOf("actions/upload-artifact@");
     expect(smokeTest).toBeGreaterThan(-1);
     expect(upload).toBeGreaterThan(smokeTest);
     expect(verify).toMatch(/name: release-tarball\n/);
@@ -143,17 +143,17 @@ describe('release workflow', () => {
     expect(verify).toMatch(/if-no-files-found: error/);
   });
 
-  it('uploads from the directory the smoke-test script packs into', () => {
+  it("uploads from the directory the smoke-test script packs into", () => {
     const script = readFileSync(
       `${REPO_ROOT}scripts/smoke-test-pack.sh`,
-      'utf-8',
+      "utf-8",
     );
     expect(script).toContain('pack_dir="$temp_dir/pack"');
     expect(script).toContain('temp_dir="${RUNNER_TEMP:-');
     expect(script).not.toMatch(/rm -rf[^\n]*pack/);
   });
 
-  it('publishes the downloaded tarball file, not the working tree', () => {
+  it("publishes the downloaded tarball file, not the working tree", () => {
     const publish = jobBodies().publish;
     expect(publish).toMatch(
       /actions\/download-artifact@[^\n]*\n\s+with:\n\s+name: release-tarball\n\s+path: \$\{\{ runner\.temp \}\}\/release-tarball/,
@@ -161,53 +161,53 @@ describe('release workflow', () => {
     expect(publish).toMatch(
       /npm stage publish "\$RUNNER_TEMP"\/release-tarball\/\*\.tgz /,
     );
-    expect(publish.indexOf('download-artifact')).toBeLessThan(
-      publish.indexOf('npm stage publish'),
+    expect(publish.indexOf("download-artifact")).toBeLessThan(
+      publish.indexOf("npm stage publish"),
     );
   });
 
-  it('runs lint, typecheck, test:ci and the pack smoke test', () => {
+  it("runs lint, typecheck, test:ci and the pack smoke test", () => {
     const verify = jobBodies().verify;
     for (const command of [
-      'npm run lint',
-      'npm run typecheck',
-      'npm run test:ci',
-      'bash scripts/smoke-test-pack.sh',
+      "npm run lint",
+      "npm run typecheck",
+      "npm run test:ci",
+      "bash scripts/smoke-test-pack.sh",
     ]) {
       expect(verify).toContain(command);
     }
   });
 });
 
-describe('check-release-tag script', () => {
+describe("check-release-tag script", () => {
   const { version } = JSON.parse(
-    readFileSync(`${REPO_ROOT}package.json`, 'utf-8'),
+    readFileSync(`${REPO_ROOT}package.json`, "utf-8"),
   );
 
-  it('passes when the tag matches package.json', () => {
+  it("passes when the tag matches package.json", () => {
     expect(runTagCheck(`v${version}`).status).toBe(0);
   });
 
-  it('fails when the tag does not match package.json', () => {
-    const result = runTagCheck('v999.0.0');
+  it("fails when the tag does not match package.json", () => {
+    const result = runTagCheck("v999.0.0");
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('does not match');
+    expect(result.stderr).toContain("does not match");
   });
 
-  it('fails when no tag is given', () => {
-    expect(runTagCheck('').status).toBe(1);
+  it("fails when no tag is given", () => {
+    expect(runTagCheck("").status).toBe(1);
     expect(runTagCheck().status).toBe(1);
   });
 });
 
-describe('check-release-tag dist-tag', () => {
+describe("check-release-tag dist-tag", () => {
   let workspace: string;
   let outputPath: string;
 
   beforeEach(() => {
-    workspace = mkdtempSync(join(tmpdir(), 'markpost-release-tag-'));
-    outputPath = join(workspace, 'github-output');
-    writeFileSync(outputPath, '');
+    workspace = mkdtempSync(join(tmpdir(), "markpost-release-tag-"));
+    outputPath = join(workspace, "github-output");
+    writeFileSync(outputPath, "");
   });
 
   afterEach(() => {
@@ -215,7 +215,7 @@ describe('check-release-tag dist-tag', () => {
   });
 
   function checkVersion(version: string, tag = `v${version}`) {
-    const packageJsonPath = join(workspace, 'package.json');
+    const packageJsonPath = join(workspace, "package.json");
     writeFileSync(packageJsonPath, JSON.stringify({ version }));
     const result = runTagCheckWithEnv(
       { GITHUB_OUTPUT: outputPath },
@@ -223,42 +223,42 @@ describe('check-release-tag dist-tag', () => {
       packageJsonPath,
     );
 
-    return { ...result, output: readFileSync(outputPath, 'utf-8') };
+    return { ...result, output: readFileSync(outputPath, "utf-8") };
   }
 
-  it('publishes a plain X.Y.Z release to latest', () => {
-    const result = checkVersion('1.2.3');
+  it("publishes a plain X.Y.Z release to latest", () => {
+    const result = checkVersion("1.2.3");
     expect(result.status).toBe(0);
-    expect(result.output).toBe('dist-tag=latest\n');
+    expect(result.output).toBe("dist-tag=latest\n");
   });
 
-  it('publishes an alpha prerelease to the alpha dist-tag', () => {
-    const result = checkVersion('0.1.0-alpha.0');
+  it("publishes an alpha prerelease to the alpha dist-tag", () => {
+    const result = checkVersion("0.1.0-alpha.0");
     expect(result.status).toBe(0);
-    expect(result.output).toBe('dist-tag=alpha\n');
+    expect(result.output).toBe("dist-tag=alpha\n");
   });
 
-  it('uses the preid of any prerelease as the dist-tag', () => {
-    expect(checkVersion('2.0.0-rc.3').output).toBe('dist-tag=rc\n');
+  it("uses the preid of any prerelease as the dist-tag", () => {
+    expect(checkVersion("2.0.0-rc.3").output).toBe("dist-tag=rc\n");
   });
 
-  it('rejects a prerelease whose preid is not a word', () => {
-    const result = checkVersion('1.0.0-0');
+  it("rejects a prerelease whose preid is not a word", () => {
+    const result = checkVersion("1.0.0-0");
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('lowercase word');
-    expect(result.output).toBe('');
+    expect(result.stderr).toContain("lowercase word");
+    expect(result.output).toBe("");
   });
 
-  it('rejects a version that is not semver', () => {
-    const result = checkVersion('1.0');
+  it("rejects a version that is not semver", () => {
+    const result = checkVersion("1.0");
     expect(result.status).toBe(1);
-    expect(result.output).toBe('');
+    expect(result.output).toBe("");
   });
 
-  it('writes no output when the tag does not match', () => {
-    const result = checkVersion('0.1.0-alpha.0', 'v0.1.0-alpha.1');
+  it("writes no output when the tag does not match", () => {
+    const result = checkVersion("0.1.0-alpha.0", "v0.1.0-alpha.1");
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('does not match');
-    expect(result.output).toBe('');
+    expect(result.stderr).toContain("does not match");
+    expect(result.output).toBe("");
   });
 });

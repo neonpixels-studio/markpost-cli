@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync, realpathSync } from "node:fs";
 import {
   dirname,
   isAbsolute,
@@ -7,7 +7,7 @@ import {
   resolve,
   sep,
   win32,
-} from 'node:path';
+} from "node:path";
 
 // Mirrors markpost's shared/utils/filePath.ts (`filePathViolation`) and the
 // primitives it imports from shared/utils/pathSafety.ts (`hasTraversalSegment`,
@@ -18,11 +18,11 @@ import {
 
 const FILE_PATH_MAX_LENGTH = 512;
 // Mirrors FILENAME_TEMPLATE_EXTENSION in markpost's shared/utils/filenameTemplate.ts.
-const FILE_PATH_EXTENSION = '.md';
+const FILE_PATH_EXTENSION = ".md";
 // Most filesystems cap a single path component at 255 bytes (not characters).
 const FILE_PATH_SEGMENT_MAX_BYTES = 255;
-const PATH_SEPARATOR = '/';
-const BACKSLASH = '\\';
+const PATH_SEPARATOR = "/";
+const BACKSLASH = "\\";
 
 const textEncoder = new TextEncoder();
 
@@ -49,21 +49,21 @@ const TRAVERSAL_SEGMENT = /^\.{2,}$/;
 const CONTROL_CHARACTERS = /[\x00-\x1f\x7f]/;
 
 export type FilePathViolation =
-  | 'empty'
-  | 'too-long'
-  | 'segment-too-long'
-  | 'absolute'
-  | 'traversal'
-  | 'invalid-characters'
-  | 'unsafe-segment'
-  | 'missing-extension';
+  | "empty"
+  | "too-long"
+  | "segment-too-long"
+  | "absolute"
+  | "traversal"
+  | "invalid-characters"
+  | "unsafe-segment"
+  | "missing-extension";
 
 export class FilePathViolationError extends Error {
-  readonly violation: FilePathViolation | 'escapes-vault';
+  readonly violation: FilePathViolation | "escapes-vault";
 
-  constructor(message: string, violation: FilePathViolation | 'escapes-vault') {
+  constructor(message: string, violation: FilePathViolation | "escapes-vault") {
     super(message);
-    this.name = 'FilePathViolationError';
+    this.name = "FilePathViolationError";
     this.violation = violation;
   }
 }
@@ -78,7 +78,7 @@ const hasTraversalSegment = (value: string): boolean =>
 const hasUnsafeSegment = (value: string): boolean =>
   segmentsOf(value).some(
     (segment) =>
-      segment === '' ||
+      segment === "" ||
       PADDED_SEGMENT.test(segment) ||
       RESERVED_SEGMENT.test(segment),
   );
@@ -90,7 +90,7 @@ const hasOversizedSegment = (value: string): boolean =>
   );
 
 const hasMarkdownExtension = (value: string): boolean => {
-  const leaf = (segmentsOf(value).at(-1) ?? '').toLowerCase();
+  const leaf = (segmentsOf(value).at(-1) ?? "").toLowerCase();
 
   return (
     leaf.endsWith(FILE_PATH_EXTENSION) &&
@@ -101,40 +101,40 @@ const hasMarkdownExtension = (value: string): boolean => {
 // Returns the first violation found, or null when the value is a safe relative
 // markdown path.
 export const filePathViolation = (value: string): FilePathViolation | null => {
-  if (value.trim() === '') {
-    return 'empty';
+  if (value.trim() === "") {
+    return "empty";
   }
 
   if (value.length > FILE_PATH_MAX_LENGTH) {
-    return 'too-long';
+    return "too-long";
   }
 
   if (hasOversizedSegment(value)) {
-    return 'segment-too-long';
+    return "segment-too-long";
   }
 
   if (CONTROL_CHARACTERS.test(value)) {
-    return 'invalid-characters';
+    return "invalid-characters";
   }
 
   if (value.startsWith(PATH_SEPARATOR) || value.startsWith(BACKSLASH)) {
-    return 'absolute';
+    return "absolute";
   }
 
   if (FORBIDDEN_CHARACTERS.test(value)) {
-    return 'invalid-characters';
+    return "invalid-characters";
   }
 
   if (hasTraversalSegment(value)) {
-    return 'traversal';
+    return "traversal";
   }
 
   if (hasUnsafeSegment(value)) {
-    return 'unsafe-segment';
+    return "unsafe-segment";
   }
 
   if (!hasMarkdownExtension(value)) {
-    return 'missing-extension';
+    return "missing-extension";
   }
 
   return null;
@@ -150,7 +150,7 @@ export const filePathViolation = (value: string): FilePathViolation | null => {
 // else invalid (traversal, drive-relative `C:x.md`, reserved names, ...) stays
 // a refusal.
 export const isLegacyLocalFilePath = (filePath: string): boolean =>
-  filePath.trim() === '' ||
+  filePath.trim() === "" ||
   posix.isAbsolute(filePath) ||
   win32.isAbsolute(filePath);
 
@@ -174,7 +174,7 @@ const isOutside = (directory: string, target: string): boolean => {
   const relativePath = relative(directory, target);
 
   return (
-    relativePath === '..' ||
+    relativePath === ".." ||
     relativePath.startsWith(`..${sep}`) ||
     isAbsolute(relativePath)
   );
@@ -183,7 +183,7 @@ const isOutside = (directory: string, target: string): boolean => {
 const unresolvablePathError = (path: string): FilePathViolationError =>
   new FilePathViolationError(
     `Refusing to write: cannot resolve ${path} inside the output directory.`,
-    'escapes-vault',
+    "escapes-vault",
   );
 
 // lstat itself throws (ELOOP, EACCES) when an intermediate component is
@@ -231,7 +231,7 @@ export const resolveWithinVault = (
   const resolvedPath = resolve(resolvedVault, relativePath);
   const escapeError = new FilePathViolationError(
     `Refusing to write outside output directory: ${relativePath}`,
-    'escapes-vault',
+    "escapes-vault",
   );
 
   if (

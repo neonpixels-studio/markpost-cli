@@ -5,15 +5,15 @@ import {
   rmSync,
   symlinkSync,
   writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock('#src/libs/config.js', () => ({
+vi.mock("#src/libs/config.js", () => ({
   config: { get: vi.fn() },
 }));
-vi.mock('#src/libs/vault-ledger.js', () => ({
+vi.mock("#src/libs/vault-ledger.js", () => ({
   getLedgerEntries: vi.fn(() => ({})),
   removeLedgerEntries: vi.fn(),
 }));
@@ -22,24 +22,24 @@ import {
   applyPrune,
   fetchDeletionFeed,
   planPrune,
-} from '#src/libs/deletions.js';
-import { hashContent } from '#src/libs/markdown.js';
-import { removeLedgerEntries } from '#src/libs/vault-ledger.js';
+} from "#src/libs/deletions.js";
+import { hashContent } from "#src/libs/markdown.js";
+import { removeLedgerEntries } from "#src/libs/vault-ledger.js";
 
-const UUID_A = '11111111-1111-4111-8111-111111111111';
-const UUID_B = '22222222-2222-4222-8222-222222222222';
-const UUID_C = '33333333-3333-4333-8333-333333333333';
+const UUID_A = "11111111-1111-4111-8111-111111111111";
+const UUID_B = "22222222-2222-4222-8222-222222222222";
+const UUID_C = "33333333-3333-4333-8333-333333333333";
 
 const tombstone = (recordUuid: string) => ({
-  type: 'recordTombstones',
+  type: "recordTombstones",
   id: recordUuid,
-  attributes: { recordUuid, filePath: null, deletedAt: '2026-11-01T00:00:00Z' },
+  attributes: { recordUuid, filePath: null, deletedAt: "2026-11-01T00:00:00Z" },
 });
 
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { "Content-Type": "application/json" },
   });
 
 const page = (uuids: string[], hasMore: boolean, complete: boolean) =>
@@ -49,13 +49,13 @@ const page = (uuids: string[], hasMore: boolean, complete: boolean) =>
     links: { next: null },
   });
 
-describe('fetchDeletionFeed', () => {
+describe("fetchDeletionFeed", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
-    vi.stubEnv('BASE_URL', 'https://example.com');
-    vi.stubEnv('API_TOKEN', 'test-token');
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubEnv("BASE_URL", "https://example.com");
+    vi.stubEnv("API_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
   });
 
@@ -67,86 +67,86 @@ describe('fetchDeletionFeed', () => {
   const requestedUrls = (): URL[] =>
     fetchMock.mock.calls.map(([url]) => new URL(String(url)));
 
-  it('sends filter[since] and reports the server-declared completeness', async () => {
+  it("sends filter[since] and reports the server-declared completeness", async () => {
     fetchMock.mockResolvedValueOnce(page([UUID_A], false, true));
 
-    const feed = await fetchDeletionFeed('2026-11-10T00:00:00Z');
+    const feed = await fetchDeletionFeed("2026-11-10T00:00:00Z");
 
     expect(feed.complete).toBe(true);
     expect(feed.tombstones.map(({ recordUuid }) => recordUuid)).toEqual([
       UUID_A,
     ]);
     const [url] = requestedUrls();
-    expect(url.pathname).toBe('/api/records/deletions');
-    expect(url.searchParams.get('filter[since]')).toBe('2026-11-10T00:00:00Z');
-    expect(url.searchParams.has('page[after]')).toBe(false);
+    expect(url.pathname).toBe("/api/records/deletions");
+    expect(url.searchParams.get("filter[since]")).toBe("2026-11-10T00:00:00Z");
+    expect(url.searchParams.has("page[after]")).toBe(false);
   });
 
-  it('follows page[after] using the last recordUuid until hasMore is false', async () => {
+  it("follows page[after] using the last recordUuid until hasMore is false", async () => {
     fetchMock
       .mockResolvedValueOnce(page([UUID_A, UUID_B], true, true))
       .mockResolvedValueOnce(page([UUID_C], false, true));
 
-    const feed = await fetchDeletionFeed('2026-11-10T00:00:00Z');
+    const feed = await fetchDeletionFeed("2026-11-10T00:00:00Z");
 
     expect(feed.tombstones).toHaveLength(3);
     const urls = requestedUrls();
     expect(urls).toHaveLength(2);
-    expect(urls[1].searchParams.get('page[after]')).toBe(UUID_B);
-    expect(urls[1].searchParams.get('filter[since]')).toBe(
-      '2026-11-10T00:00:00Z',
+    expect(urls[1].searchParams.get("page[after]")).toBe(UUID_B);
+    expect(urls[1].searchParams.get("filter[since]")).toBe(
+      "2026-11-10T00:00:00Z",
     );
   });
 
-  it('is not complete when the server says the window is not covered', async () => {
+  it("is not complete when the server says the window is not covered", async () => {
     fetchMock.mockResolvedValueOnce(page([], false, false));
 
     const feed = await fetchDeletionFeed();
 
     expect(feed.complete).toBe(false);
-    expect(requestedUrls()[0].searchParams.has('filter[since]')).toBe(false);
+    expect(requestedUrls()[0].searchParams.has("filter[since]")).toBe(false);
   });
 
-  it('treats a missing meta.complete as not complete', async () => {
+  it("treats a missing meta.complete as not complete", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ data: [] }));
 
-    expect((await fetchDeletionFeed('2026-11-10T00:00:00Z')).complete).toBe(
+    expect((await fetchDeletionFeed("2026-11-10T00:00:00Z")).complete).toBe(
       false,
     );
   });
 
-  it('throws instead of returning a truncated feed when hasMore has no new cursor', async () => {
+  it("throws instead of returning a truncated feed when hasMore has no new cursor", async () => {
     fetchMock.mockResolvedValue(page([], true, true));
 
-    await expect(fetchDeletionFeed('2026-11-10T00:00:00Z')).rejects.toThrow(
+    await expect(fetchDeletionFeed("2026-11-10T00:00:00Z")).rejects.toThrow(
       /no new cursor/,
     );
   });
 
-  it('throws on an entry with no recordUuid instead of dropping it', async () => {
+  it("throws on an entry with no recordUuid instead of dropping it", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
-        data: [{ type: 'recordTombstones', id: 'x', attributes: {} }],
+        data: [{ type: "recordTombstones", id: "x", attributes: {} }],
         meta: { size: 100, hasMore: false, complete: true },
       }),
     );
 
-    await expect(fetchDeletionFeed('2026-11-10T00:00:00Z')).rejects.toThrow(
+    await expect(fetchDeletionFeed("2026-11-10T00:00:00Z")).rejects.toThrow(
       /without a recordUuid/,
     );
   });
 
-  it('throws on a response with no data array', async () => {
+  it("throws on a response with no data array", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ meta: { size: 100, hasMore: false, complete: true } }),
     );
 
-    await expect(fetchDeletionFeed('2026-11-10T00:00:00Z')).rejects.toThrow(
+    await expect(fetchDeletionFeed("2026-11-10T00:00:00Z")).rejects.toThrow(
       /no data array/,
     );
   });
 
-  it('is incomplete if any page reports incomplete', async () => {
+  it("is incomplete if any page reports incomplete", async () => {
     fetchMock
       .mockResolvedValueOnce(page([UUID_A], true, false))
       .mockResolvedValueOnce(page([UUID_B], false, true));
@@ -154,23 +154,23 @@ describe('fetchDeletionFeed', () => {
     expect((await fetchDeletionFeed()).complete).toBe(false);
   });
 
-  it('throws when a later page fails', async () => {
+  it("throws when a later page fails", async () => {
     fetchMock
       .mockResolvedValueOnce(page([UUID_A], true, true))
       .mockResolvedValue(
         jsonResponse(
-          { errors: [{ status: '400', title: 'x', detail: 'y' }] },
+          { errors: [{ status: "400", title: "x", detail: "y" }] },
           400,
         ),
       );
 
-    await expect(fetchDeletionFeed('2026-11-10T00:00:00Z')).rejects.toThrow();
+    await expect(fetchDeletionFeed("2026-11-10T00:00:00Z")).rejects.toThrow();
   });
 
-  it('surfaces a persistent 5xx rather than an empty feed', async () => {
+  it("surfaces a persistent 5xx rather than an empty feed", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse(
-        { errors: [{ status: '500', title: 'x', detail: 'y' }] },
+        { errors: [{ status: "500", title: "x", detail: "y" }] },
         500,
       ),
     );
@@ -179,13 +179,13 @@ describe('fetchDeletionFeed', () => {
   }, 30_000);
 });
 
-describe('planPrune / applyPrune', () => {
+describe("planPrune / applyPrune", () => {
   let vault: string;
   let outside: string;
 
   beforeEach(() => {
-    vault = mkdtempSync(join(tmpdir(), 'markpost-cli-prune-vault-'));
-    outside = mkdtempSync(join(tmpdir(), 'markpost-cli-prune-outside-'));
+    vault = mkdtempSync(join(tmpdir(), "markpost-cli-prune-vault-"));
+    outside = mkdtempSync(join(tmpdir(), "markpost-cli-prune-outside-"));
     vi.mocked(removeLedgerEntries).mockClear();
   });
 
@@ -196,7 +196,7 @@ describe('planPrune / applyPrune', () => {
 
   const writeNote = (relativePath: string, content: string): void => {
     const absolutePath = join(vault, relativePath);
-    mkdirSync(join(absolutePath, '..'), { recursive: true });
+    mkdirSync(join(absolutePath, ".."), { recursive: true });
     writeFileSync(absolutePath, content);
   };
 
@@ -209,120 +209,120 @@ describe('planPrune / applyPrune', () => {
     uuids.map((recordUuid) => ({
       recordUuid,
       filePath: null,
-      deletedAt: '2026-11-01T00:00:00Z',
+      deletedAt: "2026-11-01T00:00:00Z",
     }));
 
-  it('removes only the unmodified, ledgered file', () => {
-    writeNote('inbox/a.md', 'alpha');
-    const entries = { [UUID_A]: entryFor('inbox/a.md', 'alpha') };
+  it("removes only the unmodified, ledgered file", () => {
+    writeNote("inbox/a.md", "alpha");
+    const entries = { [UUID_A]: entryFor("inbox/a.md", "alpha") };
 
     const plan = planPrune(tombstones(UUID_A), vault, entries);
     applyPrune(plan, vault);
 
     expect(plan.items).toEqual([
-      { uuid: UUID_A, path: 'inbox/a.md', outcome: 'remove' },
+      { uuid: UUID_A, path: "inbox/a.md", outcome: "remove" },
     ]);
-    expect(existsSync(join(vault, 'inbox/a.md'))).toBe(false);
+    expect(existsSync(join(vault, "inbox/a.md"))).toBe(false);
     expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A]);
   });
 
-  it('never touches a file for a tombstone the CLI did not write', () => {
-    writeNote('keep.md', 'mine');
+  it("never touches a file for a tombstone the CLI did not write", () => {
+    writeNote("keep.md", "mine");
 
     const plan = planPrune(tombstones(UUID_A), vault, {});
     applyPrune(plan, vault);
 
     expect(plan.untrackedCount).toBe(1);
     expect(plan.items).toEqual([]);
-    expect(existsSync(join(vault, 'keep.md'))).toBe(true);
+    expect(existsSync(join(vault, "keep.md"))).toBe(true);
   });
 
-  it('ignores the server-supplied filePath on a tombstone', () => {
-    writeNote('victim.md', 'precious');
+  it("ignores the server-supplied filePath on a tombstone", () => {
+    writeNote("victim.md", "precious");
     const hostile = [
       {
         recordUuid: UUID_A,
-        filePath: 'victim.md',
-        deletedAt: '2026-11-01T00:00:00Z',
+        filePath: "victim.md",
+        deletedAt: "2026-11-01T00:00:00Z",
       },
     ];
 
     applyPrune(planPrune(hostile, vault, {}), vault);
 
-    expect(existsSync(join(vault, 'victim.md'))).toBe(true);
+    expect(existsSync(join(vault, "victim.md"))).toBe(true);
   });
 
-  it('keeps a file edited since the CLI wrote it', () => {
-    writeNote('a.md', 'edited by hand');
-    const entries = { [UUID_A]: entryFor('a.md', 'original') };
+  it("keeps a file edited since the CLI wrote it", () => {
+    writeNote("a.md", "edited by hand");
+    const entries = { [UUID_A]: entryFor("a.md", "original") };
 
     const plan = planPrune(tombstones(UUID_A), vault, entries);
     applyPrune(plan, vault);
 
-    expect(plan.items[0].outcome).toBe('modified');
-    expect(existsSync(join(vault, 'a.md'))).toBe(true);
+    expect(plan.items[0].outcome).toBe("modified");
+    expect(existsSync(join(vault, "a.md"))).toBe(true);
     expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A]);
   });
 
-  it('reports an already-missing file and clears its ledger entry', () => {
-    const entries = { [UUID_A]: entryFor('gone.md', 'x') };
+  it("reports an already-missing file and clears its ledger entry", () => {
+    const entries = { [UUID_A]: entryFor("gone.md", "x") };
 
     const plan = planPrune(tombstones(UUID_A), vault, entries);
     applyPrune(plan, vault);
 
-    expect(plan.items[0].outcome).toBe('missing');
+    expect(plan.items[0].outcome).toBe("missing");
     expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A]);
   });
 
-  it('refuses a ledger path that escapes the vault', () => {
-    writeFileSync(join(outside, 'secret.md'), 'secret');
+  it("refuses a ledger path that escapes the vault", () => {
+    writeFileSync(join(outside, "secret.md"), "secret");
     const entries = {
-      [UUID_A]: entryFor(`../${join(outside, 'secret.md')}`, 'secret'),
-      [UUID_B]: entryFor('../escape.md', 'secret'),
+      [UUID_A]: entryFor(`../${join(outside, "secret.md")}`, "secret"),
+      [UUID_B]: entryFor("../escape.md", "secret"),
     };
 
     const plan = planPrune(tombstones(UUID_A, UUID_B), vault, entries);
     applyPrune(plan, vault);
 
     expect(plan.items.map(({ outcome }) => outcome)).toEqual([
-      'unsafe',
-      'unsafe',
+      "unsafe",
+      "unsafe",
     ]);
-    expect(existsSync(join(outside, 'secret.md'))).toBe(true);
+    expect(existsSync(join(outside, "secret.md"))).toBe(true);
     expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A, UUID_B]);
   });
 
-  it('does not follow or delete through a symlink at the leaf', () => {
-    writeFileSync(join(outside, 'target.md'), 'target');
-    symlinkSync(join(outside, 'target.md'), join(vault, 'link.md'));
-    const entries = { [UUID_A]: entryFor('link.md', 'target') };
+  it("does not follow or delete through a symlink at the leaf", () => {
+    writeFileSync(join(outside, "target.md"), "target");
+    symlinkSync(join(outside, "target.md"), join(vault, "link.md"));
+    const entries = { [UUID_A]: entryFor("link.md", "target") };
 
     const plan = planPrune(tombstones(UUID_A), vault, entries);
     applyPrune(plan, vault);
 
-    expect(plan.items[0].outcome).toBe('unsafe');
-    expect(existsSync(join(outside, 'target.md'))).toBe(true);
+    expect(plan.items[0].outcome).toBe("unsafe");
+    expect(existsSync(join(outside, "target.md"))).toBe(true);
   });
 
-  it('clears ledger entries for files already removed when a later removal fails', () => {
-    writeNote('a.md', 'alpha');
-    mkdirSync(join(vault, 'b.md'));
+  it("clears ledger entries for files already removed when a later removal fails", () => {
+    writeNote("a.md", "alpha");
+    mkdirSync(join(vault, "b.md"));
     const entries = {
-      [UUID_A]: entryFor('a.md', 'alpha'),
-      [UUID_B]: entryFor('b.md', 'beta'),
+      [UUID_A]: entryFor("a.md", "alpha"),
+      [UUID_B]: entryFor("b.md", "beta"),
     };
     const plan = planPrune(tombstones(UUID_A, UUID_B), vault, entries);
-    plan.items[1].outcome = 'remove';
+    plan.items[1].outcome = "remove";
 
     expect(() => applyPrune(plan, vault)).toThrow(/could not remove: b\.md/);
-    expect(existsSync(join(vault, 'a.md'))).toBe(false);
+    expect(existsSync(join(vault, "a.md"))).toBe(false);
     expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A]);
   });
 
-  it('treats a file that vanished before apply as already removed', () => {
+  it("treats a file that vanished before apply as already removed", () => {
     const plan = {
       items: [
-        { uuid: UUID_A, path: 'vanished.md', outcome: 'remove' as const },
+        { uuid: UUID_A, path: "vanished.md", outcome: "remove" as const },
       ],
       untrackedCount: 0,
     };
@@ -332,20 +332,20 @@ describe('planPrune / applyPrune', () => {
     expect(removeLedgerEntries).toHaveBeenCalledWith([UUID_A]);
   });
 
-  it('does not treat prototype keys as ledger entries', () => {
-    const plan = planPrune(tombstones('constructor', '__proto__'), vault, {});
+  it("does not treat prototype keys as ledger entries", () => {
+    const plan = planPrune(tombstones("constructor", "__proto__"), vault, {});
 
     expect(plan.untrackedCount).toBe(2);
     expect(plan.items).toEqual([]);
   });
 
-  it('plans without changing anything until applyPrune runs', () => {
-    writeNote('a.md', 'alpha');
-    const entries = { [UUID_A]: entryFor('a.md', 'alpha') };
+  it("plans without changing anything until applyPrune runs", () => {
+    writeNote("a.md", "alpha");
+    const entries = { [UUID_A]: entryFor("a.md", "alpha") };
 
     planPrune(tombstones(UUID_A), vault, entries);
 
-    expect(existsSync(join(vault, 'a.md'))).toBe(true);
+    expect(existsSync(join(vault, "a.md"))).toBe(true);
     expect(removeLedgerEntries).not.toHaveBeenCalled();
   });
 });

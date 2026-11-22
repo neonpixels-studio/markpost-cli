@@ -1,37 +1,37 @@
-import chalk from 'chalk';
+import chalk from "chalk";
 import {
   fetchSettings,
   resolveSyncSettings,
   updateSettings,
   ResolvedSyncSettings,
   SettingsReadResult,
-} from '#src/libs/settings.js';
-import { checkConfig } from '#src/libs/config.js';
-import { failWithSubcommandUsage, failWithUsage } from '#src/libs/usage.js';
-import { failWithMessage, messageFromError } from '#src/libs/errors.js';
-import { hasJsonFlag, printJson, withoutJsonFlag } from '#src/libs/output.js';
+} from "#src/libs/settings.js";
+import { checkConfig } from "#src/libs/config.js";
+import { failWithSubcommandUsage, failWithUsage } from "#src/libs/usage.js";
+import { failWithMessage, messageFromError } from "#src/libs/errors.js";
+import { hasJsonFlag, printJson, withoutJsonFlag } from "#src/libs/output.js";
 import {
   CONFLICT_STRATEGIES,
   ConflictStrategy,
   isConflictStrategy,
   UpdateSettingsInput,
-} from '#src/types/settings.types.js';
+} from "#src/types/settings.types.js";
 
 // The boolean settings a `set` accepts, keyed by the exact attribute name
 // markpost's PUT contract expects (server/api/settings/index.put.ts). Named
 // so the parser and usage text share one source of truth for the field names.
-const BOOLEAN_SETTING_KEYS = ['autoSync', 'autoDelete', 'frontmatter'] as const;
+const BOOLEAN_SETTING_KEYS = ["autoSync", "autoDelete", "frontmatter"] as const;
 type BooleanSettingKey = (typeof BOOLEAN_SETTING_KEYS)[number];
 
-const CONFLICT_STRATEGY_KEY = 'conflictStrategy';
+const CONFLICT_STRATEGY_KEY = "conflictStrategy";
 
 // A `set` field arrives as one `key=value` token; the first `=` splits it so a
 // value can safely contain further `=` (none of the current values do, but the
 // split shouldn't silently truncate one that did).
-const KEY_VALUE_SEPARATOR = '=';
+const KEY_VALUE_SEPARATOR = "=";
 
-const BOOLEAN_TRUE = 'true';
-const BOOLEAN_FALSE = 'false';
+const BOOLEAN_TRUE = "true";
+const BOOLEAN_FALSE = "false";
 
 // Width the settable-key labels pad to so their accepted-value columns line up.
 // `conflictStrategy` (the longest key) plus two spaces sets it.
@@ -46,11 +46,11 @@ const SETTABLE_KEYS_USAGE = [
   ...BOOLEAN_SETTING_KEYS.map(
     (key) => `    ${key.padEnd(KEY_LABEL_WIDTH)}${BOOLEAN_VALUES_HINT}`,
   ),
-  `    ${CONFLICT_STRATEGY_KEY.padEnd(KEY_LABEL_WIDTH)}${CONFLICT_STRATEGIES.join('|')}`,
-].join('\n');
+  `    ${CONFLICT_STRATEGY_KEY.padEnd(KEY_LABEL_WIDTH)}${CONFLICT_STRATEGIES.join("|")}`,
+].join("\n");
 
-const GET_SUBCOMMAND = 'get';
-const JSON_ONLY_ON_GET_MESSAGE = '--json is only supported by `settings get`.';
+const GET_SUBCOMMAND = "get";
+const JSON_ONLY_ON_GET_MESSAGE = "--json is only supported by `settings get`.";
 
 export const USAGE = `Usage: markpost settings <get|set> [key=value ...] [--json]
 
@@ -93,7 +93,7 @@ const parseConflictStrategy = (raw: string): ParseResult<ConflictStrategy> => {
 
   return {
     ok: false,
-    error: `expected one of ${CONFLICT_STRATEGIES.join(', ')}, got \`${raw}\``,
+    error: `expected one of ${CONFLICT_STRATEGIES.join(", ")}, got \`${raw}\``,
   };
 };
 
@@ -235,7 +235,7 @@ const serializeSettingsForJson = (
 
 const getSettings = async (rest: string[], json: boolean): Promise<void> => {
   if (rest.length > 0) {
-    failWithUsage('`settings get` takes no arguments.', USAGE, json);
+    failWithUsage("`settings get` takes no arguments.", USAGE, json);
     return;
   }
 
@@ -245,7 +245,7 @@ const getSettings = async (rest: string[], json: boolean): Promise<void> => {
   // explicit `settings get` must fail loud — reporting made-up defaults as the
   // server's current settings would mislead the user about what's stored.
   if (!result.ok) {
-    failWithMessage('Could not read settings from the server.', json);
+    failWithMessage("Could not read settings from the server.", json);
     return;
   }
 
@@ -260,7 +260,7 @@ const getSettings = async (rest: string[], json: boolean): Promise<void> => {
   // true` as a deliberate choice.
   if (result.settings === null) {
     console.log(
-      'No saved settings on this account — showing markpost defaults:',
+      "No saved settings on this account — showing markpost defaults:",
     );
   }
 
@@ -270,7 +270,7 @@ const getSettings = async (rest: string[], json: boolean): Promise<void> => {
 const setSettings = async (rest: string[]): Promise<void> => {
   if (rest.length === 0) {
     failWithUsage(
-      'No fields to set — provide at least one `key=value`.',
+      "No fields to set — provide at least one `key=value`.",
       USAGE,
     );
     return;
@@ -286,7 +286,7 @@ const setSettings = async (rest: string[]): Promise<void> => {
   const updated = await updateSettings(built.input);
 
   if (!updated) {
-    console.error(chalk.redBright('Failed to update settings.'));
+    console.error(chalk.redBright("Failed to update settings."));
     process.exitCode = 1;
     return;
   }
@@ -294,7 +294,7 @@ const setSettings = async (rest: string[]): Promise<void> => {
   // Reuse the read's normalizer so the echoed-back settings print exactly like
   // `get` does, from one place.
   const echoed: SettingsReadResult = { ok: true, settings: updated };
-  console.log(chalk.greenBright('Settings updated.'));
+  console.log(chalk.greenBright("Settings updated."));
   printSettings(resolveSyncSettings(echoed));
 };
 
@@ -306,7 +306,7 @@ const SETTINGS_HANDLERS = new Map<
   (rest: string[], json: boolean) => Promise<void>
 >([
   [GET_SUBCOMMAND, (rest, json) => getSettings(rest, json)],
-  ['set', (rest) => setSettings(rest)],
+  ["set", (rest) => setSettings(rest)],
 ]);
 
 export const runSettingsCommand = async (args: string[]): Promise<void> => {

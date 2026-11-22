@@ -1,12 +1,12 @@
 // Every third-party action must be pinned to a full commit SHA with the
 // version tag in a trailing comment, so a moved tag cannot change CI.
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 const WORKFLOWS_DIRECTORY = fileURLToPath(
-  new URL('../../.github/workflows/', import.meta.url),
+  new URL("../../.github/workflows/", import.meta.url),
 );
 const USES_PATTERN = /^\s*(?:-\s+)?uses:\s*['"]?([^'"\s]+)['"]?(.*)$/;
 const SHA_REF_PATTERN = /^[^@\s]+@[0-9a-f]{40}$/;
@@ -20,7 +20,7 @@ interface ActionUse {
 }
 
 function isLocalAction(reference: string): boolean {
-  return reference.startsWith('./');
+  return reference.startsWith("./");
 }
 
 function listWorkflowFiles(): string[] {
@@ -30,7 +30,7 @@ function listWorkflowFiles(): string[] {
 }
 
 function readWorkflowLines(file: string): string[] {
-  return readFileSync(join(WORKFLOWS_DIRECTORY, file), 'utf-8').split(/\r?\n/);
+  return readFileSync(join(WORKFLOWS_DIRECTORY, file), "utf-8").split(/\r?\n/);
 }
 
 function parseActionUse(
@@ -54,21 +54,21 @@ function collectActionUses(): ActionUse[] {
   );
 }
 
-describe('workflow action pinning', () => {
+describe("workflow action pinning", () => {
   const uses = collectActionUses();
 
-  it('finds third-party actions to check', () => {
+  it("finds third-party actions to check", () => {
     expect(uses.length).toBeGreaterThan(0);
   });
 
-  it('pins every third-party action to a full commit SHA', () => {
+  it("pins every third-party action to a full commit SHA", () => {
     const unpinned = uses
       .filter((use) => !SHA_REF_PATTERN.test(use.reference))
       .map((use) => `${use.file}:${use.line} ${use.reference}`);
     expect(unpinned).toEqual([]);
   });
 
-  it('records the version tag in a trailing comment', () => {
+  it("records the version tag in a trailing comment", () => {
     const missing = uses
       .filter((use) => !VERSION_COMMENT_PATTERN.test(use.trailer))
       .map((use) => `${use.file}:${use.line} ${use.reference}`);
