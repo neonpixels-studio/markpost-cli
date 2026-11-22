@@ -1,18 +1,18 @@
-import { join } from 'node:path';
+import { join } from "node:path";
 
 // The home references a user can put at the start of a configured path. A shell
 // won't expand these inside a quoted value (`config set outputDirectory
 // '~/notes'`), so the CLI expands them itself at read time. `${HOME}` is listed
 // before `$HOME` only for readability — the leading-prefix check below is exact,
 // so the two never overlap.
-const HOME_PREFIXES = ['~', '${HOME}', '$HOME'] as const;
+const HOME_PREFIXES = ["~", "${HOME}", "$HOME"] as const;
 
 // The separator that must follow a prefix for it to count as a home reference.
 // Deliberately POSIX `/` only: the config values and prompts this CLI reads use
 // forward slashes, so a Windows-style `~\notes` is intentionally left literal
 // rather than half-supported. (A directory named `~` is legal on POSIX, which is
 // why a bare mid-path `~` must never expand — see isLeadingHomePrefix.)
-const PATH_SEPARATOR = '/';
+const PATH_SEPARATOR = "/";
 
 // True when `prefix` is a leading path token in `inputPath`: either the whole
 // string is the prefix, or the prefix is immediately followed by a separator.
@@ -60,7 +60,7 @@ export const expandHomeDirectory = (
 
   const remainder = inputPath.slice(prefix.length);
 
-  if (remainder === '') {
+  if (remainder === "") {
     return homeDirectory;
   }
 

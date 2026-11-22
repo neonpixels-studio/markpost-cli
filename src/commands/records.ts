@@ -1,6 +1,6 @@
-import { parseArgs } from 'node:util';
-import { confirm } from '@inquirer/prompts';
-import chalk from 'chalk';
+import { parseArgs } from "node:util";
+import { confirm } from "@inquirer/prompts";
+import chalk from "chalk";
 import {
   deleteRecords,
   ERROR_STATUS,
@@ -12,47 +12,47 @@ import {
   RECORD_SORTS,
   TAG_DELIMITER,
   updateRecord,
-} from '#src/libs/records.js';
+} from "#src/libs/records.js";
 import {
   describeApiError,
   describeRequestRejection,
   isPerRecordRejection,
-} from '#src/libs/api.js';
-import { checkConfig } from '#src/libs/config.js';
+} from "#src/libs/api.js";
+import { checkConfig } from "#src/libs/config.js";
 import {
   failWithMessage,
   messageFromError,
   warnMessage,
   warnPartialRead,
-} from '#src/libs/errors.js';
-import { removeLedgerEntries } from '#src/libs/vault-ledger.js';
+} from "#src/libs/errors.js";
+import { removeLedgerEntries } from "#src/libs/vault-ledger.js";
 import {
   confirmRefusal,
   isInteractiveTerminal,
   isPromptAbort,
   sanitizeForTerminal,
-} from '#src/libs/terminal.js';
+} from "#src/libs/terminal.js";
 import {
   failWithSubcommandUsage,
   failWithUsage,
   parseOrFailWithUsage,
-} from '#src/libs/usage.js';
+} from "#src/libs/usage.js";
 import {
   hasJsonFlag,
   JSON_ERROR_FETCH_FAILED,
   printJson,
   printJsonError,
-} from '#src/libs/output.js';
-import { Record } from '#src/types/records.types.js';
+} from "#src/libs/output.js";
+import { Record } from "#src/types/records.types.js";
 import {
   DELETIONS_USAGE,
   runDeletionsCommand,
-} from '#src/commands/deletions.js';
+} from "#src/commands/deletions.js";
 
-const LIST_SUBCOMMAND = 'list';
-const UPDATE_SUBCOMMAND = 'update';
-const DELETE_SUBCOMMAND = 'delete';
-const DELETIONS_SUBCOMMAND = 'deletions';
+const LIST_SUBCOMMAND = "list";
+const UPDATE_SUBCOMMAND = "update";
+const DELETE_SUBCOMMAND = "delete";
+const DELETIONS_SUBCOMMAND = "deletions";
 
 export const USAGE = `Usage: markpost records <list|update|delete|deletions> [options]
 
@@ -158,12 +158,12 @@ const parseListArgs = (args: string[]): { filters: RecordListFilters } => {
     args,
     allowPositionals: true,
     options: {
-      source: { type: 'string', multiple: true },
-      status: { type: 'string', multiple: true },
-      search: { type: 'string', multiple: true },
-      tag: { type: 'string', multiple: true },
-      sort: { type: 'string', multiple: true },
-      json: { type: 'boolean' },
+      source: { type: "string", multiple: true },
+      status: { type: "string", multiple: true },
+      search: { type: "string", multiple: true },
+      tag: { type: "string", multiple: true },
+      sort: { type: "string", multiple: true },
+      json: { type: "boolean" },
     },
   });
 
@@ -179,9 +179,9 @@ const parseListArgs = (args: string[]): { filters: RecordListFilters } => {
 
   return {
     filters: {
-      source: normalizeFilter('source', values.source),
-      status: normalizeFilter('status', values.status),
-      search: normalizeFilter('search', values.search),
+      source: normalizeFilter("source", values.source),
+      status: normalizeFilter("status", values.status),
+      search: normalizeFilter("search", values.search),
       tags: normalizeTags(values.tag),
       sort: normalizeSort(values.sort),
     },
@@ -224,7 +224,7 @@ const normalizeTag = (occurrence: string): string => {
   const trimmed = occurrence.trim();
 
   if (trimmed.length === 0) {
-    throw new Error('--tag needs a non-empty value.');
+    throw new Error("--tag needs a non-empty value.");
   }
 
   if (trimmed.includes(TAG_DELIMITER)) {
@@ -250,7 +250,7 @@ const normalizeTags = (
 const normalizeSort = (
   occurrences: string[] | undefined,
 ): RecordSort | undefined => {
-  const value = normalizeFilter('sort', occurrences);
+  const value = normalizeFilter("sort", occurrences);
 
   if (value === undefined) {
     return undefined;
@@ -258,7 +258,7 @@ const normalizeSort = (
 
   if (!(RECORD_SORTS as readonly string[]).includes(value)) {
     throw new Error(
-      `--sort must be one of: ${RECORD_SORTS.join(', ')} (got "${value}").`,
+      `--sort must be one of: ${RECORD_SORTS.join(", ")} (got "${value}").`,
     );
   }
 
@@ -304,7 +304,7 @@ const listRecords = async (
   // command's catch reports it loudly and exits non-zero, rather than printing
   // the same message an empty account would produce.
   if (!result.ok) {
-    throw new Error('Failed to fetch records from the server.');
+    throw new Error("Failed to fetch records from the server.");
   }
 
   const { records, partial } = result;
@@ -331,8 +331,8 @@ const listRecords = async (
     // read failed before any page came back, which is not an empty account.
     console.log(
       partial
-        ? 'No records fetched — the read failed partway through.'
-        : 'No records found.',
+        ? "No records fetched — the read failed partway through."
+        : "No records found.",
     );
     return;
   }
@@ -355,7 +355,7 @@ type UpdateRecordArgs = {
 // either case — it leaves a bare `.` untouched, and the collapse happens
 // during URL resolution, before the request ever reaches the server.
 const isPathUnsafeUuid = (uuid: string): boolean =>
-  uuid === '.' || uuid === '..' || uuid.includes('/');
+  uuid === "." || uuid === ".." || uuid.includes("/");
 
 // Collapses a flag's parsed occurrences (an array under `multiple: true`,
 // mirroring normalizeFilter above) into a single value — rejecting a flag
@@ -396,9 +396,9 @@ const parseUpdateArgs = (args: string[]): UpdateRecordArgs => {
     args,
     allowPositionals: true,
     options: {
-      title: { type: 'string', multiple: true },
-      content: { type: 'string', multiple: true },
-      json: { type: 'boolean' },
+      title: { type: "string", multiple: true },
+      content: { type: "string", multiple: true },
+      json: { type: "boolean" },
     },
   });
 
@@ -406,7 +406,7 @@ const parseUpdateArgs = (args: string[]): UpdateRecordArgs => {
 
   if (!uuid) {
     throw new Error(
-      'No uuid given. Usage: markpost records update <uuid> [--title <text>] [--content <text>]',
+      "No uuid given. Usage: markpost records update <uuid> [--title <text>] [--content <text>]",
     );
   }
 
@@ -418,15 +418,15 @@ const parseUpdateArgs = (args: string[]): UpdateRecordArgs => {
     throw new Error(`Unexpected argument "${extraPositionals[0]}".`);
   }
 
-  const title = extractUpdateFlag('title', values.title);
-  const content = extractUpdateFlag('content', values.content);
+  const title = extractUpdateFlag("title", values.title);
+  const content = extractUpdateFlag("content", values.content);
 
   // Neither flag given is a no-op request that would otherwise reach the
   // server as an empty attributes object and be rejected there (see
   // markpost's emptyUpdateError) — fail loud here instead, before a network
   // round trip.
   if (title === undefined && content === undefined) {
-    throw new Error('Nothing to update: pass --title and/or --content.');
+    throw new Error("Nothing to update: pass --title and/or --content.");
   }
 
   return { uuid, title, content };
@@ -492,7 +492,7 @@ const updateRecordAndReport = async (
   if (updated.status === PENDING_STATUS) {
     console.log(
       chalk.yellow(
-        'Record is pending — the next sync run will write it to disk.',
+        "Record is pending — the next sync run will write it to disk.",
       ),
     );
   }
@@ -549,9 +549,9 @@ const describeInvalidUuids = (invalid: string[]): string => {
   const shown = invalid
     .slice(0, MAX_INVALID_UUIDS_SHOWN)
     .map((uuid) => `"${sanitizeForTerminal(uuid)}"`)
-    .join(', ');
+    .join(", ");
   const hidden = invalid.length - MAX_INVALID_UUIDS_SHOWN;
-  const more = hidden > 0 ? ` and ${hidden} more` : '';
+  const more = hidden > 0 ? ` and ${hidden} more` : "";
 
   return `Not a valid record uuid: ${shown}${more}. Nothing was deleted.`;
 };
@@ -573,8 +573,8 @@ const parseDeleteArgs = (args: string[]): DeleteRecordsArgs => {
     args,
     allowPositionals: true,
     options: {
-      yes: { type: 'boolean' },
-      json: { type: 'boolean' },
+      yes: { type: "boolean" },
+      json: { type: "boolean" },
     },
   });
 
@@ -582,7 +582,7 @@ const parseDeleteArgs = (args: string[]): DeleteRecordsArgs => {
 
   if (rawUuids.length === 0) {
     throw new Error(
-      'No uuid given. Usage: markpost records delete <uuid...> [--yes]',
+      "No uuid given. Usage: markpost records delete <uuid...> [--yes]",
     );
   }
 
@@ -612,10 +612,10 @@ const nonInteractiveRefusal = (
 
   return confirmRefusal(
     {
-      command: 'records',
+      command: "records",
       subcommand: DELETE_SUBCOMMAND,
-      argument: '<uuid...>',
-      verb: 'delete',
+      argument: "<uuid...>",
+      verb: "delete",
     },
     { skipConfirm, isInteractive: isInteractiveTerminal() },
   );
@@ -645,7 +645,7 @@ const chunkUuids = (uuids: string[]): string[][] => {
   return chunks;
 };
 
-const NOT_ATTEMPTED_REASON = 'not attempted after an earlier systemic failure';
+const NOT_ATTEMPTED_REASON = "not attempted after an earlier systemic failure";
 
 type ChunkOutcome = {
   deleted: number;
@@ -665,7 +665,7 @@ const attemptChunk = async (chunk: string[]): Promise<ChunkOutcome> => {
 
     return {
       deleted: 0,
-      failureReason: 'the request failed',
+      failureReason: "the request failed",
       systemic: false,
     };
   } catch (error) {
@@ -734,7 +734,7 @@ const describeChunkFailures = (run: DeleteRun): string =>
     .map(
       ({ chunk, reason }) => `chunk ${chunk} of ${run.totalChunks} (${reason})`,
     )
-    .join('; ');
+    .join("; ");
 
 const reportDeleteFailure = (
   run: DeleteRun,
@@ -800,7 +800,7 @@ const deleteRecordsAndReport = async (
   const confirmed = skipConfirm || (await confirmRecordDeletion(uuids.length));
 
   if (!confirmed) {
-    console.log('Deletion cancelled.');
+    console.log("Deletion cancelled.");
     return;
   }
 

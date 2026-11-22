@@ -1,15 +1,15 @@
-import { parseNoteText } from '#src/libs/frontmatter.js';
+import { parseNoteText } from "#src/libs/frontmatter.js";
 
 // The `markpost push` argument that means "read the note from stdin", the
 // standard CLI convention (`pbpaste | markpost push -`).
-export const STDIN_ARGUMENT = '-';
+export const STDIN_ARGUMENT = "-";
 
 // Label used in place of a file path in push output, since piped input has no
 // filename.
-export const STDIN_LABEL = '<stdin>';
+export const STDIN_LABEL = "<stdin>";
 
 const TITLE_HEADING_PATTERN = /^ {0,3}#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
-const FRONTMATTER_FENCE = '---';
+const FRONTMATTER_FENCE = "---";
 const CODE_FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 export type ReadInput = () => Promise<string>;
@@ -24,8 +24,8 @@ export interface ParsedNote {
 export class StdinInputError extends Error {}
 
 export const TTY_ERROR =
-  'Nothing piped to stdin. Pipe a note in (e.g. `pbpaste | markpost push -`) or pass a file path.';
-export const EMPTY_ERROR = 'Stdin was empty; there is no note to push.';
+  "Nothing piped to stdin. Pipe a note in (e.g. `pbpaste | markpost push -`) or pass a file path.";
+export const EMPTY_ERROR = "Stdin was empty; there is no note to push.";
 
 export interface ReadableInput {
   isTTY?: boolean;
@@ -42,8 +42,8 @@ export const readStdinText = async (
     throw new StdinInputError(TTY_ERROR);
   }
 
-  input.setEncoding('utf-8');
-  let text = '';
+  input.setEncoding("utf-8");
+  let text = "";
 
   for await (const chunk of input) {
     text += chunk;
@@ -82,7 +82,7 @@ const closesFence = (
   return (
     fence[0] === openFence[0] &&
     fence.length >= openFence.length &&
-    info.trim() === ''
+    info.trim() === ""
   );
 };
 

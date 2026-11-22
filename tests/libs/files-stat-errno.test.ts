@@ -1,8 +1,8 @@
-import { statSync } from 'node:fs';
-import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { statSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveMarkdownInputs } from '#src/libs/files.js';
+import { resolveMarkdownInputs } from "#src/libs/files.js";
 
 // resolveMarkdownInputs discriminates a permission failure (EACCES/EPERM)
 // from every other stat failure by reading `error.code`. EPERM is hard to
@@ -14,23 +14,23 @@ import { resolveMarkdownInputs } from '#src/libs/files.js';
 // (each test file gets its own module registry). `vi.mock` is hoisted above
 // these imports, so the static `statSync` import already resolves to the
 // mock.
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>();
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
   return { ...actual, statSync: vi.fn() };
 });
 
 const mockedStatSync = vi.mocked(statSync);
 
-describe('resolveMarkdownInputs stat errno discrimination', () => {
+describe("resolveMarkdownInputs stat errno discrimination", () => {
   afterEach(() => {
     mockedStatSync.mockReset();
   });
 
-  it('treats EPERM the same as EACCES: skipped, not missing', () => {
-    const target = join('/mock', 'blocked.md');
+  it("treats EPERM the same as EACCES: skipped, not missing", () => {
+    const target = join("/mock", "blocked.md");
     const permissionError = Object.assign(
-      new Error('operation not permitted'),
-      { code: 'EPERM' },
+      new Error("operation not permitted"),
+      { code: "EPERM" },
     );
     mockedStatSync.mockImplementation(() => {
       throw permissionError;
@@ -43,10 +43,10 @@ describe('resolveMarkdownInputs stat errno discrimination', () => {
     expect(skipped).toEqual([target]);
   });
 
-  it('falls through to glob handling for a stat failure without an errno code', () => {
-    const target = join('/mock', 'nope.md');
+  it("falls through to glob handling for a stat failure without an errno code", () => {
+    const target = join("/mock", "nope.md");
     mockedStatSync.mockImplementation(() => {
-      throw new Error('boom');
+      throw new Error("boom");
     });
 
     const { files, missing, skipped } = resolveMarkdownInputs([target]);

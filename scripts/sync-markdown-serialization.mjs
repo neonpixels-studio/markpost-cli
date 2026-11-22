@@ -22,7 +22,7 @@
 //   npm run sync:markdown-serialization -- --from <path>    # copies from an existing local checkout
 //   npm run sync:markdown-serialization -- --from=<path>    # same, `=` form
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -30,28 +30,28 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
-import { parseFromPathArg } from './sync-contract.mjs';
-import { resolveSourceRepo } from './lib/markpost-checkout.mjs';
+import { parseFromPathArg } from "./sync-contract.mjs";
+import { resolveSourceRepo } from "./lib/markpost-checkout.mjs";
 
-const MARKPOST_REPO_URL = 'https://github.com/neonpixels-studio/markpost';
-const SOURCE_RELATIVE_PATH = 'server/utils/markdown.ts';
+const MARKPOST_REPO_URL = "https://github.com/neonpixels-studio/markpost";
+const SOURCE_RELATIVE_PATH = "server/utils/markdown.ts";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(SCRIPT_DIR, '..');
-const VENDOR_DIR = join(REPO_ROOT, 'tests/libs/vendor');
+const REPO_ROOT = join(SCRIPT_DIR, "..");
+const VENDOR_DIR = join(REPO_ROOT, "tests/libs/vendor");
 const VENDOR_FILE = join(
   VENDOR_DIR,
-  'markpost-markdown-serialization.generated.ts',
+  "markpost-markdown-serialization.generated.ts",
 );
 const MANIFEST_FILE = join(
   VENDOR_DIR,
-  'markpost-markdown-serialization.manifest.json',
+  "markpost-markdown-serialization.manifest.json",
 );
 
 // The declarations pulled out of markdown.ts, in the order they are emitted.
@@ -59,18 +59,18 @@ const MANIFEST_FILE = join(
 // serialization functions. Every name here must exist in markpost's source —
 // a rename or removal upstream fails the sync loudly, which is itself the
 // drift signal worth surfacing.
-const REQUIRED_TYPE_NAMES = ['FrontmatterObject', 'ParsedPayload'];
+const REQUIRED_TYPE_NAMES = ["FrontmatterObject", "ParsedPayload"];
 const REQUIRED_FUNCTION_NAMES = [
-  'quoteYamlScalar',
-  'serializeTagsLine',
-  'serializeFrontmatter',
-  'assembleMarkdownDocument',
+  "quoteYamlScalar",
+  "serializeTagsLine",
+  "serializeFrontmatter",
+  "assembleMarkdownDocument",
 ];
 // The public entry points the drift test imports; force `export` onto them if
 // markpost ever stops exporting one, so the generated module stays importable.
 const PUBLIC_FUNCTION_NAMES = [
-  'serializeFrontmatter',
-  'assembleMarkdownDocument',
+  "serializeFrontmatter",
+  "assembleMarkdownDocument",
 ];
 
 const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
@@ -147,7 +147,7 @@ function extractSerializationSlice(source) {
 
     if (!declaration) {
       missing.push(name);
-      return '';
+      return "";
     }
 
     return declarationText(sourceFile, declaration, name);
@@ -155,13 +155,13 @@ function extractSerializationSlice(source) {
 
   if (missing.length > 0) {
     throw new Error(
-      `${SOURCE_RELATIVE_PATH} is missing expected declaration(s): ${missing.join(', ')} — ` +
-        'markpost renamed or removed part of the serialization slice; update ' +
-        'scripts/sync-markdown-serialization.mjs and src/libs/frontmatter.ts to match',
+      `${SOURCE_RELATIVE_PATH} is missing expected declaration(s): ${missing.join(", ")} — ` +
+        "markpost renamed or removed part of the serialization slice; update " +
+        "scripts/sync-markdown-serialization.mjs and src/libs/frontmatter.ts to match",
     );
   }
 
-  return declarations.join('\n\n');
+  return declarations.join("\n\n");
 }
 
 // Full history (`--filter=blob:none`, not `--depth 1`): `readCommitHash`
@@ -172,17 +172,17 @@ function extractSerializationSlice(source) {
 // trees download eagerly.
 function cloneMarkpostInto(cloneDir) {
   execFileSync(
-    'git',
-    ['clone', '--filter=blob:none', MARKPOST_REPO_URL, cloneDir],
-    { stdio: 'inherit' },
+    "git",
+    ["clone", "--filter=blob:none", MARKPOST_REPO_URL, cloneDir],
+    { stdio: "inherit" },
   );
 }
 
 function assertSourceIsCommitted(checkoutDir) {
   const status = execFileSync(
-    'git',
-    ['status', '--porcelain', '--', SOURCE_RELATIVE_PATH],
-    { cwd: checkoutDir, encoding: 'utf-8' },
+    "git",
+    ["status", "--porcelain", "--", SOURCE_RELATIVE_PATH],
+    { cwd: checkoutDir, encoding: "utf-8" },
   ).trim();
 
   if (!status) {
@@ -191,21 +191,21 @@ function assertSourceIsCommitted(checkoutDir) {
 
   throw new Error(
     `${SOURCE_RELATIVE_PATH} has uncommitted changes in ${checkoutDir} — ` +
-      'commit them first so the manifest records the commit the vendored slice actually came from',
+      "commit them first so the manifest records the commit the vendored slice actually came from",
   );
 }
 
 function readCommitHash(checkoutDir) {
   const commitHash = execFileSync(
-    'git',
-    ['log', '-1', '--format=%H', '--', SOURCE_RELATIVE_PATH],
-    { cwd: checkoutDir, encoding: 'utf-8' },
+    "git",
+    ["log", "-1", "--format=%H", "--", SOURCE_RELATIVE_PATH],
+    { cwd: checkoutDir, encoding: "utf-8" },
   ).trim();
 
   if (!commitHash) {
     throw new Error(
       `No commit history found for ${SOURCE_RELATIVE_PATH} in ${checkoutDir} — ` +
-        'is this a markpost git checkout?',
+        "is this a markpost git checkout?",
     );
   }
 
@@ -221,7 +221,7 @@ function readMarkdownSource(checkoutDir) {
     );
   }
 
-  return readFileSync(sourcePath, 'utf-8');
+  return readFileSync(sourcePath, "utf-8");
 }
 
 function writeVendoredSlice(slice) {
@@ -261,7 +261,7 @@ function main() {
   const fromPath = parseFromPathArg(process.argv.slice(2));
   const temporaryCloneDir = fromPath
     ? undefined
-    : mkdtempSync(join(tmpdir(), 'markpost-markdown-sync-'));
+    : mkdtempSync(join(tmpdir(), "markpost-markdown-sync-"));
 
   try {
     if (temporaryCloneDir) {
@@ -272,7 +272,7 @@ function main() {
 
     syncFrom(checkoutDir);
     console.log(`Synced ${VENDOR_FILE} from ${checkoutDir}`);
-    console.log('Review the diff, then run `npm test` before committing.');
+    console.log("Review the diff, then run `npm test` before committing.");
   } finally {
     if (temporaryCloneDir) {
       rmSync(temporaryCloneDir, { recursive: true, force: true });

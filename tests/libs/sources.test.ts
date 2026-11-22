@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createSource,
@@ -8,21 +8,21 @@ import {
   rotateSourceSecret,
   testSource,
   updateSource,
-} from '#src/libs/sources.js';
-import { ApiTimeoutError } from '#src/libs/api.js';
-import { logErrorMessage } from '#src/libs/errors.js';
-import { ApiDeleteMeta } from '#src/types/api.types.js';
+} from "#src/libs/sources.js";
+import { ApiTimeoutError } from "#src/libs/api.js";
+import { logErrorMessage } from "#src/libs/errors.js";
+import { ApiDeleteMeta } from "#src/types/api.types.js";
 import {
   Source,
   SourceTestResult,
   SourceType,
-} from '#src/types/sources.types.js';
+} from "#src/types/sources.types.js";
 
 // #src/libs/api.js imports #src/libs/config.js, which constructs a real
 // `conf`-backed store (touching the developer's actual config directory) as
 // soon as it's loaded. Mock it so loading api.js doesn't pull in that side
 // effect — API_TOKEN below resolves the token before the store is consulted.
-vi.mock('#src/libs/config.js', () => ({
+vi.mock("#src/libs/config.js", () => ({
   config: { get: vi.fn() },
 }));
 
@@ -36,27 +36,27 @@ vi.mock('#src/libs/config.js', () => ({
 // exercise production response-parsing logic instead of a hand-copied
 // stand-in that could silently drift from it (see tests/libs/records.test.ts).
 beforeEach(() => {
-  vi.stubEnv('BASE_URL', 'https://example.com');
-  vi.stubEnv('API_TOKEN', 'test-token');
+  vi.stubEnv("BASE_URL", "https://example.com");
+  vi.stubEnv("API_TOKEN", "test-token");
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-vi.mock('#src/libs/errors.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('#src/libs/errors.js')>()),
+vi.mock("#src/libs/errors.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#src/libs/errors.js")>()),
   logErrorMessage: vi.fn(),
 }));
 
 const mockSource: Source = {
-  uuid: 'abc-123',
-  createdAt: '2024-01-01T00:00:00Z',
-  type: 'webhook',
-  name: 'Test Source',
+  uuid: "abc-123",
+  createdAt: "2024-01-01T00:00:00Z",
+  type: "webhook",
+  name: "Test Source",
   provider: null,
-  endpointSlug: 'wh_abc12345',
-  routeFolder: '99-incoming/',
+  endpointSlug: "wh_abc12345",
+  routeFolder: "99-incoming/",
   fieldMapping: null,
   lastHitAt: null,
   recordCount: 0,
@@ -75,84 +75,84 @@ function mockFetch(responseBody: object, ok = true) {
 function mockFetchTimeout() {
   global.fetch = vi
     .fn()
-    .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    .mockRejectedValue(new DOMException("timed out", "TimeoutError"));
 }
 
 // A timeout must escape each function's resilient fallback ([] or null) so
 // the command fails loud instead of looking like an empty result on a
 // stalled server. All four source calls flow through the same seam.
-describe('sources API timeout propagation', () => {
+describe("sources API timeout propagation", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('fetchSources rejects with ApiTimeoutError instead of returning []', async () => {
+  it("fetchSources rejects with ApiTimeoutError instead of returning []", async () => {
     mockFetchTimeout();
     await expect(fetchSources()).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
-  it('createSource rejects with ApiTimeoutError instead of returning null', async () => {
+  it("createSource rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
     await expect(
-      createSource({ type: 'webhook', name: 'n', routeFolder: 'f/' }),
+      createSource({ type: "webhook", name: "n", routeFolder: "f/" }),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
-  it('updateSource rejects with ApiTimeoutError instead of returning null', async () => {
+  it("updateSource rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
     await expect(
-      updateSource('abc-123', { routeFolder: 'f/' }),
+      updateSource("abc-123", { routeFolder: "f/" }),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
-  it('deleteSource rejects with ApiTimeoutError instead of returning null', async () => {
+  it("deleteSource rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
-    await expect(deleteSource('abc-123')).rejects.toBeInstanceOf(
+    await expect(deleteSource("abc-123")).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
   });
 
-  it('rotateSourceSecret rejects with ApiTimeoutError instead of returning null', async () => {
+  it("rotateSourceSecret rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
-    await expect(rotateSourceSecret('abc-123')).rejects.toBeInstanceOf(
+    await expect(rotateSourceSecret("abc-123")).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
   });
 
-  it('testSource rejects with ApiTimeoutError instead of returning null', async () => {
+  it("testSource rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
-    await expect(testSource('abc-123')).rejects.toBeInstanceOf(ApiTimeoutError);
+    await expect(testSource("abc-123")).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 });
 
-describe('fetchSources', () => {
+describe("fetchSources", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('calls fetch with the correct URL and auth header', async () => {
+  it("calls fetch with the correct URL and auth header", async () => {
     mockFetch({ data: [{ attributes: mockSource }] });
     await fetchSources();
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources',
+      "https://example.com/api/sources",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('returns the list of source attributes on success', async () => {
+  it("returns the list of source attributes on success", async () => {
     mockFetch({ data: [{ attributes: mockSource }] });
     expect(await fetchSources()).toEqual([mockSource]);
   });
 
   // Regression coverage for #29: see the equivalent note in the createSource
   // describe block below.
-  it('extracts attributes from full JSON:API resource objects in a list response', async () => {
+  it("extracts attributes from full JSON:API resource objects in a list response", async () => {
     mockFetch({
       data: [
         {
-          type: 'sources',
+          type: "sources",
           id: mockSource.uuid,
           attributes: mockSource,
           links: { self: `/api/sources/${mockSource.uuid}` },
@@ -168,93 +168,93 @@ describe('fetchSources', () => {
   // the same class of error-swallowing bug the CLI's records path had
   // already been fixed for (see tests/libs/records.test.ts). It now
   // delegates to `assertApiSuccess`, which checks both.
-  it('returns [] and surfaces error details when the response is ok but carries errors', async () => {
+  it("returns [] and surfaces error details when the response is ok but carries errors", async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Error', detail: 'Server error' }] } },
+      { data: { errors: [{ title: "Error", detail: "Server error" }] } },
       true,
     );
     expect(await fetchSources()).toEqual([]);
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchSources',
-      'Error: Server error',
+      "fetchSources",
+      "Error: Server error",
     );
   });
 
-  it('returns [] and surfaces error details when the response is not ok', async () => {
+  it("returns [] and surfaces error details when the response is not ok", async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Error', detail: 'Server error' }] } },
+      { data: { errors: [{ title: "Error", detail: "Server error" }] } },
       false,
     );
     expect(await fetchSources()).toEqual([]);
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchSources',
-      'Error: Server error',
+      "fetchSources",
+      "Error: Server error",
     );
   });
 
-  it('returns [] on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("returns [] on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
     expect(await fetchSources()).toEqual([]);
   });
 
   // Regression coverage: a resource with no `attributes` at all must be
   // skipped (not passed through as `undefined`) and the skip must be
   // reported so it's visible instead of silently shrinking the result.
-  it('skips a resource with no attributes and reports the count', async () => {
+  it("skips a resource with no attributes and reports the count", async () => {
     mockFetch({
-      data: [{ attributes: mockSource }, { type: 'sources', id: 'x' }],
+      data: [{ attributes: mockSource }, { type: "sources", id: "x" }],
     });
 
     expect(await fetchSources()).toEqual([mockSource]);
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchSources',
-      'Skipped 1 source(s) with no attributes',
+      "fetchSources",
+      "Skipped 1 source(s) with no attributes",
     );
   });
 
   // Regression coverage: `attributes: null` is off-contract but must be
   // caught by the same skip logic as a missing `attributes` key, not passed
   // through as a `null` element typed as a `Source`.
-  it('skips a resource with attributes explicitly null', async () => {
+  it("skips a resource with attributes explicitly null", async () => {
     mockFetch({
-      data: [{ attributes: mockSource }, { type: 'sources', attributes: null }],
+      data: [{ attributes: mockSource }, { type: "sources", attributes: null }],
     });
 
     expect(await fetchSources()).toEqual([mockSource]);
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchSources',
-      'Skipped 1 source(s) with no attributes',
+      "fetchSources",
+      "Skipped 1 source(s) with no attributes",
     );
   });
 });
 
-describe('createSource', () => {
+describe("createSource", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('calls fetch with POST, correct headers, and JSON:API body', async () => {
+  it("calls fetch with POST, correct headers, and JSON:API body", async () => {
     mockFetch({ data: { attributes: mockSource } });
     await createSource({
-      type: 'webhook',
-      name: 'Test Source',
-      routeFolder: '99-incoming/',
+      type: "webhook",
+      name: "Test Source",
+      routeFolder: "99-incoming/",
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources',
+      "https://example.com/api/sources",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: 'Bearer test-token',
+          "Content-Type": "application/vnd.api+json",
+          Authorization: "Bearer test-token",
         },
         body: JSON.stringify({
           data: {
-            type: 'sources',
+            type: "sources",
             attributes: {
-              type: 'webhook',
-              name: 'Test Source',
-              routeFolder: '99-incoming/',
+              type: "webhook",
+              name: "Test Source",
+              routeFolder: "99-incoming/",
             },
           },
         }),
@@ -262,13 +262,13 @@ describe('createSource', () => {
     );
   });
 
-  it('returns the source attributes on success', async () => {
+  it("returns the source attributes on success", async () => {
     mockFetch({ data: { attributes: mockSource } });
     expect(
       await createSource({
-        type: 'webhook',
-        name: 'Test Source',
-        routeFolder: '99-incoming/',
+        type: "webhook",
+        name: "Test Source",
+        routeFolder: "99-incoming/",
       }),
     ).toEqual(mockSource);
   });
@@ -277,10 +277,10 @@ describe('createSource', () => {
   // `type`/`id`/`links` alongside `attributes` (see `sourceSerializer` in
   // markpost's server/utils/response.ts), which the CLI's old `ApiData` type
   // couldn't even describe. Extraction must still work with the full shape.
-  it('extracts attributes from a full JSON:API resource object (type/id/links included)', async () => {
+  it("extracts attributes from a full JSON:API resource object (type/id/links included)", async () => {
     mockFetch({
       data: {
-        type: 'sources',
+        type: "sources",
         id: mockSource.uuid,
         attributes: mockSource,
         links: { self: `/api/sources/${mockSource.uuid}` },
@@ -288,21 +288,21 @@ describe('createSource', () => {
     });
     expect(
       await createSource({
-        type: 'webhook',
-        name: 'Test Source',
-        routeFolder: '99-incoming/',
+        type: "webhook",
+        name: "Test Source",
+        routeFolder: "99-incoming/",
       }),
     ).toEqual(mockSource);
   });
 
-  it('returns null and surfaces error details when the response contains errors', async () => {
+  it("returns null and surfaces error details when the response contains errors", async () => {
     mockFetch(
       {
         data: {
           errors: [
             {
-              title: 'Invalid Attribute',
-              detail: 'Type must be one of: webhook, email',
+              title: "Invalid Attribute",
+              detail: "Type must be one of: webhook, email",
             },
           ],
         },
@@ -311,274 +311,274 @@ describe('createSource', () => {
     );
     const result = await createSource({
       // Deliberately invalid type to exercise the server-side rejection path.
-      type: 'bogus' as SourceType,
-      name: 'Test Source',
-      routeFolder: '99-incoming/',
+      type: "bogus" as SourceType,
+      name: "Test Source",
+      routeFolder: "99-incoming/",
     });
     expect(result).toBeNull();
     expect(logErrorMessage).toHaveBeenCalledWith(
       'createSource["Test Source"]',
-      'Invalid Attribute: Type must be one of: webhook, email',
+      "Invalid Attribute: Type must be one of: webhook, email",
     );
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
     expect(
       await createSource({
-        type: 'webhook',
-        name: 'Test Source',
-        routeFolder: '99-incoming/',
+        type: "webhook",
+        name: "Test Source",
+        routeFolder: "99-incoming/",
       }),
     ).toBeNull();
   });
 });
 
-describe('updateSource', () => {
+describe("updateSource", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('calls fetch with PATCH, correct headers, and JSON:API body', async () => {
+  it("calls fetch with PATCH, correct headers, and JSON:API body", async () => {
     mockFetch({ data: { attributes: mockSource } });
-    await updateSource('abc-123', { routeFolder: '00-fixed/' });
+    await updateSource("abc-123", { routeFolder: "00-fixed/" });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/abc-123',
+      "https://example.com/api/sources/abc-123",
       expect.objectContaining({
-        method: 'PATCH',
+        method: "PATCH",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: 'Bearer test-token',
+          "Content-Type": "application/vnd.api+json",
+          Authorization: "Bearer test-token",
         },
         body: JSON.stringify({
           data: {
-            type: 'sources',
-            attributes: { routeFolder: '00-fixed/' },
+            type: "sources",
+            attributes: { routeFolder: "00-fixed/" },
           },
         }),
       }),
     );
   });
 
-  it('encodes the uuid into the URL path', async () => {
+  it("encodes the uuid into the URL path", async () => {
     mockFetch({ data: { attributes: mockSource } });
-    await updateSource('a/../b', { routeFolder: '00-fixed/' });
+    await updateSource("a/../b", { routeFolder: "00-fixed/" });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/a%2F..%2Fb',
-      expect.objectContaining({ method: 'PATCH' }),
+      "https://example.com/api/sources/a%2F..%2Fb",
+      expect.objectContaining({ method: "PATCH" }),
     );
   });
 
-  it('sends only the fields provided, including fieldMapping', async () => {
+  it("sends only the fields provided, including fieldMapping", async () => {
     mockFetch({ data: { attributes: mockSource } });
-    await updateSource('abc-123', { fieldMapping: { title: 'subject' } });
+    await updateSource("abc-123", { fieldMapping: { title: "subject" } });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/abc-123',
+      "https://example.com/api/sources/abc-123",
       expect.objectContaining({
         body: JSON.stringify({
           data: {
-            type: 'sources',
-            attributes: { fieldMapping: { title: 'subject' } },
+            type: "sources",
+            attributes: { fieldMapping: { title: "subject" } },
           },
         }),
       }),
     );
   });
 
-  it('returns the updated source attributes on success', async () => {
+  it("returns the updated source attributes on success", async () => {
     mockFetch({ data: { attributes: mockSource } });
-    expect(await updateSource('abc-123', { routeFolder: '00-fixed/' })).toEqual(
+    expect(await updateSource("abc-123", { routeFolder: "00-fixed/" })).toEqual(
       mockSource,
     );
   });
 
-  it('returns null and surfaces error details when the uuid is not found', async () => {
+  it("returns null and surfaces error details when the uuid is not found", async () => {
     mockFetch(
       {
         data: {
           errors: [
             {
-              title: 'Not Found',
-              detail: 'No source was found for the given uuid.',
+              title: "Not Found",
+              detail: "No source was found for the given uuid.",
             },
           ],
         },
       },
       false,
     );
-    const result = await updateSource('missing-uuid', {
-      routeFolder: '00-fixed/',
+    const result = await updateSource("missing-uuid", {
+      routeFolder: "00-fixed/",
     });
     expect(result).toBeNull();
     expect(logErrorMessage).toHaveBeenCalledWith(
       'updateSource["missing-uuid"]',
-      'Not Found: No source was found for the given uuid.',
+      "Not Found: No source was found for the given uuid.",
     );
   });
 
-  it('returns null and surfaces error details when no fields are provided', async () => {
+  it("returns null and surfaces error details when no fields are provided", async () => {
     mockFetch(
       {
         data: {
           errors: [
             {
-              title: 'Invalid Attribute',
+              title: "Invalid Attribute",
               detail:
-                'At least one of routeFolder or fieldMapping must be provided.',
+                "At least one of routeFolder or fieldMapping must be provided.",
             },
           ],
         },
       },
       false,
     );
-    const result = await updateSource('abc-123', {});
+    const result = await updateSource("abc-123", {});
     expect(result).toBeNull();
     expect(logErrorMessage).toHaveBeenCalledWith(
       'updateSource["abc-123"]',
-      'Invalid Attribute: At least one of routeFolder or fieldMapping must be provided.',
+      "Invalid Attribute: At least one of routeFolder or fieldMapping must be provided.",
     );
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
     expect(
-      await updateSource('abc-123', { routeFolder: '00-fixed/' }),
+      await updateSource("abc-123", { routeFolder: "00-fixed/" }),
     ).toBeNull();
   });
 });
 
-describe('rotateSourceSecret', () => {
+describe("rotateSourceSecret", () => {
   const githubSource = {
     ...mockSource,
-    uuid: 'ghi-789',
-    type: 'github' as SourceType,
-    provider: 'github',
-    providerSecret: 'whsec_new_generated',
+    uuid: "ghi-789",
+    type: "github" as SourceType,
+    provider: "github",
+    providerSecret: "whsec_new_generated",
   };
 
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('POSTs to the rotate-secret path with empty attributes when no secret is supplied', async () => {
+  it("POSTs to the rotate-secret path with empty attributes when no secret is supplied", async () => {
     mockFetch({ data: { attributes: githubSource } });
-    await rotateSourceSecret('ghi-789');
+    await rotateSourceSecret("ghi-789");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/ghi-789/rotate-secret',
+      "https://example.com/api/sources/ghi-789/rotate-secret",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: 'Bearer test-token',
+          "Content-Type": "application/vnd.api+json",
+          Authorization: "Bearer test-token",
         },
         body: JSON.stringify({
-          data: { type: 'sources', attributes: {} },
+          data: { type: "sources", attributes: {} },
         }),
       }),
     );
   });
 
-  it('sends the supplied providerSecret for a manual-secret provider', async () => {
+  it("sends the supplied providerSecret for a manual-secret provider", async () => {
     mockFetch({ data: { attributes: mockSource } });
-    await rotateSourceSecret('str-123', { providerSecret: 'whsec_pasted' });
+    await rotateSourceSecret("str-123", { providerSecret: "whsec_pasted" });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/str-123/rotate-secret',
+      "https://example.com/api/sources/str-123/rotate-secret",
       expect.objectContaining({
         body: JSON.stringify({
           data: {
-            type: 'sources',
-            attributes: { providerSecret: 'whsec_pasted' },
+            type: "sources",
+            attributes: { providerSecret: "whsec_pasted" },
           },
         }),
       }),
     );
   });
 
-  it('encodes the uuid into the URL path', async () => {
+  it("encodes the uuid into the URL path", async () => {
     mockFetch({ data: { attributes: githubSource } });
-    await rotateSourceSecret('a/../b');
+    await rotateSourceSecret("a/../b");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/a%2F..%2Fb/rotate-secret',
-      expect.objectContaining({ method: 'POST' }),
+      "https://example.com/api/sources/a%2F..%2Fb/rotate-secret",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 
-  it('returns the rotated source attributes, including the revealed secret', async () => {
+  it("returns the rotated source attributes, including the revealed secret", async () => {
     mockFetch({ data: { attributes: githubSource } });
-    expect(await rotateSourceSecret('ghi-789')).toEqual(githubSource);
+    expect(await rotateSourceSecret("ghi-789")).toEqual(githubSource);
   });
 
-  it('returns null and surfaces error details when the source has no rotatable secret', async () => {
+  it("returns null and surfaces error details when the source has no rotatable secret", async () => {
     mockFetch(
       {
         data: {
           errors: [
             {
-              title: 'Invalid Attribute',
+              title: "Invalid Attribute",
               detail:
-                'This source has no provider set, so it has no secret to rotate.',
+                "This source has no provider set, so it has no secret to rotate.",
             },
           ],
         },
       },
       false,
     );
-    const result = await rotateSourceSecret('abc-123');
+    const result = await rotateSourceSecret("abc-123");
     expect(result).toBeNull();
     expect(logErrorMessage).toHaveBeenCalledWith(
       'rotateSourceSecret["abc-123"]',
-      'Invalid Attribute: This source has no provider set, so it has no secret to rotate.',
+      "Invalid Attribute: This source has no provider set, so it has no secret to rotate.",
     );
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await rotateSourceSecret('ghi-789')).toBeNull();
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    expect(await rotateSourceSecret("ghi-789")).toBeNull();
   });
 });
 
-describe('rotateSourceEndpoint', () => {
+describe("rotateSourceEndpoint", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('POSTs to the rotate-endpoint path with empty attributes', async () => {
+  it("POSTs to the rotate-endpoint path with empty attributes", async () => {
     mockFetch({ data: { attributes: mockSource } });
-    await rotateSourceEndpoint('abc-123');
+    await rotateSourceEndpoint("abc-123");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/abc-123/rotate-endpoint',
+      "https://example.com/api/sources/abc-123/rotate-endpoint",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: 'Bearer test-token',
+          "Content-Type": "application/vnd.api+json",
+          Authorization: "Bearer test-token",
         },
-        body: JSON.stringify({ data: { type: 'sources', attributes: {} } }),
+        body: JSON.stringify({ data: { type: "sources", attributes: {} } }),
       }),
     );
   });
 
-  it('encodes the uuid into the URL path', async () => {
+  it("encodes the uuid into the URL path", async () => {
     mockFetch({ data: { attributes: mockSource } });
-    await rotateSourceEndpoint('a/../b');
+    await rotateSourceEndpoint("a/../b");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/a%2F..%2Fb/rotate-endpoint',
-      expect.objectContaining({ method: 'POST' }),
+      "https://example.com/api/sources/a%2F..%2Fb/rotate-endpoint",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 
-  it('returns the rotated source attributes', async () => {
+  it("returns the rotated source attributes", async () => {
     mockFetch({ data: { attributes: mockSource } });
-    expect(await rotateSourceEndpoint('abc-123')).toEqual(mockSource);
+    expect(await rotateSourceEndpoint("abc-123")).toEqual(mockSource);
   });
 
-  it('returns null and surfaces details on a 422 non-rotatable type', async () => {
+  it("returns null and surfaces details on a 422 non-rotatable type", async () => {
     mockFetch(
       {
         data: {
           errors: [
             {
-              title: 'Invalid Attribute',
+              title: "Invalid Attribute",
               detail:
                 'Sources of type "email" do not have a rotatable endpoint slug.',
             },
@@ -587,194 +587,194 @@ describe('rotateSourceEndpoint', () => {
       },
       false,
     );
-    expect(await rotateSourceEndpoint('def-456')).toBeNull();
+    expect(await rotateSourceEndpoint("def-456")).toBeNull();
     expect(logErrorMessage).toHaveBeenCalledWith(
       'rotateSourceEndpoint["def-456"]',
       'Invalid Attribute: Sources of type "email" do not have a rotatable endpoint slug.',
     );
   });
 
-  it('returns null and surfaces details on a 409 concurrent rotation', async () => {
+  it("returns null and surfaces details on a 409 concurrent rotation", async () => {
     mockFetch(
       {
         data: {
           errors: [
             {
-              title: 'Conflict',
+              title: "Conflict",
               detail:
-                'The source endpoint changed during this request (likely a concurrent rotation). Try again.',
+                "The source endpoint changed during this request (likely a concurrent rotation). Try again.",
             },
           ],
         },
       },
       false,
     );
-    expect(await rotateSourceEndpoint('abc-123')).toBeNull();
+    expect(await rotateSourceEndpoint("abc-123")).toBeNull();
     expect(logErrorMessage).toHaveBeenCalledWith(
       'rotateSourceEndpoint["abc-123"]',
-      expect.stringContaining('Conflict'),
+      expect.stringContaining("Conflict"),
     );
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await rotateSourceEndpoint('abc-123')).toBeNull();
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    expect(await rotateSourceEndpoint("abc-123")).toBeNull();
   });
 });
 
-describe('deleteSource', () => {
+describe("deleteSource", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('calls fetch with DELETE and the uuid in the URL', async () => {
+  it("calls fetch with DELETE and the uuid in the URL", async () => {
     mockFetch({ meta: mockMeta });
-    await deleteSource('abc-123');
+    await deleteSource("abc-123");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/abc-123',
+      "https://example.com/api/sources/abc-123",
       expect.objectContaining({
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer test-token' },
+        method: "DELETE",
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('encodes the uuid into the URL path', async () => {
+  it("encodes the uuid into the URL path", async () => {
     mockFetch({ meta: mockMeta });
-    await deleteSource('a/../b');
+    await deleteSource("a/../b");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/a%2F..%2Fb',
-      expect.objectContaining({ method: 'DELETE' }),
+      "https://example.com/api/sources/a%2F..%2Fb",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 
-  it('returns meta on success', async () => {
+  it("returns meta on success", async () => {
     mockFetch({ meta: mockMeta });
-    expect(await deleteSource('abc-123')).toEqual(mockMeta);
+    expect(await deleteSource("abc-123")).toEqual(mockMeta);
   });
 
-  it('returns null and surfaces error details when the response contains errors', async () => {
+  it("returns null and surfaces error details when the response contains errors", async () => {
     mockFetch(
       {
         data: {
           errors: [
             {
-              title: 'Not Found',
-              detail: 'No source was found for the given uuid.',
+              title: "Not Found",
+              detail: "No source was found for the given uuid.",
             },
           ],
         },
       },
       false,
     );
-    const result = await deleteSource('missing-uuid');
+    const result = await deleteSource("missing-uuid");
     expect(result).toBeNull();
     expect(logErrorMessage).toHaveBeenCalledWith(
       'deleteSource["missing-uuid"]',
-      'Not Found: No source was found for the given uuid.',
+      "Not Found: No source was found for the given uuid.",
     );
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await deleteSource('abc-123')).toBeNull();
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    expect(await deleteSource("abc-123")).toBeNull();
   });
 });
 
-describe('testSource', () => {
+describe("testSource", () => {
   const testResult: SourceTestResult = {
-    provider: 'github',
-    payload: { title: 'Test event from markpost', tags: ['test'] },
+    provider: "github",
+    payload: { title: "Test event from markpost", tags: ["test"] },
     signatureCheck: {
-      status: 'verified',
+      status: "verified",
       message: "This source's stored secret produced a valid signature.",
     },
     fieldMapping: {
-      title: 'Test event from markpost',
-      content: 'This is a test event.',
-      tags: ['test'],
-      frontmatter: { source: 'github' },
-      filePath: '99-incoming/test-event.md',
+      title: "Test event from markpost",
+      content: "This is a test event.",
+      tags: ["test"],
+      frontmatter: { source: "github" },
+      filePath: "99-incoming/test-event.md",
     },
   };
 
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('POSTs to the test path with the JSON:API envelope and empty attributes by default', async () => {
+  it("POSTs to the test path with the JSON:API envelope and empty attributes by default", async () => {
     mockFetch({ data: { attributes: testResult } });
-    await testSource('abc-123');
+    await testSource("abc-123");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/abc-123/test',
+      "https://example.com/api/sources/abc-123/test",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: 'Bearer test-token',
+          "Content-Type": "application/vnd.api+json",
+          Authorization: "Bearer test-token",
         },
         body: JSON.stringify({
-          data: { type: 'sources', attributes: {} },
+          data: { type: "sources", attributes: {} },
         }),
       }),
     );
   });
 
-  it('sends a supplied sample payload in the request body', async () => {
+  it("sends a supplied sample payload in the request body", async () => {
     mockFetch({ data: { attributes: testResult } });
-    await testSource('abc-123', { payload: { title: 'Custom' } });
+    await testSource("abc-123", { payload: { title: "Custom" } });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/abc-123/test',
+      "https://example.com/api/sources/abc-123/test",
       expect.objectContaining({
         body: JSON.stringify({
           data: {
-            type: 'sources',
-            attributes: { payload: { title: 'Custom' } },
+            type: "sources",
+            attributes: { payload: { title: "Custom" } },
           },
         }),
       }),
     );
   });
 
-  it('encodes the uuid into the URL path', async () => {
+  it("encodes the uuid into the URL path", async () => {
     mockFetch({ data: { attributes: testResult } });
-    await testSource('a/../b');
+    await testSource("a/../b");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/sources/a%2F..%2Fb/test',
-      expect.objectContaining({ method: 'POST' }),
+      "https://example.com/api/sources/a%2F..%2Fb/test",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 
-  it('returns the test result attributes on success', async () => {
+  it("returns the test result attributes on success", async () => {
     mockFetch({ data: { attributes: testResult } });
-    expect(await testSource('abc-123')).toEqual(testResult);
+    expect(await testSource("abc-123")).toEqual(testResult);
   });
 
-  it('returns null and surfaces error details when the source is not testable', async () => {
+  it("returns null and surfaces error details when the source is not testable", async () => {
     mockFetch(
       {
         data: {
           errors: [
             {
-              title: 'Invalid Attribute',
+              title: "Invalid Attribute",
               detail:
-                'This source does not ingest via the JSON webhook path, so there is no signature or field-mapping behavior to test here.',
+                "This source does not ingest via the JSON webhook path, so there is no signature or field-mapping behavior to test here.",
             },
           ],
         },
       },
       false,
     );
-    const result = await testSource('email-uuid');
+    const result = await testSource("email-uuid");
     expect(result).toBeNull();
     expect(logErrorMessage).toHaveBeenCalledWith(
       'testSource["email-uuid"]',
-      'Invalid Attribute: This source does not ingest via the JSON webhook path, so there is no signature or field-mapping behavior to test here.',
+      "Invalid Attribute: This source does not ingest via the JSON webhook path, so there is no signature or field-mapping behavior to test here.",
     );
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await testSource('abc-123')).toBeNull();
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    expect(await testSource("abc-123")).toBeNull();
   });
 });

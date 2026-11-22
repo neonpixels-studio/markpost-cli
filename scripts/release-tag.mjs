@@ -4,16 +4,16 @@
 //
 // Usage: node scripts/release-tag.mjs [--dry-run] [path/to/package.json]
 // --dry-run prints the git commands instead of running them.
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
-const DEFAULT_PACKAGE_JSON = new URL('../package.json', import.meta.url);
-const DRY_RUN_FLAG = '--dry-run';
-const REMOTE = 'origin';
+const DEFAULT_PACKAGE_JSON = new URL("../package.json", import.meta.url);
+const DRY_RUN_FLAG = "--dry-run";
+const REMOTE = "origin";
 
 function readTag(packageJsonPath) {
-  const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-  if (typeof version !== 'string' || !version) {
+  const { version } = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+  if (typeof version !== "string" || !version) {
     console.error('package.json has no "version" to tag.');
     process.exit(1);
   }
@@ -23,8 +23,8 @@ function readTag(packageJsonPath) {
 
 function gitCommands(tag) {
   return [
-    ['tag', tag],
-    ['push', REMOTE, tag],
+    ["tag", tag],
+    ["push", REMOTE, tag],
   ];
 }
 
@@ -36,9 +36,9 @@ const tag = readTag(packageJsonPath);
 
 for (const command of gitCommands(tag)) {
   if (dryRun) {
-    console.log(`git ${command.join(' ')}`);
+    console.log(`git ${command.join(" ")}`);
     continue;
   }
 
-  execFileSync('git', command, { stdio: 'inherit' });
+  execFileSync("git", command, { stdio: "inherit" });
 }

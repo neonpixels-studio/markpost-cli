@@ -1,20 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MAX_GET_ATTEMPTS } from '#src/libs/api.js';
-import { fetchAllEvents, fetchPaginatedEvents } from '#src/libs/events.js';
-import { Event } from '#src/types/events.types.js';
+import { MAX_GET_ATTEMPTS } from "#src/libs/api.js";
+import { fetchAllEvents, fetchPaginatedEvents } from "#src/libs/events.js";
+import { Event } from "#src/types/events.types.js";
 
 // #src/libs/api.js imports #src/libs/config.js, which constructs a real
 // `conf`-backed store as soon as it's loaded — mock it so loading api.js
 // doesn't pull in that side effect (mirrors tests/libs/records.test.ts).
-vi.mock('#src/libs/config.js', () => ({
+vi.mock("#src/libs/config.js", () => ({
   config: { get: vi.fn() },
 }));
 
 beforeEach(() => {
-  vi.stubEnv('BASE_URL', 'https://example.com');
-  vi.stubEnv('API_TOKEN', 'test-token');
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.stubEnv("BASE_URL", "https://example.com");
+  vi.stubEnv("API_TOKEN", "test-token");
+  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -32,40 +32,40 @@ function mockFetch(responseBody: object, ok = true, status = ok ? 200 : 400) {
 function mockFetchTimeout() {
   global.fetch = vi
     .fn()
-    .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    .mockRejectedValue(new DOMException("timed out", "TimeoutError"));
 }
 
 const mockEvent: Event = {
-  id: 'evt-1',
-  userId: 'user-1',
-  ts: '2024-01-01T00:00:00Z',
-  kind: 'ok',
-  message: 'Ingested record from webhook',
-  recordUuid: 'rec-1',
-  sourceId: 'src-1',
+  id: "evt-1",
+  userId: "user-1",
+  ts: "2024-01-01T00:00:00Z",
+  kind: "ok",
+  message: "Ingested record from webhook",
+  recordUuid: "rec-1",
+  sourceId: "src-1",
 };
 
 const mockEvent2: Event = {
-  id: 'evt-2',
-  userId: 'user-1',
-  ts: '2024-01-02T00:00:00Z',
-  kind: 'err',
-  message: 'Signature verification failed',
+  id: "evt-2",
+  userId: "user-1",
+  ts: "2024-01-02T00:00:00Z",
+  kind: "err",
+  message: "Signature verification failed",
   recordUuid: null,
-  sourceId: 'src-1',
+  sourceId: "src-1",
 };
 
 function eventResource(event: Event) {
   return {
-    type: 'events',
+    type: "events",
     id: event.id,
     attributes: event,
     links: { self: `/api/events/${event.id}` },
   };
 }
 
-describe('fetchPaginatedEvents', () => {
-  it('fetches and unwraps a page of events', async () => {
+describe("fetchPaginatedEvents", () => {
+  it("fetches and unwraps a page of events", async () => {
     mockFetch({
       data: [eventResource(mockEvent)],
       meta: { total: 1, size: 100, hasMore: false },
@@ -81,22 +81,22 @@ describe('fetchPaginatedEvents', () => {
     });
   });
 
-  it('sends page[size] and page[after] as query params', async () => {
+  it("sends page[size] and page[after] as query params", async () => {
     mockFetch({ data: [], meta: { total: 0, size: 50, hasMore: false } });
 
-    await fetchPaginatedEvents('cursor-1', 50);
+    await fetchPaginatedEvents("cursor-1", 50);
 
     const requestedUrl = vi.mocked(global.fetch).mock.calls[0][0] as string;
-    expect(requestedUrl).toContain('page[size]=50');
+    expect(requestedUrl).toContain("page[size]=50");
     expect(requestedUrl).toContain(
-      `page[after]=${encodeURIComponent('cursor-1')}`,
+      `page[after]=${encodeURIComponent("cursor-1")}`,
     );
   });
 
   // markpost's eventPaginationLinks sends only `next` (no `prev`), unlike
   // records/sources — a missing `prev` is on-contract, not a malformed
   // fallback, and `ApiPaginationLinks.prev` is already optional.
-  it('defaults a missing prev link to null without treating the response as malformed', async () => {
+  it("defaults a missing prev link to null without treating the response as malformed", async () => {
     mockFetch({
       data: [eventResource(mockEvent)],
       meta: { total: 1, size: 100, hasMore: false },
@@ -111,7 +111,7 @@ describe('fetchPaginatedEvents', () => {
   // A malformed/missing meta or links must fall back to conservative
   // defaults (hasMore: false, next: null) rather than crashing on
   // `undefined.hasMore`, mirroring fetchPaginatedRecords.
-  it('falls back to conservative defaults when meta/links are missing', async () => {
+  it("falls back to conservative defaults when meta/links are missing", async () => {
     mockFetch({ data: [eventResource(mockEvent)] });
 
     const result = await fetchPaginatedEvents();
@@ -120,8 +120,8 @@ describe('fetchPaginatedEvents', () => {
     expect(result?.links).toEqual({ next: null, prev: null });
   });
 
-  it('returns null and logs on a non-systemic failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("returns null and logs on a non-systemic failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
     const result = await fetchPaginatedEvents();
 
@@ -133,8 +133,8 @@ describe('fetchPaginatedEvents', () => {
   // --json, the CLI's stderr contract is exactly one JSON error object (see
   // warnPartialRead in errors.ts / issue #194), so this function's own
   // plain-text line must not sneak onto stderr ahead of it.
-  it('returns null but does not log when json is true', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("returns null but does not log when json is true", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
     const result = await fetchPaginatedEvents(undefined, 100, true);
 
@@ -144,11 +144,11 @@ describe('fetchPaginatedEvents', () => {
 
   // A systemic auth failure dooms every page of the read, so it must
   // propagate rather than collapse to null (mirrors fetchPaginatedRecords).
-  it('propagates a systemic auth (401) failure instead of returning null', async () => {
+  it("propagates a systemic auth (401) failure instead of returning null", async () => {
     mockFetch(
       {
         errors: [
-          { status: '401', title: 'Unauthorized', detail: 'Invalid token' },
+          { status: "401", title: "Unauthorized", detail: "Invalid token" },
         ],
       },
       false,
@@ -159,16 +159,16 @@ describe('fetchPaginatedEvents', () => {
   });
 });
 
-describe('fetchAllEvents', () => {
+describe("fetchAllEvents", () => {
   // A failed INITIAL fetch must surface as `{ ok: false }` — never an empty
   // array, which the caller can't tell apart from a genuinely empty log.
-  it('returns { ok: false } when the initial fetch fails', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("returns { ok: false } when the initial fetch fails", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
     expect(await fetchAllEvents()).toEqual({ ok: false });
   });
 
-  it('returns an empty, non-partial result for an empty log', async () => {
+  it("returns an empty, non-partial result for an empty log", async () => {
     mockFetch({
       data: [],
       meta: { total: 0, size: 100, hasMore: false },
@@ -182,7 +182,7 @@ describe('fetchAllEvents', () => {
     });
   });
 
-  it('returns every event from a single page', async () => {
+  it("returns every event from a single page", async () => {
     mockFetch({
       data: [eventResource(mockEvent), eventResource(mockEvent2)],
       meta: { total: 2, size: 100, hasMore: false },
@@ -196,7 +196,7 @@ describe('fetchAllEvents', () => {
     });
   });
 
-  it('follows the cursor across multiple pages', async () => {
+  it("follows the cursor across multiple pages", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -206,7 +206,7 @@ describe('fetchAllEvents', () => {
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+              next: "/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1",
             },
           }),
       })
@@ -231,13 +231,13 @@ describe('fetchAllEvents', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const secondRequestUrl = fetchMock.mock.calls[1][0] as string;
     expect(secondRequestUrl).toContain(
-      `page[after]=${encodeURIComponent('evt-1')}`,
+      `page[after]=${encodeURIComponent("evt-1")}`,
     );
   });
 
   // A later page failing non-systemically must keep the pages already
   // collected but flag the read incomplete, not silently truncate.
-  it('flags partial when a later page fails non-systemically', async () => {
+  it("flags partial when a later page fails non-systemically", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -247,11 +247,11 @@ describe('fetchAllEvents', () => {
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+              next: "/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1",
             },
           }),
       })
-      .mockRejectedValueOnce(new Error('Network blip'));
+      .mockRejectedValueOnce(new Error("Network blip"));
     global.fetch = fetchMock;
 
     const result = await fetchAllEvents();
@@ -268,7 +268,7 @@ describe('fetchAllEvents', () => {
   // errors.ts / issue #194). fetchPaginatedEvents's own plain-text
   // diagnostic for the same page failure must stay silent in that mode, or
   // stderr would carry a stray non-JSON line ahead of it.
-  it('stays silent on stderr for a subsequent-page failure when json is true', async () => {
+  it("stays silent on stderr for a subsequent-page failure when json is true", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -278,11 +278,11 @@ describe('fetchAllEvents', () => {
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+              next: "/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1",
             },
           }),
       })
-      .mockRejectedValueOnce(new Error('Network blip'));
+      .mockRejectedValueOnce(new Error("Network blip"));
     global.fetch = fetchMock;
 
     const result = await fetchAllEvents(true);
@@ -297,7 +297,7 @@ describe('fetchAllEvents', () => {
 
   // A systemic failure on a LATER page must still propagate (fail loud),
   // not collapse into a partial success — the whole read is doomed.
-  it('propagates a systemic failure encountered on a later page', async () => {
+  it("propagates a systemic failure encountered on a later page", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -307,7 +307,7 @@ describe('fetchAllEvents', () => {
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+              next: "/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1",
             },
           }),
       })
@@ -316,7 +316,7 @@ describe('fetchAllEvents', () => {
         status: 500,
         json: () =>
           Promise.resolve({
-            errors: [{ status: '500', title: 'Server error', detail: 'boom' }],
+            errors: [{ status: "500", title: "Server error", detail: "boom" }],
           }),
       });
     global.fetch = fetchMock;
@@ -335,7 +335,7 @@ describe('fetchAllEvents', () => {
 
   // A request timeout on the INITIAL page must propagate as an
   // ApiTimeoutError (fail loud), never collapse to `{ ok: false }`.
-  it('propagates a timeout on the initial page', async () => {
+  it("propagates a timeout on the initial page", async () => {
     mockFetchTimeout();
 
     await expect(fetchAllEvents()).rejects.toThrow(/timed out/);
@@ -344,7 +344,7 @@ describe('fetchAllEvents', () => {
   // A request timeout on a LATER page dooms the rest of the read the same
   // way a systemic failure does — it must propagate, not degrade to a
   // partial success (logApiFailure re-throws a timeout via rethrowIfTimeout).
-  it('propagates a timeout encountered on a later page', async () => {
+  it("propagates a timeout encountered on a later page", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -354,11 +354,11 @@ describe('fetchAllEvents', () => {
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+              next: "/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1",
             },
           }),
       })
-      .mockRejectedValueOnce(new DOMException('timed out', 'TimeoutError'));
+      .mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"));
     global.fetch = fetchMock;
 
     await expect(fetchAllEvents()).rejects.toThrow(/timed out/);
@@ -366,7 +366,7 @@ describe('fetchAllEvents', () => {
 
   // A page claiming more results but yielding no usable cursor (malformed
   // link) must flag the read incomplete rather than silently ending.
-  it('flags partial when a page claims more but the cursor is unreadable', async () => {
+  it("flags partial when a page claims more but the cursor is unreadable", async () => {
     mockFetch({
       data: [eventResource(mockEvent)],
       meta: { total: 2, size: 1, hasMore: true },
@@ -382,11 +382,11 @@ describe('fetchAllEvents', () => {
 
   // A present `next` link that carries no `page[after]` param (a malformed
   // link, distinct from a `null` link) must also flag the read incomplete.
-  it('flags partial when the next link is present but has no page[after]', async () => {
+  it("flags partial when the next link is present but has no page[after]", async () => {
     mockFetch({
       data: [eventResource(mockEvent)],
       meta: { total: 2, size: 1, hasMore: true },
-      links: { next: '/api/events?page%5Bsize%5D=1' },
+      links: { next: "/api/events?page%5Bsize%5D=1" },
     });
 
     expect(await fetchAllEvents()).toEqual({
@@ -398,11 +398,11 @@ describe('fetchAllEvents', () => {
 
   // A repeating cursor (a misbehaving server looping already-fetched pages)
   // must not hang the CLI — stop and flag the read incomplete.
-  it('stops and flags partial on a repeating cursor', async () => {
+  it("stops and flags partial on a repeating cursor", async () => {
     const pageBody = {
       data: [eventResource(mockEvent)],
       meta: { total: 5, size: 1, hasMore: true },
-      links: { next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1' },
+      links: { next: "/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1" },
     };
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -421,7 +421,7 @@ describe('fetchAllEvents', () => {
   // extractAfterCursor deliberately avoids URLSearchParams, which decodes
   // application/x-www-form-urlencoded and would turn a literal `+` in the
   // cursor into a space. A plain percent-decode must preserve it exactly.
-  it('preserves a literal + in the cursor instead of decoding it as a space', async () => {
+  it("preserves a literal + in the cursor instead of decoding it as a space", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -430,7 +430,7 @@ describe('fetchAllEvents', () => {
           Promise.resolve({
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
-            links: { next: '/api/events?page%5Bafter%5D=a+b&page%5Bsize%5D=1' },
+            links: { next: "/api/events?page%5Bafter%5D=a+b&page%5Bsize%5D=1" },
           }),
       })
       .mockResolvedValueOnce({
@@ -448,13 +448,13 @@ describe('fetchAllEvents', () => {
 
     const secondRequestUrl = fetchMock.mock.calls[1][0] as string;
     expect(secondRequestUrl).toContain(
-      `page[after]=${encodeURIComponent('a+b')}`,
+      `page[after]=${encodeURIComponent("a+b")}`,
     );
   });
 
   // A cursor value carrying `=` (e.g. base64 padding) must survive: the
   // parser splits on the FIRST `=` only, not every `=` in the pair.
-  it('preserves = characters within the cursor value (e.g. base64 padding)', async () => {
+  it("preserves = characters within the cursor value (e.g. base64 padding)", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -464,7 +464,7 @@ describe('fetchAllEvents', () => {
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/events?page%5Bafter%5D=abc%3D%3D&page%5Bsize%5D=1',
+              next: "/api/events?page%5Bafter%5D=abc%3D%3D&page%5Bsize%5D=1",
             },
           }),
       })
@@ -483,17 +483,17 @@ describe('fetchAllEvents', () => {
 
     const secondRequestUrl = fetchMock.mock.calls[1][0] as string;
     expect(secondRequestUrl).toContain(
-      `page[after]=${encodeURIComponent('abc==')}`,
+      `page[after]=${encodeURIComponent("abc==")}`,
     );
   });
 
   // A malformed percent-encoding (e.g. a lone `%`) must not crash the read —
   // it's treated as "no usable cursor", stopping pagination with `partial: true`.
-  it('treats a malformed percent-encoded cursor as unreadable rather than throwing', async () => {
+  it("treats a malformed percent-encoded cursor as unreadable rather than throwing", async () => {
     mockFetch({
       data: [eventResource(mockEvent)],
       meta: { total: 2, size: 1, hasMore: true },
-      links: { next: '/api/events?page%5Bafter%5D=%&page%5Bsize%5D=1' },
+      links: { next: "/api/events?page%5Bafter%5D=%&page%5Bsize%5D=1" },
     });
 
     const result = await fetchAllEvents();
@@ -503,39 +503,39 @@ describe('fetchAllEvents', () => {
   });
 });
 
-describe('event filter query string', () => {
-  const SOURCE_ID = '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b';
+describe("event filter query string", () => {
+  const SOURCE_ID = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
   const emptyPage = {
     data: [],
     meta: { total: 0, size: 100, hasMore: false },
     links: { next: null },
   };
 
-  it('sends no filter params when none are given', async () => {
+  it("sends no filter params when none are given", async () => {
     mockFetch(emptyPage);
 
     await fetchPaginatedEvents();
 
     const url = (global.fetch as ReturnType<typeof vi.fn>).mock
       .calls[0][0] as string;
-    expect(url).not.toContain('filter[');
+    expect(url).not.toContain("filter[");
   });
 
-  it('sends filter[kind] and filter[sourceId] exactly as markpost parses them', async () => {
+  it("sends filter[kind] and filter[sourceId] exactly as markpost parses them", async () => {
     mockFetch(emptyPage);
 
     await fetchPaginatedEvents(undefined, 100, false, {
-      kind: 'err',
+      kind: "err",
       sourceId: SOURCE_ID,
     });
 
     const url = (global.fetch as ReturnType<typeof vi.fn>).mock
       .calls[0][0] as string;
-    expect(url).toContain('filter[kind]=err');
+    expect(url).toContain("filter[kind]=err");
     expect(url).toContain(`filter[sourceId]=${SOURCE_ID}`);
   });
 
-  it('re-sends the filters on every page', async () => {
+  it("re-sends the filters on every page", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -545,7 +545,7 @@ describe('event filter query string', () => {
             data: [eventResource(mockEvent)],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1',
+              next: "/api/events?page%5Bafter%5D=evt-1&page%5Bsize%5D=1",
             },
           }),
       })
@@ -555,11 +555,11 @@ describe('event filter query string', () => {
       });
     global.fetch = fetchMock;
 
-    await fetchAllEvents(false, { kind: 'warn' });
+    await fetchAllEvents(false, { kind: "warn" });
 
     for (const call of fetchMock.mock.calls) {
-      expect(call[0] as string).toContain('filter[kind]=warn');
+      expect(call[0] as string).toContain("filter[kind]=warn");
     }
-    expect(fetchMock.mock.calls[1][0] as string).toContain('page[after]=evt-1');
+    expect(fetchMock.mock.calls[1][0] as string).toContain("page[after]=evt-1");
   });
 });

@@ -1,14 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from "vitest";
 
 import {
   AUTO_SYNC_INTERVAL_MS,
   defaultSchedule,
   runSyncWithAutoSchedule,
   type ScheduleFn,
-} from '#src/libs/scheduler.js';
+} from "#src/libs/scheduler.js";
 
-describe('runSyncWithAutoSchedule', () => {
-  it('schedules another run at the auto-sync interval when the sync reports autoSync on', async () => {
+describe("runSyncWithAutoSchedule", () => {
+  it("schedules another run at the auto-sync interval when the sync reports autoSync on", async () => {
     const runSync = vi.fn().mockResolvedValue(true);
     const schedule: ScheduleFn = vi.fn();
 
@@ -22,7 +22,7 @@ describe('runSyncWithAutoSchedule', () => {
     );
   });
 
-  it('does not schedule another run when the sync reports autoSync off', async () => {
+  it("does not schedule another run when the sync reports autoSync off", async () => {
     const runSync = vi.fn().mockResolvedValue(false);
     const schedule: ScheduleFn = vi.fn();
 
@@ -32,7 +32,7 @@ describe('runSyncWithAutoSchedule', () => {
     expect(schedule).not.toHaveBeenCalled();
   });
 
-  it('re-runs the sync when the scheduled callback fires', async () => {
+  it("re-runs the sync when the scheduled callback fires", async () => {
     const runSync = vi
       .fn()
       .mockResolvedValueOnce(true)
@@ -53,16 +53,16 @@ describe('runSyncWithAutoSchedule', () => {
     expect(schedule).toHaveBeenCalledTimes(1);
   });
 
-  it('logs and stops the loop when a scheduled re-run rejects, without a second schedule', async () => {
+  it("logs and stops the loop when a scheduled re-run rejects, without a second schedule", async () => {
     const runSync = vi
       .fn()
       .mockResolvedValueOnce(true)
-      .mockRejectedValueOnce(new Error('network down'));
+      .mockRejectedValueOnce(new Error("network down"));
     let scheduledCallback: (() => void) | undefined;
     const schedule: ScheduleFn = vi.fn((callback) => {
       scheduledCallback = callback;
     });
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const originalExitCode = process.exitCode;
 
     await runSyncWithAutoSchedule(runSync, schedule);
@@ -78,7 +78,7 @@ describe('runSyncWithAutoSchedule', () => {
     errorSpy.mockRestore();
   });
 
-  it('honors a custom interval', async () => {
+  it("honors a custom interval", async () => {
     const runSync = vi.fn().mockResolvedValue(true);
     const schedule: ScheduleFn = vi.fn();
     const customInterval = 1234;
@@ -89,9 +89,9 @@ describe('runSyncWithAutoSchedule', () => {
   });
 });
 
-describe('defaultSchedule', () => {
-  it('arms a ref-holding timer so a pending sync keeps the CLI process alive', () => {
-    const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+describe("defaultSchedule", () => {
+  it("arms a ref-holding timer so a pending sync keeps the CLI process alive", () => {
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
     const callback = vi.fn();
 
     defaultSchedule(callback, AUTO_SYNC_INTERVAL_MS);

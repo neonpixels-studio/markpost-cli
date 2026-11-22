@@ -9,25 +9,28 @@
 //
 // It never hits the network: the vendored slice is refreshed by hand and
 // reviewed like any other diff (see README.md#markdown-serialization-sync).
-import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 
 import {
   assembleMarkdownDocument as cliAssembleMarkdownDocument,
   serializeFrontmatter as cliSerializeFrontmatter,
-} from '#src/libs/frontmatter.js';
-import { Frontmatter } from '#src/types/records.types.js';
+} from "#src/libs/frontmatter.js";
+import { Frontmatter } from "#src/types/records.types.js";
 
 import {
   assembleMarkdownDocument as markpostAssembleMarkdownDocument,
   serializeFrontmatter as markpostSerializeFrontmatter,
   FrontmatterObject,
-} from './vendor/markpost-markdown-serialization.generated.js';
-import manifest from './vendor/markpost-markdown-serialization.manifest.json' with { type: 'json' };
+} from "./vendor/markpost-markdown-serialization.generated.js";
+import manifest from "./vendor/markpost-markdown-serialization.manifest.json" with { type: "json" };
 
 const VENDOR_SLICE_PATH = fileURLToPath(
-  new URL('./vendor/markpost-markdown-serialization.generated.ts', import.meta.url),
+  new URL(
+    "./vendor/markpost-markdown-serialization.generated.ts",
+    import.meta.url,
+  ),
 );
 
 // The CLI's `Frontmatter` and markpost's `FrontmatterObject` are structurally
@@ -40,7 +43,7 @@ type SerializationCase = {
   body: string;
 };
 
-const BASE_CREATED = '2026-06-14T09:41:02Z';
+const BASE_CREATED = "2026-06-14T09:41:02Z";
 
 // Each case pins one behavior of `quoteYamlScalar` / `serializeTagsLine`: the
 // no-quote path, empty vs many tags, every YAML metacharacter that forces
@@ -48,84 +51,84 @@ const BASE_CREATED = '2026-06-14T09:41:02Z';
 // to markpost's quoting rules moves at least one of these and trips the test.
 const SERIALIZATION_CASES: SerializationCase[] = [
   {
-    name: 'plain values need no quoting',
+    name: "plain values need no quoting",
     frontmatter: {
-      title: 'Production deploy succeeded',
-      source: 'webhook/github',
+      title: "Production deploy succeeded",
+      source: "webhook/github",
       created: BASE_CREATED,
-      tags: ['ci', 'deploy', 'incoming'],
+      tags: ["ci", "deploy", "incoming"],
     },
-    body: 'Commit a1f9c20 shipped to prod.',
+    body: "Commit a1f9c20 shipped to prod.",
   },
   {
-    name: 'empty tags serialize as an empty array',
+    name: "empty tags serialize as an empty array",
     frontmatter: {
-      title: 'No tags here',
-      source: 'webhook',
-      created: BASE_CREATED,
-      tags: [],
-    },
-    body: 'Body without tags.',
-  },
-  {
-    name: 'a colon in the title forces quoting',
-    frontmatter: {
-      title: 'Deploy: success',
-      source: 'webhook',
+      title: "No tags here",
+      source: "webhook",
       created: BASE_CREATED,
       tags: [],
     },
-    body: 'Colon in title.',
+    body: "Body without tags.",
   },
   {
-    name: 'each YAML metacharacter forces quoting',
+    name: "a colon in the title forces quoting",
     frontmatter: {
-      title: 'chars #[]{}&!|>%@`, and more',
+      title: "Deploy: success",
+      source: "webhook",
+      created: BASE_CREATED,
+      tags: [],
+    },
+    body: "Colon in title.",
+  },
+  {
+    name: "each YAML metacharacter forces quoting",
+    frontmatter: {
+      title: "chars #[]{}&!|>%@`, and more",
       source: "single ' and double \" quote",
       created: BASE_CREATED,
-      tags: ['a,b', 'a]b', 'c#d'],
+      tags: ["a,b", "a]b", "c#d"],
     },
-    body: 'Special characters everywhere.',
+    body: "Special characters everywhere.",
   },
   {
-    name: 'leading and trailing whitespace forces quoting',
+    name: "leading and trailing whitespace forces quoting",
     frontmatter: {
-      title: ' leading and trailing ',
-      source: 'webhook',
+      title: " leading and trailing ",
+      source: "webhook",
       created: BASE_CREATED,
-      tags: ['  padded  '],
+      tags: ["  padded  "],
     },
-    body: 'Whitespace preserved via quoting.',
+    body: "Whitespace preserved via quoting.",
   },
   {
-    name: 'backslash, quote, and newline are escaped',
+    name: "backslash, quote, and newline are escaped",
     frontmatter: {
       title: 'path C:\\temp and a "quote"\nmalicious: true',
-      source: 'webhook',
+      source: "webhook",
       created: BASE_CREATED,
-      tags: ['tag\nwith newline'],
+      tags: ["tag\nwith newline"],
     },
-    body: 'Escaping keeps the block a single logical line.',
+    body: "Escaping keeps the block a single logical line.",
   },
   {
-    name: 'a multi-line body is placed verbatim after the heading',
+    name: "a multi-line body is placed verbatim after the heading",
     frontmatter: {
-      title: 'Multi-line body',
-      source: 'webhook',
+      title: "Multi-line body",
+      source: "webhook",
       created: BASE_CREATED,
-      tags: ['notes'],
+      tags: ["notes"],
     },
-    body: 'First paragraph.\n\nSecond paragraph.\n\n- item one\n- item two',
+    body: "First paragraph.\n\nSecond paragraph.\n\n- item one\n- item two",
   },
   {
-    name: 'an empty body still produces the heading block',
+    name: "an empty body still produces the heading block",
     frontmatter: {
-      title: 'Empty body',
-      source: 'webhook',
+      title: "Empty body",
+      source: "webhook",
       created: BASE_CREATED,
       tags: [],
     },
-    body: '',
+    body: "",
   },
 ];
 
@@ -138,7 +141,7 @@ function markpostDocument(serializationCase: SerializationCase): string {
     body: serializationCase.body,
     frontmatter: serializationCase.frontmatter,
     tags: serializationCase.frontmatter.tags,
-    filePath: 'ignored-by-assembly',
+    filePath: "ignored-by-assembly",
   });
 }
 
@@ -150,15 +153,15 @@ function cliDocument(serializationCase: SerializationCase): string {
   });
 }
 
-describe('frontmatter serialization drift', () => {
-  it('the vendored markpost slice is present and records its provenance', () => {
+describe("frontmatter serialization drift", () => {
+  it("the vendored markpost slice is present and records its provenance", () => {
     expect(existsSync(VENDOR_SLICE_PATH)).toBe(true);
-    expect(manifest.sourceFile).toBe('server/utils/markdown.ts');
+    expect(manifest.sourceFile).toBe("server/utils/markdown.ts");
     expect(manifest.sourceCommit).toMatch(/^[0-9a-f]{40}$/);
   });
 
   it.each(SERIALIZATION_CASES)(
-    'serializeFrontmatter matches markpost byte-for-byte: $name',
+    "serializeFrontmatter matches markpost byte-for-byte: $name",
     (serializationCase) => {
       const cliOutput = cliSerializeFrontmatter(serializationCase.frontmatter);
       const markpostOutput = markpostSerializeFrontmatter(
@@ -170,7 +173,7 @@ describe('frontmatter serialization drift', () => {
   );
 
   it.each(SERIALIZATION_CASES)(
-    'assembleMarkdownDocument matches markpost byte-for-byte: $name',
+    "assembleMarkdownDocument matches markpost byte-for-byte: $name",
     (serializationCase) => {
       expect(cliDocument(serializationCase)).toBe(
         markpostDocument(serializationCase),

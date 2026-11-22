@@ -2,7 +2,7 @@ import {
   authedRequest,
   logApiFailure,
   unwrapResourceAttributes,
-} from '#src/libs/api.js';
+} from "#src/libs/api.js";
 import {
   ConflictStrategy,
   DEFAULT_CONFLICT_STRATEGY,
@@ -15,7 +15,7 @@ import {
   UserSettings,
   UserSettingsApiResponse,
   USER_SETTINGS_RESOURCE_TYPE,
-} from '#src/types/settings.types.js';
+} from "#src/types/settings.types.js";
 
 // A read either succeeded (`ok: true`) or failed. On success `settings` may
 // still be `null` — a valid `{ data: null }` body for an account with no
@@ -38,7 +38,7 @@ export type SettingsReadResult =
 export const fetchSettings = async (): Promise<SettingsReadResult> => {
   try {
     const body = (await authedRequest(
-      '/api/settings',
+      "/api/settings",
     )) as UserSettingsApiResponse;
 
     return {
@@ -46,7 +46,7 @@ export const fetchSettings = async (): Promise<SettingsReadResult> => {
       settings: unwrapResourceAttributes(body),
     };
   } catch (error) {
-    logApiFailure('fetchSettings', error);
+    logApiFailure("fetchSettings", error);
 
     return { ok: false };
   }
@@ -64,10 +64,10 @@ export const updateSettings = async (
   input: UpdateSettingsInput,
 ): Promise<UserSettings | null> => {
   try {
-    const body = (await authedRequest('/api/settings', {
-      method: 'PUT',
+    const body = (await authedRequest("/api/settings", {
+      method: "PUT",
       headers: {
-        'Content-Type': 'application/vnd.api+json',
+        "Content-Type": "application/vnd.api+json",
       },
       body: JSON.stringify({
         data: {
@@ -79,7 +79,7 @@ export const updateSettings = async (
 
     return unwrapResourceAttributes(body);
   } catch (error) {
-    logApiFailure('updateSettings', error);
+    logApiFailure("updateSettings", error);
 
     return null;
   }

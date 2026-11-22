@@ -1,4 +1,4 @@
-import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
+import type { ApiResourceObject, ApiResponse } from "#src/types/api.types.js";
 
 // Mirrors markpost's user-settings contract by hand (markpost is the source
 // of truth): `CONFLICT_STRATEGIES` comes from `server/utils/response.ts` and
@@ -6,13 +6,13 @@ import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
 // sync with markpost when that contract changes. Only the fields the CLI
 // actually consumes are modelled as enums — `theme`/`accentColor` are carried
 // as plain strings since the CLI never acts on them.
-export const CONFLICT_STRATEGIES = ['suffix', 'overwrite', 'skip'] as const;
+export const CONFLICT_STRATEGIES = ["suffix", "overwrite", "skip"] as const;
 export type ConflictStrategy = (typeof CONFLICT_STRATEGIES)[number];
 
 // markpost's schema defaults (server/db/schema.ts): the CLI falls back to
 // these whenever GET /api/settings can't be read, so a transient settings
 // failure behaves exactly like an untouched account rather than guessing.
-export const DEFAULT_CONFLICT_STRATEGY: ConflictStrategy = 'suffix';
+export const DEFAULT_CONFLICT_STRATEGY: ConflictStrategy = "suffix";
 export const DEFAULT_AUTO_DELETE = true;
 export const DEFAULT_AUTO_SYNC = true;
 export const DEFAULT_FRONTMATTER_ENABLED = true;
@@ -40,7 +40,7 @@ export type UserSettings = {
 // The JSON:API resource object markpost's `userSettingsSerializer` produces:
 // `attributes` plus the `type`/`id`/`links` envelope fields.
 export type UserSettingsResource = ApiResourceObject & {
-  type: 'user_settings';
+  type: "user_settings";
   attributes: UserSettings;
 };
 
@@ -49,7 +49,7 @@ export type UserSettingsApiResponse = ApiResponse<UserSettingsResource | null>;
 // The JSON:API resource `type` markpost's settings serializer emits and that
 // PUT /api/settings echoes back — sent on the request body so the write
 // mirrors the same contract the read returns.
-export const USER_SETTINGS_RESOURCE_TYPE = 'user_settings';
+export const USER_SETTINGS_RESOURCE_TYPE = "user_settings";
 
 // The subset of markpost's PUT /api/settings contract
 // (server/api/settings/index.put.ts) the CLI lets a user change: only the four
@@ -91,7 +91,7 @@ export const normalizeConflictStrategy = (
 // written. Only an actual boolean is trusted; anything else falls back to the
 // documented default.
 const normalizeBoolean = (value: unknown, fallback: boolean): boolean => {
-  if (typeof value === 'boolean') {
+  if (typeof value === "boolean") {
     return value;
   }
 

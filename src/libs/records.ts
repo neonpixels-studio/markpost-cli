@@ -10,25 +10,25 @@ import {
   unwrapResourceAttributes,
   unwrapResourceCollection,
   InvalidBaseUrlError,
-} from '#src/libs/api.js';
-import { logErrorMessage } from '#src/libs/errors.js';
+} from "#src/libs/api.js";
+import { logErrorMessage } from "#src/libs/errors.js";
 import {
   ApiDeleteMeta,
   ApiDeleteResponse,
   ApiPaginationLinks,
-} from '#src/types/api.types.js';
+} from "#src/types/api.types.js";
 import {
   Record,
   PaginatedRecordsMeta,
   RecordApiResponse,
   RecordListApiResponse,
-} from '#src/types/records.types.js';
+} from "#src/types/records.types.js";
 
 // markpost's record lifecycle statuses (server/db/schema.ts RECORD_STATUSES).
 // The sync only ever wants records not yet written to disk, so it fetches
 // `pending` and, once a record is written, PATCHes it to `synced`.
-export const PENDING_STATUS = 'pending';
-const SYNCED_STATUS = 'synced';
+export const PENDING_STATUS = "pending";
+const SYNCED_STATUS = "synced";
 // markpost's PATCH /api/records only touches fields present in the request
 // body (server/api/records/index.patch.ts `buildItemPayload`) — moving a
 // record's status away from `error` does NOT itself clear `errorMessage`,
@@ -37,7 +37,7 @@ const SYNCED_STATUS = 'synced';
 // must gate on the record's CURRENT status, not on `errorMessage` alone, to
 // avoid showing a resolved failure as if it were live (mirrors markpost's own
 // `isErrorRecord` gate in `app/components/RecordDetailModal.vue`).
-export const ERROR_STATUS = 'error';
+export const ERROR_STATUS = "error";
 
 // Per-record result of a bulk mark-synced run (see `markRecordsSynced`, which
 // PATCHes records in chunks of up to MAX_MARK_SYNCED_BATCH_SIZE). `MARK_SYNCED`
@@ -66,10 +66,10 @@ export const ERROR_STATUS = 'error';
 // `SYNCED_STATUS = 'synced'` above: these are internal outcome tags, not the
 // status string sent to the server, and an accidental cross-comparison should
 // not silently type-check as equal.
-export const MARK_SYNCED = 'mark-synced';
-export const MARK_FAILED = 'mark-failed';
-export const MARK_TIMED_OUT = 'mark-timed-out';
-export const MARK_ABORTED = 'mark-aborted';
+export const MARK_SYNCED = "mark-synced";
+export const MARK_FAILED = "mark-failed";
+export const MARK_TIMED_OUT = "mark-timed-out";
+export const MARK_ABORTED = "mark-aborted";
 
 export type MarkSyncedOutcome =
   | typeof MARK_SYNCED
@@ -108,20 +108,20 @@ const extractAfterCursor = (
     return undefined;
   }
 
-  const queryString = next.slice(next.indexOf('?') + 1);
+  const queryString = next.slice(next.indexOf("?") + 1);
 
-  for (const pair of queryString.split('&')) {
+  for (const pair of queryString.split("&")) {
     // Split on the first `=` only, so a value that itself contains an
     // unencoded `=` (e.g. base64 padding) isn't truncated.
-    const separatorIndex = pair.indexOf('=');
+    const separatorIndex = pair.indexOf("=");
     const rawKey = separatorIndex === -1 ? pair : pair.slice(0, separatorIndex);
 
-    if (decodePercentEncoding(rawKey) !== 'page[after]') {
+    if (decodePercentEncoding(rawKey) !== "page[after]") {
       continue;
     }
 
     const rawValue =
-      separatorIndex === -1 ? '' : pair.slice(separatorIndex + 1);
+      separatorIndex === -1 ? "" : pair.slice(separatorIndex + 1);
 
     return decodePercentEncoding(rawValue);
   }
@@ -130,7 +130,7 @@ const extractAfterCursor = (
 };
 
 // markpost's allowed `sort` values (server/utils/recordListQuery.ts).
-export const RECORD_SORTS = ['createdAt', '-createdAt'] as const;
+export const RECORD_SORTS = ["createdAt", "-createdAt"] as const;
 export type RecordSort = (typeof RECORD_SORTS)[number];
 
 // The list filters markpost's `GET /api/records` validates and applies (see
@@ -155,13 +155,13 @@ export type RecordListFilters = {
 
 // The scalar filters, one query param each. `tags` and `sort` are emitted
 // separately in `buildRecordsQuery`.
-type ScalarFilterKey = Exclude<keyof RecordListFilters, 'tags' | 'sort'>;
+type ScalarFilterKey = Exclude<keyof RecordListFilters, "tags" | "sort">;
 
 // markpost splits each `filter[tag]` value on this (server/utils/recordListQuery.ts),
 // so a tag containing it can't be matched.
-export const TAG_DELIMITER = ',';
-const TAG_QUERY_KEY = 'filter[tag]';
-const SORT_QUERY_KEY = 'sort';
+export const TAG_DELIMITER = ",";
+const TAG_QUERY_KEY = "filter[tag]";
+const SORT_QUERY_KEY = "sort";
 
 // A read either succeeded (`ok: true`) or the INITIAL page fetch failed
 // (`ok: false`). Collapsing a failed initial fetch to an empty array — the old
@@ -195,9 +195,9 @@ export type FetchAllRecordsResult =
 // type from records.types.js, which shadows TypeScript's global `Record`
 // utility.
 const FILTER_QUERY_KEYS: { [Key in ScalarFilterKey]-?: string } = {
-  source: 'filter[source]',
-  status: 'filter[status]',
-  search: 'filter[q]',
+  source: "filter[source]",
+  status: "filter[status]",
+  search: "filter[q]",
 };
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -331,7 +331,7 @@ const buildRecordsQuery = (
     params.push(`${SORT_QUERY_KEY}=${encodeURIComponent(filters.sort)}`);
   }
 
-  return params.join('&');
+  return params.join("&");
 };
 
 // `json` suppresses the plain-text `logApiFailure` diagnostic below for a
@@ -357,9 +357,9 @@ export const fetchPaginatedRecords = async (
     )) as RecordListApiResponse;
 
     const records = unwrapResourceCollection(
-      'fetchPaginatedRecords',
+      "fetchPaginatedRecords",
       body,
-      'record',
+      "record",
     );
 
     // `meta`/`links` fall back to conservative defaults, field by field
@@ -441,14 +441,14 @@ export const createRecord = async (
   tags: string[] = [],
 ): Promise<Record | null> => {
   try {
-    const body = (await authedRequest('/api/records', {
-      method: 'POST',
+    const body = (await authedRequest("/api/records", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/vnd.api+json',
+        "Content-Type": "application/vnd.api+json",
       },
       body: JSON.stringify({
         data: {
-          type: 'records',
+          type: "records",
           attributes: buildCreateRecordAttributes(title, content, tags),
         },
       }),
@@ -505,7 +505,7 @@ export type MarkSyncedItem = {
 // next pass may build a valid request. `null` — the run completed every chunk (any
 // failures were per-chunk, not systemic).
 export type MarkAbortReason =
-  'timeout' | 'permanent' | 'transient' | 'request-shape' | null;
+  "timeout" | "permanent" | "transient" | "request-shape" | null;
 
 // Outcome of a whole bulk mark-synced run. `outcomes` holds one entry per
 // record in the ORIGINAL input order, so the caller can align each result back
@@ -550,7 +550,7 @@ const updatedCountFromMeta = (
 ): number | undefined => {
   const meta = body.meta as { updated?: unknown } | undefined;
 
-  return typeof meta?.updated === 'number' ? meta.updated : undefined;
+  return typeof meta?.updated === "number" ? meta.updated : undefined;
 };
 
 // Maps one chunk's request outcome to a per-item result. markpost returns the
@@ -576,7 +576,7 @@ const outcomesFromResponse = (
     return items.map(() => (wholeChunkAccepted ? MARK_SYNCED : MARK_FAILED));
   }
 
-  const updated = unwrapResourceCollection('markRecordsSynced', body, 'record');
+  const updated = unwrapResourceCollection("markRecordsSynced", body, "record");
   const updatedUuids = new Set(updated.map((record) => record.uuid));
 
   return items.map((item) =>
@@ -636,14 +636,14 @@ const markSyncedChunk = async (
   items: MarkSyncedItem[],
 ): Promise<MarkSyncedChunkResult> => {
   try {
-    const body = (await authedRequest('/api/records', {
-      method: 'PATCH',
+    const body = (await authedRequest("/api/records", {
+      method: "PATCH",
       headers: {
-        'Content-Type': 'application/vnd.api+json',
+        "Content-Type": "application/vnd.api+json",
       },
       body: JSON.stringify({
         data: {
-          type: 'records',
+          type: "records",
           attributes: {
             records: items.map(buildBulkRecordPayload),
           },
@@ -672,7 +672,7 @@ const markSyncedChunk = async (
     if (error instanceof ApiTimeoutError) {
       return {
         outcomes: items.map(() => MARK_TIMED_OUT),
-        abortReason: 'timeout',
+        abortReason: "timeout",
         message: null,
       };
     }
@@ -692,7 +692,7 @@ const markSyncedChunk = async (
     if (isPermanentApiFailure(error)) {
       return {
         outcomes: failedOutcomes,
-        abortReason: 'permanent',
+        abortReason: "permanent",
         message: null,
       };
     }
@@ -700,7 +700,7 @@ const markSyncedChunk = async (
     if (isSystemicApiFailure(error)) {
       return {
         outcomes: failedOutcomes,
-        abortReason: 'transient',
+        abortReason: "transient",
         message: null,
       };
     }
@@ -708,7 +708,7 @@ const markSyncedChunk = async (
     if (isFatalRequestError(error)) {
       return {
         outcomes: failedOutcomes,
-        abortReason: 'request-shape',
+        abortReason: "request-shape",
         message: error.message,
       };
     }
@@ -811,14 +811,14 @@ export const markRecordsSynced = async (
     // unsent (their records get no outcome, read as pending). Only `'permanent'`
     // additionally stops the daemon; that decision lives in the caller.
     if (
-      abortReason === 'timeout' ||
-      abortReason === 'permanent' ||
-      abortReason === 'transient'
+      abortReason === "timeout" ||
+      abortReason === "permanent" ||
+      abortReason === "transient"
     ) {
       return { outcomes, abortReason };
     }
 
-    if (abortReason !== 'request-shape') {
+    if (abortReason !== "request-shape") {
       // Non-abort chunk breaks consecutiveness — see `confirmsRequestShapeAbort`.
       lastRequestShapeMessage = null;
       continue;
@@ -834,7 +834,7 @@ export const markRecordsSynced = async (
     ) {
       return {
         outcomes: withAbortedTail(outcomes, chunkOutcomes.length),
-        abortReason: 'request-shape',
+        abortReason: "request-shape",
       };
     }
 
@@ -901,13 +901,13 @@ export const updateRecord = async (
     const body = (await authedRequest(
       `/api/records/${encodeURIComponent(uuid)}`,
       {
-        method: 'PATCH',
+        method: "PATCH",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
+          "Content-Type": "application/vnd.api+json",
         },
         body: JSON.stringify({
           data: {
-            type: 'records',
+            type: "records",
             attributes,
           },
         }),
@@ -977,14 +977,14 @@ const deleteRecordsChunk = async (
   uuids: string[],
 ): Promise<DeleteRecordsChunkResult> => {
   try {
-    const body = (await authedRequest('/api/records', {
-      method: 'DELETE',
+    const body = (await authedRequest("/api/records", {
+      method: "DELETE",
       headers: {
-        'Content-Type': 'application/vnd.api+json',
+        "Content-Type": "application/vnd.api+json",
       },
       body: JSON.stringify({
         data: {
-          type: 'records',
+          type: "records",
           attributes: {
             uuids: uuids,
           },
@@ -1006,7 +1006,7 @@ const deleteRecordsChunk = async (
       throw error;
     }
 
-    logApiFailure(uuidRangeLabel('deleteRecords', uuids), error);
+    logApiFailure(uuidRangeLabel("deleteRecords", uuids), error);
 
     // `assertApiSuccess` (see `authedRequest`) also throws for a 2xx response
     // whose body carries `data.errors` — an odd contract shape, but the server
@@ -1039,7 +1039,7 @@ const logPartialSettle = (uuids: string[], totalDeleted: number): void => {
   }
 
   logErrorMessage(
-    uuidRangeLabel('deleteRecords', uuids),
+    uuidRangeLabel("deleteRecords", uuids),
     `Partially settled: ${totalDeleted}/${uuids.length} uuids confirmed deleted; the remainder are unconfirmed and may still be on the server.`,
   );
 };
@@ -1062,10 +1062,10 @@ const logRequestShapeAbort = (
   const neverAttempted =
     unattemptedCount > 0
       ? ` ${unattemptedCount} of them were never attempted;`
-      : '';
+      : "";
 
   logErrorMessage(
-    uuidRangeLabel('deleteRecords', uuids),
+    uuidRangeLabel("deleteRecords", uuids),
     `Aborted after two consecutive request-shape rejections with the same message — the request envelope looks wrong.${neverAttempted} none of the ${uuids.length} requested uuid(s) were confirmed deleted.`,
   );
 };

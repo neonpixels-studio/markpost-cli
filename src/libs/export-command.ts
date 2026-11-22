@@ -1,9 +1,9 @@
-import chalk from 'chalk';
-import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
-import { writeExportFile } from '#src/libs/export.js';
-import { warnPartialRead } from '#src/libs/errors.js';
-import { hasJsonFlag } from '#src/libs/output.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
+import chalk from "chalk";
+import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
+import { writeExportFile } from "#src/libs/export.js";
+import { warnPartialRead } from "#src/libs/errors.js";
+import { hasJsonFlag } from "#src/libs/output.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
 
 // Argument parsing and result reporting shared by `export` (records) and
 // `events export`: both endpoints share one contract (bare row array, row
@@ -35,9 +35,9 @@ export const parseExportArgs = (
     allowPositionals: true,
     options: {
       ...extraOptions,
-      out: { type: 'string' },
-      force: { type: 'boolean' },
-      json: { type: 'boolean' },
+      out: { type: "string" },
+      force: { type: "boolean" },
+      json: { type: "boolean" },
     },
   });
 
@@ -51,7 +51,7 @@ export const parseExportArgs = (
   // dash-prefixed value (the space-separated `--out --json` is already
   // rejected by `parseArgs` itself as an ambiguous option value), so without
   // this check it would silently write a file literally named "--json".
-  if (values.out !== undefined && values.out.startsWith('--')) {
+  if (values.out !== undefined && values.out.startsWith("--")) {
     throw new Error(
       `--out was not given a path — got the flag "${values.out}" instead.`,
     );
@@ -62,15 +62,15 @@ export const parseExportArgs = (
   // before `values.json` is ever set, so relying on it here would miss that
   // combination.
   if (values.out !== undefined && hasJsonFlag(args)) {
-    throw new Error('Cannot combine --out and --json.');
+    throw new Error("Cannot combine --out and --json.");
   }
 
   if (values.out !== undefined && values.out.trim().length === 0) {
-    throw new Error('--out needs a non-empty path.');
+    throw new Error("--out needs a non-empty path.");
   }
 
   if (values.out === undefined && values.force) {
-    throw new Error('--force has no effect without --out.');
+    throw new Error("--force has no effect without --out.");
   }
 
   return {
@@ -93,7 +93,7 @@ const describeIncompleteExport = (
 
   if (truncated) {
     reasons.push(
-      'The export was truncated at the server-side row limit — only the most recent rows were included.',
+      "The export was truncated at the server-side row limit — only the most recent rows were included.",
     );
   }
 
@@ -126,7 +126,7 @@ export const reportIncompleteExport = (
     return;
   }
 
-  warnPartialRead(json, reasons.join(' '));
+  warnPartialRead(json, reasons.join(" "));
 };
 
 // Writes the already-fetched rows to disk and reports where they landed. A
@@ -155,7 +155,7 @@ export const writeToOutputFile = (
   }
 
   const skippedSuffix =
-    skippedCount > 0 ? ` (${skippedCount} malformed row(s) skipped)` : '';
+    skippedCount > 0 ? ` (${skippedCount} malformed row(s) skipped)` : "";
 
   console.log(
     chalk.green(

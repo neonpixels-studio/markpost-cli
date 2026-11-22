@@ -1,6 +1,6 @@
-import chalk from 'chalk';
-import { CheckResult, runDoctorChecks } from '#src/libs/doctor.js';
-import { failWithUsage } from '#src/libs/usage.js';
+import chalk from "chalk";
+import { CheckResult, runDoctorChecks } from "#src/libs/doctor.js";
+import { failWithUsage } from "#src/libs/usage.js";
 
 export const USAGE = `Usage: markpost doctor
 
@@ -9,7 +9,7 @@ export const USAGE = `Usage: markpost doctor
   check fails. Makes no changes and never prints the token.`;
 
 const formatResult = (result: CheckResult): string => {
-  const label = result.ok ? chalk.greenBright('PASS') : chalk.redBright('FAIL');
+  const label = result.ok ? chalk.greenBright("PASS") : chalk.redBright("FAIL");
 
   return `${label} ${result.name}: ${result.detail}`;
 };

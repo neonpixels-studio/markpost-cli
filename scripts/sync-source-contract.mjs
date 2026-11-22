@@ -20,12 +20,12 @@
 //   npm run sync:source-contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:source-contract -- --from=<path>    # same, `=` form
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
-import { parseFromPathArg } from './sync-contract.mjs';
+import { parseFromPathArg } from "./sync-contract.mjs";
 import {
   assertPathIsCommitted,
   hasExportModifier,
@@ -35,14 +35,14 @@ import {
   resolveSourceRepo,
   withMarkpostCheckout,
   writeManifest,
-} from './lib/markpost-checkout.mjs';
+} from "./lib/markpost-checkout.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(SCRIPT_DIR, '..');
-const VENDOR_DIR = join(REPO_ROOT, 'tests/types/vendor');
+const REPO_ROOT = join(SCRIPT_DIR, "..");
+const VENDOR_DIR = join(REPO_ROOT, "tests/types/vendor");
 const MANIFEST_FILE = join(
   VENDOR_DIR,
-  'markpost-source-contract.manifest.json',
+  "markpost-source-contract.manifest.json",
 );
 
 // Both files are vendored verbatim (not extracted piecemeal like the
@@ -56,19 +56,19 @@ const MANIFEST_FILE = join(
 // an opaque "does not provide an export named" module error.
 const VENDORED_FILES = [
   {
-    sourceRelativePath: 'shared/utils/sourceTypes.ts',
-    vendorFileName: 'markpost-source-types.generated.ts',
+    sourceRelativePath: "shared/utils/sourceTypes.ts",
+    vendorFileName: "markpost-source-types.generated.ts",
     description: "markpost's canonical source-type list",
-    requiredExports: ['SOURCE_TYPES', 'isSourceEndpointRotatable'],
+    requiredExports: ["SOURCE_TYPES", "isSourceEndpointRotatable"],
   },
   {
-    sourceRelativePath: 'shared/utils/webhookSecrets.ts',
-    vendorFileName: 'markpost-webhook-secrets.generated.ts',
+    sourceRelativePath: "shared/utils/webhookSecrets.ts",
+    vendorFileName: "markpost-webhook-secrets.generated.ts",
     description: "markpost's webhook-secret provider classification",
     requiredExports: [
-      'MANUAL_SECRET_PROVIDER_IDS',
-      'SECRET_BACKED_PROVIDER_IDS',
-      'ROTATABLE_PROVIDER_IDS',
+      "MANUAL_SECRET_PROVIDER_IDS",
+      "SECRET_BACKED_PROVIDER_IDS",
+      "ROTATABLE_PROVIDER_IDS",
     ],
   },
 ];
@@ -108,9 +108,9 @@ export function assertFileHasNoImports(sourceFile, sourceRelativePath) {
   if (importStatements.length > 0) {
     throw new Error(
       `${sourceRelativePath} now has an import — it can no longer be vendored ` +
-        'verbatim as a standalone file. Update scripts/sync-source-contract.mjs ' +
-        'to extract just the relevant declarations instead (see ' +
-        'scripts/sync-markdown-serialization.mjs for that pattern).',
+        "verbatim as a standalone file. Update scripts/sync-source-contract.mjs " +
+        "to extract just the relevant declarations instead (see " +
+        "scripts/sync-markdown-serialization.mjs for that pattern).",
     );
   }
 }
@@ -175,9 +175,9 @@ export function assertRequiredExportsPresent(
 
   if (missingExports.length > 0) {
     throw new Error(
-      `${sourceRelativePath} no longer exports: ${missingExports.join(', ')} — ` +
-        'markpost renamed or removed part of the contract; update ' +
-        'scripts/sync-source-contract.mjs and src/types/sources.types.ts to match',
+      `${sourceRelativePath} no longer exports: ${missingExports.join(", ")} — ` +
+        "markpost renamed or removed part of the contract; update " +
+        "scripts/sync-source-contract.mjs and src/types/sources.types.ts to match",
     );
   }
 }
@@ -245,12 +245,12 @@ function main() {
 
   withMarkpostCheckout(
     fromPath,
-    'markpost-source-contract-sync-',
+    "markpost-source-contract-sync-",
     (checkoutDir) => {
       syncFrom(checkoutDir);
       console.log(`Synced ${VENDOR_DIR} from ${checkoutDir}`);
       console.log(
-        'Review the diff, then run `npm run build` and `npm test` before committing.',
+        "Review the diff, then run `npm run build` and `npm test` before committing.",
       );
     },
   );

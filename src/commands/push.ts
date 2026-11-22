@@ -1,24 +1,24 @@
-import chalk from 'chalk';
-import { createRecord } from '#src/libs/records.js';
+import chalk from "chalk";
+import { createRecord } from "#src/libs/records.js";
 import {
   ApiRequestError,
   describeRequestRejection,
   describeSystemicFailure,
   isSystemicApiFailure,
   rethrowIfTimeout,
-} from '#src/libs/api.js';
-import { readMarkdown } from '#src/libs/markdown.js';
-import { resolveMarkdownInputs } from '#src/libs/files.js';
-import { checkConfig } from '#src/libs/config.js';
-import { failWithUsage } from '#src/libs/usage.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
+} from "#src/libs/api.js";
+import { readMarkdown } from "#src/libs/markdown.js";
+import { resolveMarkdownInputs } from "#src/libs/files.js";
+import { checkConfig } from "#src/libs/config.js";
+import { failWithUsage } from "#src/libs/usage.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
 import {
   parseStdinNote,
   readStdinText,
   STDIN_ARGUMENT,
   STDIN_LABEL,
-} from '#src/libs/stdin.js';
-import type { ReadInput, ParsedNote } from '#src/libs/stdin.js';
+} from "#src/libs/stdin.js";
+import type { ReadInput, ParsedNote } from "#src/libs/stdin.js";
 
 export const USAGE = `Usage: markpost push [--dry-run] <path...>
        markpost push [--dry-run] -
@@ -35,17 +35,17 @@ export const USAGE = `Usage: markpost push [--dry-run] <path...>
 // Preview flag: resolve the inputs and print the exact push plan without
 // creating any server records. Named so the parse check and usage text share
 // the one literal, mirroring sync's --dry-run.
-const DRY_RUN_FLAG = '--dry-run';
+const DRY_RUN_FLAG = "--dry-run";
 
 // A leading `--` marks a long flag, not a path — used to reject a stray or
 // mistyped long flag before it's mistaken for a file to push. A genuine
 // dash-leading filename is still pushable after the OPTIONS_END separator below.
-const FLAG_PREFIX = '--';
+const FLAG_PREFIX = "--";
 
 // POSIX end-of-options separator: everything after the first bare `--` is a
 // literal path, even if it starts with dashes — the standard escape hatch for a
 // file whose name would otherwise look like a flag (e.g. `push -- --notes.md`).
-const OPTIONS_END = '--';
+const OPTIONS_END = "--";
 
 // `systemicError` is set only when this file failed for a reason that will
 // recur for every other file (auth/5xx). Carrying it on the result rather than
@@ -287,7 +287,7 @@ const validateStdinUsage = (
 const reportStdinDryRun = (note: ParsedNote): void => {
   console.log(
     chalk.yellow(
-      'Dry run — previewing 1 note from stdin; nothing will be pushed.',
+      "Dry run — previewing 1 note from stdin; nothing will be pushed.",
     ),
   );
   console.log(
@@ -344,7 +344,7 @@ export const runPushCommand = async (
 
     if (unexpectedFlags.length > 0) {
       failWithUsage(
-        `Unexpected arguments: ${unexpectedFlags.join(' ')}`,
+        `Unexpected arguments: ${unexpectedFlags.join(" ")}`,
         USAGE,
       );
       return;
@@ -356,7 +356,7 @@ export const runPushCommand = async (
     ];
 
     if (paths.length === 0) {
-      failWithUsage('No path given.', USAGE);
+      failWithUsage("No path given.", USAGE);
       return;
     }
 
@@ -404,7 +404,7 @@ export const runPushCommand = async (
     }
 
     if (files.length === 0) {
-      console.error(chalk.redBright('No markdown files to push.'));
+      console.error(chalk.redBright("No markdown files to push."));
       process.exitCode = 1;
       return;
     }

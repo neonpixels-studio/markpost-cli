@@ -1,17 +1,17 @@
-import chalk from 'chalk';
-import { fetchRecordExport } from '#src/libs/export.js';
+import chalk from "chalk";
+import { fetchRecordExport } from "#src/libs/export.js";
 import {
   parseExportArgs,
   reportIncompleteExport,
   writeToOutputFile,
-} from '#src/libs/export-command.js';
-import { describeApiError } from '#src/libs/api.js';
-import { checkConfig } from '#src/libs/config.js';
-import { failWithMessage } from '#src/libs/errors.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
-import { parseOrFailWithUsage } from '#src/libs/usage.js';
-import { hasJsonFlag, printJson } from '#src/libs/output.js';
-import { RecordExportRow } from '#src/types/records.types.js';
+} from "#src/libs/export-command.js";
+import { describeApiError } from "#src/libs/api.js";
+import { checkConfig } from "#src/libs/config.js";
+import { failWithMessage } from "#src/libs/errors.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
+import { parseOrFailWithUsage } from "#src/libs/usage.js";
+import { hasJsonFlag, printJson } from "#src/libs/output.js";
+import { RecordExportRow } from "#src/types/records.types.js";
 
 export const USAGE = `Usage: markpost export [options]
 
@@ -42,7 +42,7 @@ export const runExportCommand = async (args: string[]): Promise<void> => {
   // rather than the fetch path's `fetch_failed`/generic prose — a usage error
   // is not a fetch failure (issue #208), mirroring records.ts/events.ts.
   const parsed = parseOrFailWithUsage(
-    () => parseExportArgs(args, 'export'),
+    () => parseExportArgs(args, "export"),
     USAGE,
     json,
   );
@@ -106,14 +106,14 @@ const runExport = async (
   // records.ts/events.ts's listRecords/listEvents. Thrown before any write, so
   // a failed fetch can never touch (or clobber) a previous backup file.
   if (!result.ok) {
-    throw new Error('Failed to fetch the export from the server.');
+    throw new Error("Failed to fetch the export from the server.");
   }
 
   const { rows, truncated, skippedCount } = result;
   reportIncompleteExport(truncated, skippedCount, json);
 
   if (outputPath) {
-    writeToOutputFile(outputPath, rows, force, skippedCount, 'record');
+    writeToOutputFile(outputPath, rows, force, skippedCount, "record");
     return;
   }
 
@@ -126,7 +126,7 @@ const runExport = async (
   }
 
   if (rows.length === 0) {
-    console.log('No records to export.');
+    console.log("No records to export.");
     return;
   }
 

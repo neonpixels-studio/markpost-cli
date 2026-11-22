@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   API_REQUEST_TIMEOUT_MS,
@@ -26,24 +26,24 @@ import {
   rethrowIfTimeout,
   unwrapResourceAttributes,
   unwrapResourceCollection,
-} from '#src/libs/api.js';
-import { logErrorMessage } from '#src/libs/errors.js';
+} from "#src/libs/api.js";
+import { logErrorMessage } from "#src/libs/errors.js";
 import {
   ApiError,
   ApiResourceObject,
   ApiResponse,
-} from '#src/types/api.types.js';
+} from "#src/types/api.types.js";
 
-vi.mock('#src/libs/config.js', () => ({
+vi.mock("#src/libs/config.js", () => ({
   getConfigValue: vi.fn(),
 }));
 
-vi.mock('#src/libs/errors.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('#src/libs/errors.js')>()),
+vi.mock("#src/libs/errors.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#src/libs/errors.js")>()),
   logErrorMessage: vi.fn(),
 }));
 
-describe('getBaseUrl', () => {
+describe("getBaseUrl", () => {
   const original = process.env.BASE_URL;
 
   afterEach(() => {
@@ -55,82 +55,82 @@ describe('getBaseUrl', () => {
     process.env.BASE_URL = original;
   });
 
-  it('returns BASE_URL env var when set', () => {
-    process.env.BASE_URL = 'https://example.com';
-    expect(getBaseUrl()).toBe('https://example.com');
+  it("returns BASE_URL env var when set", () => {
+    process.env.BASE_URL = "https://example.com";
+    expect(getBaseUrl()).toBe("https://example.com");
   });
 
-  it('returns default URL when BASE_URL is not set', () => {
+  it("returns default URL when BASE_URL is not set", () => {
     delete process.env.BASE_URL;
-    expect(getBaseUrl()).toBe('https://markpost.io');
+    expect(getBaseUrl()).toBe("https://markpost.io");
   });
 
   it.each([
-    'http://localhost:8888',
-    'http://127.0.0.1:8888',
-    'http://[::1]:8888',
-    'HTTP://LOCALHOST:8888',
-    'https://staging.example.com',
-  ])('allows BASE_URL %s', (url) => {
+    "http://localhost:8888",
+    "http://127.0.0.1:8888",
+    "http://[::1]:8888",
+    "HTTP://LOCALHOST:8888",
+    "https://staging.example.com",
+  ])("allows BASE_URL %s", (url) => {
     process.env.BASE_URL = url;
     expect(getBaseUrl()).toBe(url);
   });
 
   it.each([
-    'http://example.com',
-    'http://localhost.evil.com',
-    'http://192.168.1.5:8888',
-    'ftp://localhost',
-    'not a url',
-    'localhost:8888/api',
-    '',
-  ])('refuses unsafe or malformed BASE_URL %j', (url) => {
+    "http://example.com",
+    "http://localhost.evil.com",
+    "http://192.168.1.5:8888",
+    "ftp://localhost",
+    "not a url",
+    "localhost:8888/api",
+    "",
+  ])("refuses unsafe or malformed BASE_URL %j", (url) => {
     process.env.BASE_URL = url;
     expect(() => getBaseUrl()).toThrow(InvalidBaseUrlError);
   });
 
   it.each([
-    ['ftp://localhost', /unsupported protocol "ftp:"/],
-    ['http://example.com', /unencrypted/],
-    ['not a url', /not a valid URL/],
-  ])('explains why %s is refused', (url, message) => {
+    ["ftp://localhost", /unsupported protocol "ftp:"/],
+    ["http://example.com", /unencrypted/],
+    ["not a url", /not a valid URL/],
+  ])("explains why %s is refused", (url, message) => {
     process.env.BASE_URL = url;
     expect(() => getBaseUrl()).toThrow(message);
   });
 
-  it('lets an invalid BASE_URL escape logApiFailure instead of being swallowed', () => {
-    expect(() =>
-      logApiFailure('ctx', new InvalidBaseUrlError('bad')),
-    ).toThrow(InvalidBaseUrlError);
+  it("lets an invalid BASE_URL escape logApiFailure instead of being swallowed", () => {
+    expect(() => logApiFailure("ctx", new InvalidBaseUrlError("bad"))).toThrow(
+      InvalidBaseUrlError,
+    );
   });
 
-  it('never sends the bearer token when BASE_URL is unsafe', async () => {
+  it("never sends the bearer token when BASE_URL is unsafe", async () => {
     const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-    process.env.BASE_URL = 'http://example.com';
+    vi.stubGlobal("fetch", fetchSpy);
+    process.env.BASE_URL = "http://example.com";
 
-    await expect(authedRequest('/api/x')).rejects.toThrow(InvalidBaseUrlError);
+    await expect(authedRequest("/api/x")).rejects.toThrow(InvalidBaseUrlError);
     expect(fetchSpy).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();
   });
 });
 
-describe('getApiToken', () => {
+describe("getApiToken", () => {
   const original = process.env.API_TOKEN;
 
   afterEach(() => {
     process.env.API_TOKEN = original;
   });
 
-  it('returns API_TOKEN env var when set', () => {
-    process.env.API_TOKEN = 'test-token';
-    expect(getApiToken()).toBe('test-token');
+  it("returns API_TOKEN env var when set", () => {
+    process.env.API_TOKEN = "test-token";
+    expect(getApiToken()).toBe("test-token");
   });
 
-  it('returns undefined when neither API_TOKEN nor the stored config value is set', async () => {
+  it("returns undefined when neither API_TOKEN nor the stored config value is set", async () => {
     delete process.env.API_TOKEN;
-    const { getConfigValue } = await import('#src/libs/config.js');
+    const { getConfigValue } = await import("#src/libs/config.js");
     vi.mocked(getConfigValue).mockReturnValue(undefined);
     expect(getApiToken()).toBeUndefined();
   });
@@ -138,100 +138,100 @@ describe('getApiToken', () => {
   // Falls back to the stored config value so a machine with no exported
   // API_TOKEN still authenticates with whatever `markpost config set
   // apiToken` last wrote.
-  it('falls back to the stored config value when API_TOKEN is not set', async () => {
+  it("falls back to the stored config value when API_TOKEN is not set", async () => {
     delete process.env.API_TOKEN;
-    const { getConfigValue } = await import('#src/libs/config.js');
-    vi.mocked(getConfigValue).mockReturnValue('stored-token');
-    expect(getApiToken()).toBe('stored-token');
+    const { getConfigValue } = await import("#src/libs/config.js");
+    vi.mocked(getConfigValue).mockReturnValue("stored-token");
+    expect(getApiToken()).toBe("stored-token");
   });
 
   // API_TOKEN is the documented override — it must win even when a different
   // value is already stored, matching the precedence `ensureConfigValue`
   // (libs/config.ts) treats as authoritative for a fresh, unconfigured field.
-  it('prefers API_TOKEN over a different stored config value', async () => {
-    process.env.API_TOKEN = 'env-token';
-    const { getConfigValue } = await import('#src/libs/config.js');
-    vi.mocked(getConfigValue).mockReturnValue('stored-token');
-    expect(getApiToken()).toBe('env-token');
+  it("prefers API_TOKEN over a different stored config value", async () => {
+    process.env.API_TOKEN = "env-token";
+    const { getConfigValue } = await import("#src/libs/config.js");
+    vi.mocked(getConfigValue).mockReturnValue("stored-token");
+    expect(getApiToken()).toBe("env-token");
   });
 });
 
-describe('formatErrorMessages', () => {
+describe("formatErrorMessages", () => {
   const error = (title: string, detail: string): ApiError => ({
-    status: '400',
+    status: "400",
     title,
     detail,
     source: {},
   });
 
   it('returns "Unknown error occurred" for empty array', () => {
-    expect(formatErrorMessages([])).toBe('Unknown error occurred');
+    expect(formatErrorMessages([])).toBe("Unknown error occurred");
   });
 
   it('returns "Title: Detail" for a single error', () => {
-    expect(formatErrorMessages([error('Bad Request', 'Invalid input')])).toBe(
-      'Bad Request: Invalid input',
+    expect(formatErrorMessages([error("Bad Request", "Invalid input")])).toBe(
+      "Bad Request: Invalid input",
     );
   });
 
-  it('returns a bulleted list for multiple errors', () => {
+  it("returns a bulleted list for multiple errors", () => {
     const errors = [
-      error('Bad Request', 'Invalid input'),
-      error('Unprocessable', 'Missing field'),
+      error("Bad Request", "Invalid input"),
+      error("Unprocessable", "Missing field"),
     ];
     expect(formatErrorMessages(errors)).toBe(
-      '- Bad Request: Invalid input\n- Unprocessable: Missing field',
+      "- Bad Request: Invalid input\n- Unprocessable: Missing field",
     );
   });
 });
 
-describe('assertApiSuccess', () => {
+describe("assertApiSuccess", () => {
   const error = (title: string, detail: string): ApiError => ({
-    status: '400',
+    status: "400",
     title,
     detail,
     source: {},
   });
 
-  it('does not throw when the response is ok and carries no errors', () => {
+  it("does not throw when the response is ok and carries no errors", () => {
     expect(() =>
       assertApiSuccess({ ok: true } as Response, { data: {} }),
     ).not.toThrow();
   });
 
-  it('does not throw when the response is ok and errors is a present but empty array', () => {
+  it("does not throw when the response is ok and errors is a present but empty array", () => {
     expect(() =>
       assertApiSuccess({ ok: true } as Response, { data: { errors: [] } }),
     ).not.toThrow();
   });
 
-  it('throws with the real error detail when the body carries errors', () => {
+  it("throws with the real error detail when the body carries errors", () => {
     const body = {
-      data: { errors: [error('Unauthorized', 'Invalid or missing token')] },
+      data: { errors: [error("Unauthorized", "Invalid or missing token")] },
     };
 
     expect(() => assertApiSuccess({ ok: false } as Response, body)).toThrow(
-      'Unauthorized: Invalid or missing token',
+      "Unauthorized: Invalid or missing token",
     );
   });
 
   it('throws "Unknown error occurred" when the response fails with an empty JSON body', () => {
     expect(() =>
       assertApiSuccess({ ok: false, status: 400 } as Response, {}),
-    ).toThrow('Unknown error occurred');
+    ).toThrow("Unknown error occurred");
   });
 
-  it('names the status when the response fails with no parsed body', () => {
+  it("names the status when the response fails with no parsed body", () => {
     expect(() =>
       assertApiSuccess({ ok: false, status: 400 } as Response, undefined),
-    ).toThrow('The server returned a non-JSON error response (HTTP 400)');
+    ).toThrow("The server returned a non-JSON error response (HTTP 400)");
   });
 
-  it('throws when the response is ok but the body still carries errors', () => {
-    const body = { data: { errors: [error('Conflict', 'Duplicate record')] } };
+  it("throws when the response is ok but the body still carries errors", () => {
+    const body = { data: { errors: [error("Conflict", "Duplicate record")] } };
 
     expect(() => assertApiSuccess({ ok: true } as Response, body)).toThrow(
-      'Conflict: Duplicate record',
+      "Conflict: Duplicate record",
     );
   });
 
@@ -241,32 +241,32 @@ describe('assertApiSuccess', () => {
   // sends this shape, but the CLI must not silently accept it as success
   // just because it doesn't match the shape every handler happens to use
   // today.
-  it('throws when the body carries top-level errors instead of nested data.errors', () => {
+  it("throws when the body carries top-level errors instead of nested data.errors", () => {
     const body = {
-      errors: [error('Unauthorized', 'Invalid or missing token')],
+      errors: [error("Unauthorized", "Invalid or missing token")],
     };
 
     expect(() => assertApiSuccess({ ok: false } as Response, body)).toThrow(
-      'Unauthorized: Invalid or missing token',
+      "Unauthorized: Invalid or missing token",
     );
   });
 
-  it('throws when the response is ok but carries top-level errors', () => {
-    const body = { errors: [error('Conflict', 'Duplicate record')] };
+  it("throws when the response is ok but carries top-level errors", () => {
+    const body = { errors: [error("Conflict", "Duplicate record")] };
 
     expect(() => assertApiSuccess({ ok: true } as Response, body)).toThrow(
-      'Conflict: Duplicate record',
+      "Conflict: Duplicate record",
     );
   });
 
-  it('does not let an empty data.errors mask a populated top-level errors', () => {
+  it("does not let an empty data.errors mask a populated top-level errors", () => {
     const body = {
       data: { errors: [] },
-      errors: [error('Conflict', 'Duplicate record')],
+      errors: [error("Conflict", "Duplicate record")],
     };
 
     expect(() => assertApiSuccess({ ok: true } as Response, body)).toThrow(
-      'Conflict: Duplicate record',
+      "Conflict: Duplicate record",
     );
   });
 
@@ -274,11 +274,11 @@ describe('assertApiSuccess', () => {
   // object here, but a string has the same problem) must not throw a raw
   // `TypeError` out of the spread — it degrades to "no errors present"
   // instead, and `!response.ok` still surfaces "Unknown error occurred".
-  it('does not throw a TypeError when data.errors is not an array', () => {
-    const body = { data: { errors: { detail: 'not an array' } } };
+  it("does not throw a TypeError when data.errors is not an array", () => {
+    const body = { data: { errors: { detail: "not an array" } } };
 
     expect(() => assertApiSuccess({ ok: false } as Response, body)).toThrow(
-      'Unknown error occurred',
+      "Unknown error occurred",
     );
   });
 });
@@ -288,10 +288,10 @@ describe('assertApiSuccess', () => {
 // dropping auth, return the parsed body on success, and delegate error
 // detection to `assertApiSuccess` (so a 2xx body carrying `errors` still
 // throws, not just a non-2xx status).
-describe('authedRequest', () => {
+describe("authedRequest", () => {
   const mockFetch = (responseBody: unknown, ok = true, status = 200) => {
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn().mockResolvedValue({
         ok,
         status,
@@ -301,8 +301,8 @@ describe('authedRequest', () => {
   };
 
   beforeEach(() => {
-    vi.stubEnv('BASE_URL', 'https://example.com');
-    vi.stubEnv('API_TOKEN', 'test-token');
+    vi.stubEnv("BASE_URL", "https://example.com");
+    vi.stubEnv("API_TOKEN", "test-token");
   });
 
   afterEach(() => {
@@ -310,65 +310,65 @@ describe('authedRequest', () => {
     vi.unstubAllGlobals();
   });
 
-  it('prefixes the base URL and attaches the bearer auth header', async () => {
+  it("prefixes the base URL and attaches the bearer auth header", async () => {
     mockFetch({ data: {} });
-    await authedRequest('/api/records');
+    await authedRequest("/api/records");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records',
+      "https://example.com/api/records",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('merges caller-provided headers without dropping the auth header', async () => {
+  it("merges caller-provided headers without dropping the auth header", async () => {
     mockFetch({ data: {} });
-    await authedRequest('/api/records', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/vnd.api+json' },
+    await authedRequest("/api/records", {
+      method: "POST",
+      headers: { "Content-Type": "application/vnd.api+json" },
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records',
+      "https://example.com/api/records",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         headers: {
-          Authorization: 'Bearer test-token',
-          'Content-Type': 'application/vnd.api+json',
+          Authorization: "Bearer test-token",
+          "Content-Type": "application/vnd.api+json",
         },
       }),
     );
   });
 
-  it('returns the parsed body on success', async () => {
-    mockFetch({ data: { attributes: { uuid: 'abc-123' } } });
-    await expect(authedRequest('/api/records')).resolves.toEqual({
-      data: { attributes: { uuid: 'abc-123' } },
+  it("returns the parsed body on success", async () => {
+    mockFetch({ data: { attributes: { uuid: "abc-123" } } });
+    await expect(authedRequest("/api/records")).resolves.toEqual({
+      data: { attributes: { uuid: "abc-123" } },
     });
   });
 
-  it('throws with the real error detail when a 2xx body still carries errors', async () => {
+  it("throws with the real error detail when a 2xx body still carries errors", async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Conflict', detail: 'Duplicate record' }] } },
+      { data: { errors: [{ title: "Conflict", detail: "Duplicate record" }] } },
       true,
     );
-    await expect(authedRequest('/api/records')).rejects.toThrow(
-      'Conflict: Duplicate record',
+    await expect(authedRequest("/api/records")).rejects.toThrow(
+      "Conflict: Duplicate record",
     );
   });
 
-  it('throws with the real error detail when the response is not ok', async () => {
+  it("throws with the real error detail when the response is not ok", async () => {
     mockFetch(
       {
         data: {
           errors: [
-            { title: 'Unauthorized', detail: 'Invalid or missing token' },
+            { title: "Unauthorized", detail: "Invalid or missing token" },
           ],
         },
       },
       false,
     );
-    await expect(authedRequest('/api/records')).rejects.toThrow(
-      'Unauthorized: Invalid or missing token',
+    await expect(authedRequest("/api/records")).rejects.toThrow(
+      "Unauthorized: Invalid or missing token",
     );
   });
 
@@ -376,34 +376,34 @@ describe('authedRequest', () => {
   // `createRecord` only re-throws (fail-fast) when `isSystemicApiFailure`
   // sees a systemic status. A seam that dropped the status would still pass
   // the message-only assertions above, so classification is asserted here.
-  it('propagates the HTTP status so systemic failures stay classifiable', async () => {
+  it("propagates the HTTP status so systemic failures stay classifiable", async () => {
     mockFetch(
       {
         data: {
           errors: [
-            { title: 'Unauthorized', detail: 'Invalid or missing token' },
+            { title: "Unauthorized", detail: "Invalid or missing token" },
           ],
         },
       },
       false,
       401,
     );
-    await expect(authedRequest('/api/records')).rejects.toMatchObject({
+    await expect(authedRequest("/api/records")).rejects.toMatchObject({
       statusCode: 401,
       isSystemic: true,
     });
   });
 });
 
-describe('assertApiSuccess (systemic classification)', () => {
+describe("assertApiSuccess (systemic classification)", () => {
   const authError: ApiError = {
-    status: '401',
-    title: 'Unauthorized',
-    detail: 'Invalid or missing token',
+    status: "401",
+    title: "Unauthorized",
+    detail: "Invalid or missing token",
     source: {},
   };
 
-  it('throws an ApiRequestError carrying the response status', () => {
+  it("throws an ApiRequestError carrying the response status", () => {
     const body = { data: { errors: [authError] } };
 
     expect(() =>
@@ -422,43 +422,43 @@ describe('assertApiSuccess (systemic classification)', () => {
   // markpost's `requireUser` throws a bare 401 with no `data.errors` body, so
   // without a status fallback the user would see the useless "Unknown error
   // occurred". The message must instead tell them the token is the problem.
-  it('gives an actionable message for an errorless 401 response', () => {
+  it("gives an actionable message for an errorless 401 response", () => {
     try {
       assertApiSuccess({ ok: false, status: 401 } as Response, {});
-      throw new Error('expected assertApiSuccess to throw');
+      throw new Error("expected assertApiSuccess to throw");
     } catch (error) {
       expect((error as ApiRequestError).message).toBe(
-        'Invalid or missing API token — run `markpost config` to set a valid one',
+        "Invalid or missing API token — run `markpost config` to set a valid one",
       );
       expect((error as ApiRequestError).isSystemic).toBe(true);
     }
   });
 
-  it('prefers a populated data.errors detail over the status fallback', () => {
+  it("prefers a populated data.errors detail over the status fallback", () => {
     const body = {
       data: { errors: [authError] },
     };
 
     try {
       assertApiSuccess({ ok: false, status: 401 } as Response, body);
-      throw new Error('expected assertApiSuccess to throw');
+      throw new Error("expected assertApiSuccess to throw");
     } catch (error) {
       expect((error as ApiRequestError).message).toBe(
-        'Unauthorized: Invalid or missing token',
+        "Unauthorized: Invalid or missing token",
       );
     }
   });
 
-  it('throws a non-systemic ApiRequestError for a 4xx the payload caused', () => {
+  it("throws a non-systemic ApiRequestError for a 4xx the payload caused", () => {
     const body = {
       data: {
-        errors: [{ status: '422', title: 'Unprocessable', detail: 'Bad' }],
+        errors: [{ status: "422", title: "Unprocessable", detail: "Bad" }],
       },
     };
 
     try {
       assertApiSuccess({ ok: false, status: 422 } as Response, body);
-      throw new Error('expected assertApiSuccess to throw');
+      throw new Error("expected assertApiSuccess to throw");
     } catch (error) {
       expect((error as ApiRequestError).statusCode).toBe(422);
       expect((error as ApiRequestError).isSystemic).toBe(false);
@@ -470,16 +470,16 @@ describe('assertApiSuccess (systemic classification)', () => {
   // still rejects that off-contract shape — and must treat it as non-systemic
   // (status 200), so an odd 200-with-errors body can't masquerade as an auth
   // failure just because an inner error object claims `status: '401'`.
-  it('throws a non-systemic error for an ok response that still carries errors', () => {
+  it("throws a non-systemic error for an ok response that still carries errors", () => {
     const body = {
       data: {
-        errors: [{ status: '401', title: 'Odd', detail: 'off-contract' }],
+        errors: [{ status: "401", title: "Odd", detail: "off-contract" }],
       },
     };
 
     try {
       assertApiSuccess({ ok: true, status: 200 } as Response, body);
-      throw new Error('expected assertApiSuccess to throw');
+      throw new Error("expected assertApiSuccess to throw");
     } catch (error) {
       expect((error as ApiRequestError).statusCode).toBe(200);
       expect((error as ApiRequestError).isSystemic).toBe(false);
@@ -487,50 +487,50 @@ describe('assertApiSuccess (systemic classification)', () => {
   });
 });
 
-describe('ApiRequestError', () => {
-  it('classifies 401 and 403 as auth failures (and systemic)', () => {
+describe("ApiRequestError", () => {
+  it("classifies 401 and 403 as auth failures (and systemic)", () => {
     for (const statusCode of [401, 403]) {
-      const error = new ApiRequestError('nope', statusCode);
+      const error = new ApiRequestError("nope", statusCode);
       expect(error.isAuthFailure).toBe(true);
       expect(error.isServerError).toBe(false);
       expect(error.isSystemic).toBe(true);
     }
   });
 
-  it('classifies 429 as a rate limit (and systemic)', () => {
-    const error = new ApiRequestError('nope', 429);
+  it("classifies 429 as a rate limit (and systemic)", () => {
+    const error = new ApiRequestError("nope", 429);
     expect(error.isRateLimited).toBe(true);
     expect(error.isAuthFailure).toBe(false);
     expect(error.isServerError).toBe(false);
     expect(error.isSystemic).toBe(true);
   });
 
-  it('classifies any 5xx as a server error (and systemic)', () => {
+  it("classifies any 5xx as a server error (and systemic)", () => {
     for (const statusCode of [500, 502, 503]) {
-      const error = new ApiRequestError('nope', statusCode);
+      const error = new ApiRequestError("nope", statusCode);
       expect(error.isServerError).toBe(true);
       expect(error.isAuthFailure).toBe(false);
       expect(error.isSystemic).toBe(true);
     }
   });
 
-  it('treats a 4xx that is not auth or rate limit as non-systemic', () => {
+  it("treats a 4xx that is not auth or rate limit as non-systemic", () => {
     for (const statusCode of [400, 404, 409, 422]) {
-      expect(new ApiRequestError('nope', statusCode).isSystemic).toBe(false);
+      expect(new ApiRequestError("nope", statusCode).isSystemic).toBe(false);
     }
   });
 
   // Permanence gates whether an autoSync daemon should shut down: auth failures
   // (401/403) won't clear on retry, but a rate-limit/5xx is transient.
-  it('marks only auth failures (401/403) as permanent', () => {
+  it("marks only auth failures (401/403) as permanent", () => {
     for (const statusCode of [401, 403]) {
-      expect(new ApiRequestError('nope', statusCode).isPermanent).toBe(true);
+      expect(new ApiRequestError("nope", statusCode).isPermanent).toBe(true);
     }
   });
 
-  it('marks a rate limit and 5xx as NOT permanent (transient)', () => {
+  it("marks a rate limit and 5xx as NOT permanent (transient)", () => {
     for (const statusCode of [429, 500, 503]) {
-      expect(new ApiRequestError('nope', statusCode).isPermanent).toBe(false);
+      expect(new ApiRequestError("nope", statusCode).isPermanent).toBe(false);
     }
   });
 
@@ -538,235 +538,235 @@ describe('ApiRequestError', () => {
   // batch that failed the same way. The boundaries matter: a per-record 404, an
   // auth 401/403, a transient 429, and any 5xx must stay OUT so they don't
   // trigger the abort.
-  it('classifies only 400 and 422 as request-shape (fatal) errors', () => {
+  it("classifies only 400 and 422 as request-shape (fatal) errors", () => {
     for (const statusCode of [400, 422]) {
-      expect(new ApiRequestError('nope', statusCode).isFatalRequest).toBe(true);
+      expect(new ApiRequestError("nope", statusCode).isFatalRequest).toBe(true);
     }
   });
 
-  it('does not classify per-record, auth, rate-limit, or server 4xx/5xx as request-shape', () => {
+  it("does not classify per-record, auth, rate-limit, or server 4xx/5xx as request-shape", () => {
     for (const statusCode of [401, 403, 404, 409, 429, 500, 503]) {
-      expect(new ApiRequestError('nope', statusCode).isFatalRequest).toBe(
+      expect(new ApiRequestError("nope", statusCode).isFatalRequest).toBe(
         false,
       );
     }
   });
 });
 
-describe('isFatalRequestError', () => {
-  it('is true only for a 400/422 ApiRequestError', () => {
-    expect(isFatalRequestError(new ApiRequestError('nope', 400))).toBe(true);
-    expect(isFatalRequestError(new ApiRequestError('nope', 422))).toBe(true);
+describe("isFatalRequestError", () => {
+  it("is true only for a 400/422 ApiRequestError", () => {
+    expect(isFatalRequestError(new ApiRequestError("nope", 400))).toBe(true);
+    expect(isFatalRequestError(new ApiRequestError("nope", 422))).toBe(true);
   });
 
-  it('is false for a per-record, auth, rate-limit, or 5xx ApiRequestError', () => {
+  it("is false for a per-record, auth, rate-limit, or 5xx ApiRequestError", () => {
     for (const statusCode of [401, 404, 429, 500]) {
-      expect(isFatalRequestError(new ApiRequestError('nope', statusCode))).toBe(
+      expect(isFatalRequestError(new ApiRequestError("nope", statusCode))).toBe(
         false,
       );
     }
   });
 
-  it('is false for a plain Error or non-error value', () => {
-    expect(isFatalRequestError(new Error('network down'))).toBe(false);
-    expect(isFatalRequestError('boom')).toBe(false);
+  it("is false for a plain Error or non-error value", () => {
+    expect(isFatalRequestError(new Error("network down"))).toBe(false);
+    expect(isFatalRequestError("boom")).toBe(false);
     expect(isFatalRequestError(undefined)).toBe(false);
   });
 });
 
-describe('isSystemicApiFailure', () => {
-  it('is true only for a systemic ApiRequestError', () => {
-    expect(isSystemicApiFailure(new ApiRequestError('nope', 401))).toBe(true);
-    expect(isSystemicApiFailure(new ApiRequestError('nope', 503))).toBe(true);
+describe("isSystemicApiFailure", () => {
+  it("is true only for a systemic ApiRequestError", () => {
+    expect(isSystemicApiFailure(new ApiRequestError("nope", 401))).toBe(true);
+    expect(isSystemicApiFailure(new ApiRequestError("nope", 503))).toBe(true);
   });
 
-  it('is false for a non-systemic ApiRequestError', () => {
-    expect(isSystemicApiFailure(new ApiRequestError('nope', 422))).toBe(false);
+  it("is false for a non-systemic ApiRequestError", () => {
+    expect(isSystemicApiFailure(new ApiRequestError("nope", 422))).toBe(false);
   });
 
-  it('is false for a plain Error or non-error value', () => {
-    expect(isSystemicApiFailure(new Error('network down'))).toBe(false);
-    expect(isSystemicApiFailure('boom')).toBe(false);
+  it("is false for a plain Error or non-error value", () => {
+    expect(isSystemicApiFailure(new Error("network down"))).toBe(false);
+    expect(isSystemicApiFailure("boom")).toBe(false);
     expect(isSystemicApiFailure(undefined)).toBe(false);
   });
 });
 
-describe('isPermanentApiFailure', () => {
+describe("isPermanentApiFailure", () => {
   // Gates the autoSync daemon shutdown, so its two boundaries matter: a
   // permanent 401/403 is true; a systemic-but-transient 429/5xx is false (the
   // daemon retries those); and anything that isn't a systemic ApiRequestError is
   // false so the caller keeps its per-item handling.
-  it('is true only for a permanent (auth) ApiRequestError', () => {
-    expect(isPermanentApiFailure(new ApiRequestError('nope', 401))).toBe(true);
-    expect(isPermanentApiFailure(new ApiRequestError('nope', 403))).toBe(true);
+  it("is true only for a permanent (auth) ApiRequestError", () => {
+    expect(isPermanentApiFailure(new ApiRequestError("nope", 401))).toBe(true);
+    expect(isPermanentApiFailure(new ApiRequestError("nope", 403))).toBe(true);
   });
 
-  it('is false for a transient systemic ApiRequestError (429/5xx)', () => {
-    expect(isPermanentApiFailure(new ApiRequestError('nope', 429))).toBe(false);
-    expect(isPermanentApiFailure(new ApiRequestError('nope', 503))).toBe(false);
+  it("is false for a transient systemic ApiRequestError (429/5xx)", () => {
+    expect(isPermanentApiFailure(new ApiRequestError("nope", 429))).toBe(false);
+    expect(isPermanentApiFailure(new ApiRequestError("nope", 503))).toBe(false);
   });
 
-  it('is false for a non-permanent 4xx ApiRequestError', () => {
-    expect(isPermanentApiFailure(new ApiRequestError('nope', 422))).toBe(false);
+  it("is false for a non-permanent 4xx ApiRequestError", () => {
+    expect(isPermanentApiFailure(new ApiRequestError("nope", 422))).toBe(false);
   });
 
-  it('is false for a plain Error or non-error value', () => {
-    expect(isPermanentApiFailure(new Error('network down'))).toBe(false);
-    expect(isPermanentApiFailure('boom')).toBe(false);
+  it("is false for a plain Error or non-error value", () => {
+    expect(isPermanentApiFailure(new Error("network down"))).toBe(false);
+    expect(isPermanentApiFailure("boom")).toBe(false);
     expect(isPermanentApiFailure(undefined)).toBe(false);
   });
 });
 
-describe('describeSystemicFailure', () => {
-  it('labels an auth failure with its status and message', () => {
-    const error = new ApiRequestError('Invalid or missing token', 401);
+describe("describeSystemicFailure", () => {
+  it("labels an auth failure with its status and message", () => {
+    const error = new ApiRequestError("Invalid or missing token", 401);
     expect(describeSystemicFailure(error)).toBe(
-      'Authentication failed (HTTP 401): Invalid or missing token',
+      "Authentication failed (HTTP 401): Invalid or missing token",
     );
   });
 
-  it('labels a rate limit with its status and message', () => {
-    const error = new ApiRequestError('Too many requests', 429);
+  it("labels a rate limit with its status and message", () => {
+    const error = new ApiRequestError("Too many requests", 429);
     expect(describeSystemicFailure(error)).toBe(
-      'Rate limited (HTTP 429): Too many requests',
+      "Rate limited (HTTP 429): Too many requests",
     );
   });
 
-  it('labels a server error with its status and message', () => {
-    const error = new ApiRequestError('Unknown error occurred', 503);
+  it("labels a server error with its status and message", () => {
+    const error = new ApiRequestError("Unknown error occurred", 503);
     expect(describeSystemicFailure(error)).toBe(
-      'Server error (HTTP 503): Unknown error occurred',
+      "Server error (HTTP 503): Unknown error occurred",
     );
   });
 
   // Guards the label so a non-systemic error handed in by mistake can't be
   // mislabeled as a server error.
-  it('falls back to a generic label for a non-systemic error', () => {
-    const error = new ApiRequestError('Duplicate record', 409);
+  it("falls back to a generic label for a non-systemic error", () => {
+    const error = new ApiRequestError("Duplicate record", 409);
     expect(describeSystemicFailure(error)).toBe(
-      'Request failed (HTTP 409): Duplicate record',
+      "Request failed (HTTP 409): Duplicate record",
     );
   });
 });
 
-describe('describeApiError', () => {
+describe("describeApiError", () => {
   // A systemic failure gets the classified, actionable description so a command
   // can surface *why* it failed (e.g. an expired token) rather than a bare message.
-  it('classifies a systemic ApiRequestError with its status label', () => {
-    const error = new ApiRequestError('Invalid or missing API token', 401);
+  it("classifies a systemic ApiRequestError with its status label", () => {
+    const error = new ApiRequestError("Invalid or missing API token", 401);
     expect(describeApiError(error)).toBe(
-      'Authentication failed (HTTP 401): Invalid or missing API token',
+      "Authentication failed (HTTP 401): Invalid or missing API token",
     );
   });
 
   // A non-systemic ApiRequestError (a per-request 4xx) falls back to its bare
   // message — no systemic classification prefix, since it isn't batch-wide.
-  it('returns the bare message for a non-systemic ApiRequestError', () => {
-    const error = new ApiRequestError('Record not found', 404);
-    expect(describeApiError(error)).toBe('Record not found');
+  it("returns the bare message for a non-systemic ApiRequestError", () => {
+    const error = new ApiRequestError("Record not found", 404);
+    expect(describeApiError(error)).toBe("Record not found");
   });
 
-  it('returns the message of a plain Error', () => {
-    expect(describeApiError(new Error('Network error'))).toBe('Network error');
+  it("returns the message of a plain Error", () => {
+    expect(describeApiError(new Error("Network error"))).toBe("Network error");
   });
 
   // A thrown non-Error value (a bare string) still yields a printable message
   // rather than "[object Object]" or a crash.
-  it('stringifies a thrown non-Error value', () => {
-    expect(describeApiError('boom')).toBe('boom');
+  it("stringifies a thrown non-Error value", () => {
+    expect(describeApiError("boom")).toBe("boom");
   });
 });
 
-describe('unwrapResourceAttributes', () => {
+describe("unwrapResourceAttributes", () => {
   type FixtureAttributes = { uuid: string; title: string };
   type FixtureResource = ApiResourceObject & {
-    type: 'fixtures';
+    type: "fixtures";
     attributes: FixtureAttributes;
   };
 
-  it('returns the attributes off a resource object', () => {
+  it("returns the attributes off a resource object", () => {
     const body: ApiResponse<FixtureResource | null> = {
       data: {
-        type: 'fixtures',
-        id: 'abc-123',
-        attributes: { uuid: 'abc-123', title: 'Hello' },
+        type: "fixtures",
+        id: "abc-123",
+        attributes: { uuid: "abc-123", title: "Hello" },
       },
     };
 
     expect(unwrapResourceAttributes(body)).toEqual({
-      uuid: 'abc-123',
-      title: 'Hello',
+      uuid: "abc-123",
+      title: "Hello",
     });
   });
 
-  it('returns null when data is null', () => {
+  it("returns null when data is null", () => {
     const body: ApiResponse<FixtureResource | null> = { data: null };
 
     expect(unwrapResourceAttributes(body)).toBeNull();
   });
 
-  it('returns null (not undefined) when the resource has no attributes', () => {
+  it("returns null (not undefined) when the resource has no attributes", () => {
     const body = {
-      data: { type: 'fixtures', id: 'abc-123' },
+      data: { type: "fixtures", id: "abc-123" },
     } as ApiResponse<FixtureResource | null>;
 
     expect(unwrapResourceAttributes(body)).toBeNull();
   });
 });
 
-describe('unwrapResourceCollection', () => {
+describe("unwrapResourceCollection", () => {
   type FixtureAttributes = { uuid: string; title: string };
   type FixtureResource = ApiResourceObject & {
-    type: 'fixtures';
+    type: "fixtures";
     attributes: FixtureAttributes;
   };
 
-  const fixture: FixtureAttributes = { uuid: 'abc-123', title: 'Hello' };
+  const fixture: FixtureAttributes = { uuid: "abc-123", title: "Hello" };
 
   beforeEach(() => {
     vi.mocked(logErrorMessage).mockClear();
   });
 
-  it('returns [] and does not log when data is missing entirely', () => {
+  it("returns [] and does not log when data is missing entirely", () => {
     const body = {} as ApiResponse<FixtureResource[]>;
 
-    expect(unwrapResourceCollection('context', body, 'fixture')).toEqual([]);
+    expect(unwrapResourceCollection("context", body, "fixture")).toEqual([]);
     expect(logErrorMessage).not.toHaveBeenCalled();
   });
 
-  it('returns the attributes of every usable resource', () => {
+  it("returns the attributes of every usable resource", () => {
     const body: ApiResponse<FixtureResource[]> = {
       data: [
-        { type: 'fixtures', id: 'abc-123', attributes: fixture },
+        { type: "fixtures", id: "abc-123", attributes: fixture },
         {
-          type: 'fixtures',
-          id: 'def-456',
-          attributes: { ...fixture, uuid: 'def-456' },
+          type: "fixtures",
+          id: "def-456",
+          attributes: { ...fixture, uuid: "def-456" },
         },
       ],
     };
 
-    expect(unwrapResourceCollection('context', body, 'fixture')).toEqual([
+    expect(unwrapResourceCollection("context", body, "fixture")).toEqual([
       fixture,
-      { ...fixture, uuid: 'def-456' },
+      { ...fixture, uuid: "def-456" },
     ]);
     expect(logErrorMessage).not.toHaveBeenCalled();
   });
 
-  it('drops a resource with attributes explicitly null and logs the skip', () => {
+  it("drops a resource with attributes explicitly null and logs the skip", () => {
     const body = {
       data: [
-        { type: 'fixtures', id: 'abc-123', attributes: fixture },
-        { type: 'fixtures', id: 'def-456', attributes: null },
+        { type: "fixtures", id: "abc-123", attributes: fixture },
+        { type: "fixtures", id: "def-456", attributes: null },
       ],
     } as unknown as ApiResponse<FixtureResource[]>;
 
-    expect(unwrapResourceCollection('myContext', body, 'fixture')).toEqual([
+    expect(unwrapResourceCollection("myContext", body, "fixture")).toEqual([
       fixture,
     ]);
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'myContext',
-      'Skipped 1 fixture(s) with no attributes',
+      "myContext",
+      "Skipped 1 fixture(s) with no attributes",
     );
   });
 
@@ -774,23 +774,23 @@ describe('unwrapResourceCollection', () => {
   // (an empty array, not a thrown error), so the only signal something's
   // wrong is the logged skip count — this must not silently look identical
   // to "the server legitimately returned zero resources".
-  it('drops every resource and logs the full count when none are usable', () => {
+  it("drops every resource and logs the full count when none are usable", () => {
     const body = {
       data: [
-        { type: 'fixtures', id: 'abc-123' },
-        { type: 'fixtures', id: 'def-456', attributes: null },
+        { type: "fixtures", id: "abc-123" },
+        { type: "fixtures", id: "def-456", attributes: null },
       ],
     } as unknown as ApiResponse<FixtureResource[]>;
 
-    expect(unwrapResourceCollection('myContext', body, 'fixture')).toEqual([]);
+    expect(unwrapResourceCollection("myContext", body, "fixture")).toEqual([]);
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'myContext',
-      'Skipped 2 fixture(s) with no attributes',
+      "myContext",
+      "Skipped 2 fixture(s) with no attributes",
     );
   });
 });
 
-describe('apiFetch', () => {
+describe("apiFetch", () => {
   const originalFetch = global.fetch;
 
   const okResponse = (body: unknown = {}) =>
@@ -801,11 +801,11 @@ describe('apiFetch', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns the response and parsed body on success', async () => {
-    const parsed = { data: { attributes: { uuid: 'abc-123' } } };
+  it("returns the response and parsed body on success", async () => {
+    const parsed = { data: { attributes: { uuid: "abc-123" } } };
     global.fetch = vi.fn().mockResolvedValue(okResponse(parsed));
 
-    const result = await apiFetch('https://example.com/api/records');
+    const result = await apiFetch("https://example.com/api/records");
 
     expect(result.response.ok).toBe(true);
     expect(result.body).toEqual(parsed);
@@ -814,35 +814,35 @@ describe('apiFetch', () => {
   // Pins the timeout to the named constant: a mutation to `AbortSignal
   // .timeout(1)` or to a controller that never fires (both of which would
   // silently defeat the timeout) makes this assertion fail.
-  it('arms the request with an AbortSignal for the configured timeout', async () => {
-    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+  it("arms the request with an AbortSignal for the configured timeout", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const fetchMock = vi.fn().mockResolvedValue(okResponse());
     global.fetch = fetchMock;
 
-    await apiFetch('https://example.com/api/records', { method: 'GET' });
+    await apiFetch("https://example.com/api/records", { method: "GET" });
 
     expect(timeoutSpy).toHaveBeenCalledWith(API_REQUEST_TIMEOUT_MS);
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.signal).toBeInstanceOf(AbortSignal);
-    expect(init.method).toBe('GET');
+    expect(init.method).toBe("GET");
   });
 
   // A stalled connection is aborted by `AbortSignal.timeout`, which `fetch`
   // rejects with a `TimeoutError` DOMException — the exact shape reproduced
   // here. It must surface as a distinct `ApiTimeoutError` with a clear
   // message, never as a generic error or a silent hang.
-  it('rejects a stalled request with a distinct ApiTimeoutError', async () => {
+  it("rejects a stalled request with a distinct ApiTimeoutError", async () => {
     const timeout = new DOMException(
-      'The operation timed out.',
-      'TimeoutError',
+      "The operation timed out.",
+      "TimeoutError",
     );
     global.fetch = vi.fn().mockRejectedValue(timeout);
 
     await expect(
-      apiFetch('https://example.com/api/records'),
+      apiFetch("https://example.com/api/records"),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
 
-    await expect(apiFetch('https://example.com/api/records')).rejects.toThrow(
+    await expect(apiFetch("https://example.com/api/records")).rejects.toThrow(
       `Request to https://example.com/api/records timed out after ${API_REQUEST_TIMEOUT_MS}ms`,
     );
   });
@@ -850,10 +850,10 @@ describe('apiFetch', () => {
   // The signal aborts the body stream too, so a server that stalls after
   // sending headers rejects `response.json()` with the same TimeoutError —
   // it must translate to ApiTimeoutError just like a connection stall.
-  it('rejects with ApiTimeoutError when the body read stalls past the timeout', async () => {
+  it("rejects with ApiTimeoutError when the body read stalls past the timeout", async () => {
     const timeout = new DOMException(
-      'The operation timed out.',
-      'TimeoutError',
+      "The operation timed out.",
+      "TimeoutError",
     );
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -861,43 +861,43 @@ describe('apiFetch', () => {
     } as unknown as Response);
 
     await expect(
-      apiFetch('https://example.com/api/records'),
+      apiFetch("https://example.com/api/records"),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
   // undici can surface a mid-body timeout wrapped in a `TypeError`
   // ("terminated") with the real reason on `.cause`; the translation must
   // still recognize it or the sync silently degrades to an empty result.
-  it('translates a timeout wrapped in a cause chain', async () => {
-    const wrapped = new TypeError('terminated', {
-      cause: new DOMException('The operation timed out.', 'TimeoutError'),
+  it("translates a timeout wrapped in a cause chain", async () => {
+    const wrapped = new TypeError("terminated", {
+      cause: new DOMException("The operation timed out.", "TimeoutError"),
     });
     global.fetch = vi.fn().mockRejectedValue(wrapped);
 
     await expect(
-      apiFetch('https://example.com/api/records'),
+      apiFetch("https://example.com/api/records"),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
   // apiFetch owns the only signal, so any abort is the timeout firing —
   // including a plain AbortError-named DOMException some undici paths report.
-  it('translates a plain AbortError as a timeout', async () => {
+  it("translates a plain AbortError as a timeout", async () => {
     const aborted = new DOMException(
-      'This operation was aborted',
-      'AbortError',
+      "This operation was aborted",
+      "AbortError",
     );
     global.fetch = vi.fn().mockRejectedValue(aborted);
 
     await expect(
-      apiFetch('https://example.com/api/records'),
+      apiFetch("https://example.com/api/records"),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
-  it('lets a non-timeout error pass through unwrapped', async () => {
-    const networkError = new TypeError('fetch failed');
+  it("lets a non-timeout error pass through unwrapped", async () => {
+    const networkError = new TypeError("fetch failed");
     global.fetch = vi.fn().mockRejectedValue(networkError);
 
-    await expect(apiFetch('https://example.com/api/records')).rejects.toBe(
+    await expect(apiFetch("https://example.com/api/records")).rejects.toBe(
       networkError,
     );
   });
@@ -907,20 +907,20 @@ describe('apiFetch', () => {
   // so a self-referential cause whose names never match an abort terminates and
   // passes the original error through. Remove the bound and this test hangs
   // until vitest's per-test timeout fails it.
-  it('does not hang on a self-referential cause chain', async () => {
-    const looping = new TypeError('terminated') as TypeError & {
+  it("does not hang on a self-referential cause chain", async () => {
+    const looping = new TypeError("terminated") as TypeError & {
       cause: unknown;
     };
     looping.cause = looping;
     global.fetch = vi.fn().mockRejectedValue(looping);
 
-    await expect(apiFetch('https://example.com/api/records')).rejects.toBe(
+    await expect(apiFetch("https://example.com/api/records")).rejects.toBe(
       looping,
     );
   });
 });
 
-describe('logApiFailure', () => {
+describe("logApiFailure", () => {
   beforeEach(() => {
     vi.mocked(logErrorMessage).mockClear();
   });
@@ -928,94 +928,94 @@ describe('logApiFailure', () => {
   // The rethrow-vs-log split is the whole reason this seam exists: a timeout
   // must escape the resilient catch (fail loud) and must NOT also be logged as
   // a generic error, since callers like the sync log its reason themselves.
-  it('re-throws a timeout without logging it', () => {
-    const timeout = new ApiTimeoutError('https://example.com/api/records');
+  it("re-throws a timeout without logging it", () => {
+    const timeout = new ApiTimeoutError("https://example.com/api/records");
 
-    expect(() => logApiFailure('fetchThing', timeout)).toThrow(timeout);
+    expect(() => logApiFailure("fetchThing", timeout)).toThrow(timeout);
     expect(logErrorMessage).not.toHaveBeenCalled();
   });
 
-  it('logs the message of any non-timeout error without throwing', () => {
+  it("logs the message of any non-timeout error without throwing", () => {
     expect(() =>
-      logApiFailure('fetchThing', new Error('server error')),
+      logApiFailure("fetchThing", new Error("server error")),
     ).not.toThrow();
-    expect(logErrorMessage).toHaveBeenCalledWith('fetchThing', 'server error');
+    expect(logErrorMessage).toHaveBeenCalledWith("fetchThing", "server error");
   });
 
-  it('stringifies a non-Error thrown value when logging', () => {
-    expect(() => logApiFailure('fetchThing', 'boom')).not.toThrow();
-    expect(logErrorMessage).toHaveBeenCalledWith('fetchThing', 'boom');
+  it("stringifies a non-Error thrown value when logging", () => {
+    expect(() => logApiFailure("fetchThing", "boom")).not.toThrow();
+    expect(logErrorMessage).toHaveBeenCalledWith("fetchThing", "boom");
   });
 });
 
-describe('rethrowIfTimeout', () => {
-  it('re-throws an ApiTimeoutError so it escapes a resilient catch', () => {
-    const timeout = new ApiTimeoutError('https://example.com/api/records');
+describe("rethrowIfTimeout", () => {
+  it("re-throws an ApiTimeoutError so it escapes a resilient catch", () => {
+    const timeout = new ApiTimeoutError("https://example.com/api/records");
 
     expect(() => rethrowIfTimeout(timeout)).toThrow(timeout);
   });
 
-  it('returns without throwing for any other error', () => {
-    expect(() => rethrowIfTimeout(new Error('server error'))).not.toThrow();
-    expect(() => rethrowIfTimeout('boom')).not.toThrow();
+  it("returns without throwing for any other error", () => {
+    expect(() => rethrowIfTimeout(new Error("server error"))).not.toThrow();
+    expect(() => rethrowIfTimeout("boom")).not.toThrow();
   });
 });
 
-describe('describeRequestRejection', () => {
-  it('includes the status and server detail for a non-systemic 404 and 422 so they differ', () => {
+describe("describeRequestRejection", () => {
+  it("includes the status and server detail for a non-systemic 404 and 422 so they differ", () => {
     const notFound = describeRequestRejection(
-      new ApiRequestError('Not Found: No record was found', 404),
+      new ApiRequestError("Not Found: No record was found", 404),
     );
     const invalid = describeRequestRejection(
-      new ApiRequestError('Invalid Attribute: Title is too long', 422),
+      new ApiRequestError("Invalid Attribute: Title is too long", 422),
     );
 
     expect(notFound).toBe(
-      'Request failed (HTTP 404): Not Found: No record was found',
+      "Request failed (HTTP 404): Not Found: No record was found",
     );
     expect(invalid).toBe(
-      'Request failed (HTTP 422): Invalid Attribute: Title is too long',
+      "Request failed (HTTP 422): Invalid Attribute: Title is too long",
     );
   });
 
-  it('keeps the classified wording for a systemic failure', () => {
+  it("keeps the classified wording for a systemic failure", () => {
     expect(
-      describeRequestRejection(new ApiRequestError('Bad token', 401)),
-    ).toBe('Authentication failed (HTTP 401): Bad token');
+      describeRequestRejection(new ApiRequestError("Bad token", 401)),
+    ).toBe("Authentication failed (HTTP 401): Bad token");
   });
 
-  it('falls back to the raw message for a non-API error', () => {
-    expect(describeRequestRejection(new Error('Network error'))).toBe(
-      'Network error',
+  it("falls back to the raw message for a non-API error", () => {
+    expect(describeRequestRejection(new Error("Network error"))).toBe(
+      "Network error",
     );
   });
 });
 
-describe('authedRequest retry', () => {
+describe("authedRequest retry", () => {
   const failure = (status: number, retryAfter?: string) => ({
     ok: false,
     status,
-    headers: new Headers(retryAfter ? { 'Retry-After': retryAfter } : {}),
+    headers: new Headers(retryAfter ? { "Retry-After": retryAfter } : {}),
     json: () => Promise.resolve({ data: { errors: [] } }),
   });
   const success = {
     ok: true,
     status: 200,
     headers: new Headers(),
-    json: () => Promise.resolve({ data: 'ok' }),
+    json: () => Promise.resolve({ data: "ok" }),
   };
   const htmlFailure = (status: number) => ({
     ok: false,
     status,
     headers: new Headers(),
     json: () =>
-      Promise.reject(new SyntaxError('Unexpected token \'<\', "<html>"...')),
+      Promise.reject(new SyntaxError("Unexpected token '<', \"<html>\"...")),
   });
   const sleep = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
-    vi.stubEnv('BASE_URL', 'https://example.com');
-    vi.stubEnv('API_TOKEN', 'test-token');
+    vi.stubEnv("BASE_URL", "https://example.com");
+    vi.stubEnv("API_TOKEN", "test-token");
     sleep.mockClear();
   });
 
@@ -1024,111 +1024,111 @@ describe('authedRequest retry', () => {
     vi.unstubAllGlobals();
   });
 
-  it('retries a GET on 429 honoring Retry-After seconds, then succeeds', async () => {
+  it("retries a GET on 429 honoring Retry-After seconds, then succeeds", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(failure(429, '3'))
+      .mockResolvedValueOnce(failure(429, "3"))
       .mockResolvedValueOnce(success);
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
-    await expect(authedRequest('/api/records', {}, { sleep })).resolves.toEqual(
-      { data: 'ok' },
+    await expect(authedRequest("/api/records", {}, { sleep })).resolves.toEqual(
+      { data: "ok" },
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledExactlyOnceWith(3000);
   });
 
   it.each([502, 503, 504])(
-    'retries a GET on an HTML %i gateway body, then succeeds',
+    "retries a GET on an HTML %i gateway body, then succeeds",
     async (status) => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(htmlFailure(status))
         .mockResolvedValueOnce(success);
-      vi.stubGlobal('fetch', fetchMock);
+      vi.stubGlobal("fetch", fetchMock);
 
       await expect(
-        authedRequest('/api/records', {}, { sleep }),
-      ).resolves.toEqual({ data: 'ok' });
+        authedRequest("/api/records", {}, { sleep }),
+      ).resolves.toEqual({ data: "ok" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(sleep).toHaveBeenCalledExactlyOnceWith(BASE_RETRY_BACKOFF_MS);
     },
   );
 
-  it('surfaces a clear error for a non-retryable non-JSON status without retrying', async () => {
+  it("surfaces a clear error for a non-retryable non-JSON status without retrying", async () => {
     const fetchMock = vi.fn().mockResolvedValue(htmlFailure(400));
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
-    await expect(authedRequest('/api/records', {}, { sleep })).rejects.toThrow(
-      'The server returned a non-JSON error response (HTTP 400)',
+    await expect(authedRequest("/api/records", {}, { sleep })).rejects.toThrow(
+      "The server returned a non-JSON error response (HTTP 400)",
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
   });
 
-  it('does not retry a POST that hits an HTML 502', async () => {
+  it("does not retry a POST that hits an HTML 502", async () => {
     const fetchMock = vi.fn().mockResolvedValue(htmlFailure(502));
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      authedRequest('/api/records', { method: 'POST' }, { sleep }),
+      authedRequest("/api/records", { method: "POST" }, { sleep }),
     ).rejects.toMatchObject({ statusCode: 502 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
   });
 
-  it('gives up after the maximum attempts on a persistent HTML 503', async () => {
+  it("gives up after the maximum attempts on a persistent HTML 503", async () => {
     const fetchMock = vi.fn().mockResolvedValue(htmlFailure(503));
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      authedRequest('/api/records', {}, { sleep }),
+      authedRequest("/api/records", {}, { sleep }),
     ).rejects.toMatchObject({
-      name: 'ApiRequestError',
+      name: "ApiRequestError",
       statusCode: 503,
-      message: 'The server returned a non-JSON error response (HTTP 503)',
+      message: "The server returned a non-JSON error response (HTTP 503)",
     });
     expect(fetchMock).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS);
     expect(sleep).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS - 1);
   });
 
-  it('still reports a timeout that fires while reading a non-OK body', async () => {
+  it("still reports a timeout that fires while reading a non-OK body", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ...htmlFailure(503),
-      json: () => Promise.reject(new DOMException('timed out', 'TimeoutError')),
+      json: () => Promise.reject(new DOMException("timed out", "TimeoutError")),
     });
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      authedRequest('/api/records', {}, { sleep }),
+      authedRequest("/api/records", {}, { sleep }),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
   });
 
-  it('still throws a SyntaxError for an OK response with an unparseable body', async () => {
+  it("still throws a SyntaxError for an OK response with an unparseable body", async () => {
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn().mockResolvedValue({
         ...success,
-        json: () => Promise.reject(new SyntaxError('bad json')),
+        json: () => Promise.reject(new SyntaxError("bad json")),
       }),
     );
 
-    await expect(authedRequest('/api/records', {}, { sleep })).rejects.toThrow(
+    await expect(authedRequest("/api/records", {}, { sleep })).rejects.toThrow(
       SyntaxError,
     );
   });
 
-  it('retries a GET on 503 and on a plain 500 with exponential backoff', async () => {
+  it("retries a GET on 503 and on a plain 500 with exponential backoff", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(failure(500, '9'))
+      .mockResolvedValueOnce(failure(500, "9"))
       .mockResolvedValueOnce(failure(503))
       .mockResolvedValueOnce(success);
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
-    await authedRequest('/api/records', { method: 'GET' }, { sleep });
+    await authedRequest("/api/records", { method: "GET" }, { sleep });
 
     // 500 ignores Retry-After; 503 without the header falls back to backoff.
     expect(sleep.mock.calls).toEqual([
@@ -1137,41 +1137,41 @@ describe('authedRequest retry', () => {
     ]);
   });
 
-  it('honors Retry-After on 503 and returns headers from the final response', async () => {
+  it("honors Retry-After on 503 and returns headers from the final response", async () => {
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(failure(503, '2'))
+        .mockResolvedValueOnce(failure(503, "2"))
         .mockResolvedValueOnce({
           ...success,
-          headers: new Headers({ 'X-Final': 'yes' }),
+          headers: new Headers({ "X-Final": "yes" }),
         }),
     );
 
     const result = await authedRequestWithHeaders(
-      '/api/records',
+      "/api/records",
       {},
       { sleep },
     );
 
     expect(sleep).toHaveBeenCalledExactlyOnceWith(2000);
-    expect(result.headers.get('X-Final')).toBe('yes');
+    expect(result.headers.get("X-Final")).toBe("yes");
   });
 
-  it('honors an HTTP-date Retry-After', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(Date.parse('2026-01-01T00:00:00Z'));
+  it("honors an HTTP-date Retry-After", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-01-01T00:00:00Z"));
     try {
       vi.stubGlobal(
-        'fetch',
+        "fetch",
         vi
           .fn()
-          .mockResolvedValueOnce(failure(429, 'Thu, 01 Jan 2026 00:00:04 GMT'))
+          .mockResolvedValueOnce(failure(429, "Thu, 01 Jan 2026 00:00:04 GMT"))
           .mockResolvedValueOnce(success),
       );
 
-      await authedRequest('/api/records', {}, { sleep });
+      await authedRequest("/api/records", {}, { sleep });
 
       expect(sleep).toHaveBeenCalledExactlyOnceWith(4000);
     } finally {
@@ -1179,67 +1179,67 @@ describe('authedRequest retry', () => {
     }
   });
 
-  it('falls back to backoff when Retry-After is unparseable', async () => {
+  it("falls back to backoff when Retry-After is unparseable", async () => {
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(failure(429, 'soon'))
+        .mockResolvedValueOnce(failure(429, "soon"))
         .mockResolvedValueOnce(success),
     );
 
-    await authedRequest('/api/records', {}, { sleep });
+    await authedRequest("/api/records", {}, { sleep });
 
     expect(sleep).toHaveBeenCalledExactlyOnceWith(BASE_RETRY_BACKOFF_MS);
   });
 
-  it('retries a lowercase get, honors Retry-After 0, and stops on a non-retryable follow-up', async () => {
+  it("retries a lowercase get, honors Retry-After 0, and stops on a non-retryable follow-up", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(failure(503, '0'))
+      .mockResolvedValueOnce(failure(503, "0"))
       .mockResolvedValueOnce(failure(404));
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      authedRequest('/api/records', { method: 'get' }, { sleep }),
+      authedRequest("/api/records", { method: "get" }, { sleep }),
     ).rejects.toMatchObject({ statusCode: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledExactlyOnceWith(0);
   });
 
-  it('caps the wait so a hostile Retry-After cannot stall the sync', async () => {
+  it("caps the wait so a hostile Retry-After cannot stall the sync", async () => {
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(failure(429, '86400'))
+        .mockResolvedValueOnce(failure(429, "86400"))
         .mockResolvedValueOnce(success),
     );
 
-    await authedRequest('/api/records', {}, { sleep });
+    await authedRequest("/api/records", {}, { sleep });
 
     expect(sleep).toHaveBeenCalledExactlyOnceWith(MAX_RETRY_WAIT_MS);
   });
 
-  it('gives up after the attempt cap and throws the final error', async () => {
+  it("gives up after the attempt cap and throws the final error", async () => {
     const fetchMock = vi.fn().mockResolvedValue(failure(503));
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      authedRequest('/api/records', {}, { sleep }),
+      authedRequest("/api/records", {}, { sleep }),
     ).rejects.toMatchObject({ statusCode: 503 });
     expect(fetchMock).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS);
     expect(sleep).toHaveBeenCalledTimes(MAX_GET_ATTEMPTS - 1);
   });
 
-  it.each(['POST', 'PATCH', 'DELETE', 'PUT'])(
-    'never retries a %s request',
+  it.each(["POST", "PATCH", "DELETE", "PUT"])(
+    "never retries a %s request",
     async (method) => {
-      const fetchMock = vi.fn().mockResolvedValue(failure(429, '1'));
-      vi.stubGlobal('fetch', fetchMock);
+      const fetchMock = vi.fn().mockResolvedValue(failure(429, "1"));
+      vi.stubGlobal("fetch", fetchMock);
 
       await expect(
-        authedRequest('/api/records', { method }, { sleep }),
+        authedRequest("/api/records", { method }, { sleep }),
       ).rejects.toMatchObject({ statusCode: 429 });
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(sleep).not.toHaveBeenCalled();
@@ -1247,13 +1247,13 @@ describe('authedRequest retry', () => {
   );
 
   it.each([401, 403, 404, 422])(
-    'does not retry a GET on %i',
+    "does not retry a GET on %i",
     async (status) => {
       const fetchMock = vi.fn().mockResolvedValue(failure(status));
-      vi.stubGlobal('fetch', fetchMock);
+      vi.stubGlobal("fetch", fetchMock);
 
       await expect(
-        authedRequest('/api/records', {}, { sleep }),
+        authedRequest("/api/records", {}, { sleep }),
       ).rejects.toMatchObject({ statusCode: status });
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(sleep).not.toHaveBeenCalled();
@@ -1261,25 +1261,25 @@ describe('authedRequest retry', () => {
   );
 });
 
-describe('parseRetryAfterMs', () => {
-  const now = Date.parse('2026-01-01T00:00:00Z');
+describe("parseRetryAfterMs", () => {
+  const now = Date.parse("2026-01-01T00:00:00Z");
 
-  it('parses delta-seconds', () => {
-    expect(parseRetryAfterMs('120', now)).toBe(120_000);
+  it("parses delta-seconds", () => {
+    expect(parseRetryAfterMs("120", now)).toBe(120_000);
   });
 
-  it('parses an HTTP-date relative to now', () => {
-    expect(parseRetryAfterMs('Thu, 01 Jan 2026 00:00:30 GMT', now)).toBe(
+  it("parses an HTTP-date relative to now", () => {
+    expect(parseRetryAfterMs("Thu, 01 Jan 2026 00:00:30 GMT", now)).toBe(
       30_000,
     );
   });
 
-  it('clamps a past HTTP-date to zero', () => {
-    expect(parseRetryAfterMs('Wed, 31 Dec 2025 23:00:00 GMT', now)).toBe(0);
+  it("clamps a past HTTP-date to zero", () => {
+    expect(parseRetryAfterMs("Wed, 31 Dec 2025 23:00:00 GMT", now)).toBe(0);
   });
 
-  it.each([null, undefined, '', '  ', 'soon', 'foo 1', '-5', '1.5'])(
-    'returns null for garbage value %j',
+  it.each([null, undefined, "", "  ", "soon", "foo 1", "-5", "1.5"])(
+    "returns null for garbage value %j",
     (value) => {
       expect(parseRetryAfterMs(value, now)).toBeNull();
     },

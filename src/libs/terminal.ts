@@ -45,7 +45,7 @@ function isDangerousControlCode(codePoint: number): boolean {
 // non-string (or null). Coercing here — one place — keeps callers from having
 // to guard, and stops `Array.from` throwing on null/undefined.
 function sanitize(value: unknown, allowLineBreaks: boolean): string {
-  return Array.from(String(value ?? ''), (character) => {
+  return Array.from(String(value ?? ""), (character) => {
     const codePoint = character.codePointAt(0) ?? 0;
 
     if (
@@ -58,11 +58,11 @@ function sanitize(value: unknown, allowLineBreaks: boolean): string {
     // Drop CR outright in the block path so a CRLF body keeps clean `\n`
     // breaks instead of gaining a trailing space on every line.
     if (allowLineBreaks && codePoint === CARRIAGE_RETURN_CODE) {
-      return '';
+      return "";
     }
 
-    return isDangerousControlCode(codePoint) ? ' ' : character;
-  }).join('');
+    return isDangerousControlCode(codePoint) ? " " : character;
+  }).join("");
 }
 
 // Single-line fields: strips every control character, including LF/TAB. Any
@@ -121,7 +121,7 @@ export function confirmRefusal(
     subcommand,
     argument,
     verb,
-    requirement = '--yes',
+    requirement = "--yes",
   } = options;
   return `\`${command} ${subcommand}\` needs an interactive terminal to confirm; pass ${requirement} (\`markpost ${command} ${subcommand} ${argument} --yes\`) to ${verb} without a prompt.`;
 }
@@ -129,5 +129,5 @@ export function confirmRefusal(
 // A deliberate Ctrl+C at an @inquirer prompt throws `ExitPromptError`. That is
 // a user abort, not a command failure, so callers swallow it and exit quietly.
 export function isPromptAbort(error: unknown): boolean {
-  return error instanceof Error && error.name === 'ExitPromptError';
+  return error instanceof Error && error.name === "ExitPromptError";
 }

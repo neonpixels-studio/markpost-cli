@@ -1,16 +1,16 @@
-import type { ApiResourceObject, ApiResponse } from '#src/types/api.types.js';
+import type { ApiResourceObject, ApiResponse } from "#src/types/api.types.js";
 
 // Mirrors markpost's canonical source-type list (shared/utils/sourceTypes.ts).
 // Keep in lockstep: the server rejects any type absent here with a 400. RSS was
 // dropped in markpost#116 (no polling infrastructure to ingest it), so it must
 // stay out of this list — see tests/types/sources.types.test.ts.
 export const SOURCE_TYPES = [
-  'webhook',
-  'email',
-  'stripe',
-  'github',
-  'zapier',
-  'shortcuts',
+  "webhook",
+  "email",
+  "stripe",
+  "github",
+  "zapier",
+  "shortcuts",
 ] as const;
 
 export type SourceType = (typeof SOURCE_TYPES)[number];
@@ -20,15 +20,15 @@ export type SourceType = (typeof SOURCE_TYPES)[number];
 // Mirrors markpost's MANUAL_SECRET_PROVIDER_IDS
 // (shared/utils/webhookSecrets.ts); keep in lockstep — see
 // tests/types/sources.types.test.ts.
-export const MANUAL_SECRET_PROVIDERS = ['stripe'] as const;
+export const MANUAL_SECRET_PROVIDERS = ["stripe"] as const;
 
 // Providers whose secret markpost generates and reveals exactly once on
 // rotation. Mirrors markpost's SECRET_BACKED_PROVIDER_IDS
 // (shared/utils/webhookSecrets.ts); keep in lockstep.
 export const SECRET_BACKED_PROVIDERS = [
-  'github',
-  'zapier',
-  'shortcuts',
+  "github",
+  "zapier",
+  "shortcuts",
 ] as const;
 
 // Every provider a source can rotate a secret for — the union of the manual
@@ -52,7 +52,7 @@ export const isRotatableProvider = (
   provider !== null &&
   (ROTATABLE_PROVIDERS as readonly string[]).includes(provider);
 
-export const EMAIL_SOURCE_TYPE: SourceType = 'email';
+export const EMAIL_SOURCE_TYPE: SourceType = "email";
 
 // Mirrors markpost's isSourceEndpointRotatable (shared/utils/sourceTypes.ts):
 // email-in addresses are a mailbox handed to senders, not a URL credential, so
@@ -103,12 +103,12 @@ export type CreatedSource = Source & {
 // lockstep by hand; a key added upstream without a matching prompt in
 // src/commands/sources.ts silently can't be configured from the CLI.
 export const FIELD_MAPPING_KEYS = [
-  'title',
-  'content',
-  'html',
-  'source',
-  'tags',
-  'created',
+  "title",
+  "content",
+  "html",
+  "source",
+  "tags",
+  "created",
 ] as const;
 
 export type FieldMappingKey = (typeof FIELD_MAPPING_KEYS)[number];
@@ -149,7 +149,7 @@ export type RotateSourceSecretInput = {
 // (`server/utils/response.ts`) actually produces for a source: `attributes`
 // plus the `type`/`id`/`links` envelope fields the old `ApiData` type dropped.
 export type SourceResource = ApiResourceObject & {
-  type: 'sources';
+  type: "sources";
   attributes: Source;
 };
 
@@ -159,7 +159,7 @@ export type SourceListApiResponse = ApiResponse<SourceResource[]>;
 // reveals `providerSecret`, so their resource attributes are `CreatedSource`,
 // not the base `Source`.
 export type CreatedSourceResource = ApiResourceObject & {
-  type: 'sources';
+  type: "sources";
   attributes: CreatedSource;
 };
 
@@ -178,7 +178,7 @@ export type SourceTestInput = {
 // whose plaintext markpost only stores as a one-way hash, so it can't be
 // re-signed server-side). See test.post.ts for the exact semantics.
 export type SourceTestSignatureStatus =
-  'not_required' | 'verified' | 'failed' | 'not_verifiable';
+  "not_required" | "verified" | "failed" | "not_verifiable";
 
 export type SourceTestSignatureCheck = {
   status: SourceTestSignatureStatus;
@@ -214,6 +214,6 @@ export type SourceTestResult = {
 // never be referenced — see `SourceListApiResponse`, which is used, for the
 // contrast.)
 export type SourceTestResource = ApiResourceObject & {
-  type: 'sourceTestEvents';
+  type: "sourceTestEvents";
   attributes: SourceTestResult;
 };

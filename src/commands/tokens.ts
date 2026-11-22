@@ -1,34 +1,34 @@
-import { parseArgs } from 'node:util';
-import chalk from 'chalk';
-import { confirm } from '@inquirer/prompts';
+import { parseArgs } from "node:util";
+import chalk from "chalk";
+import { confirm } from "@inquirer/prompts";
 import {
   createToken,
   fetchTokens,
   revokeToken,
   updateTokenScopes,
-} from '#src/libs/tokens.js';
-import { parseScopesFlag } from '#src/libs/scopes.js';
-import { checkConfig } from '#src/libs/config.js';
-import { getApiToken } from '#src/libs/api.js';
-import { failWithMessage } from '#src/libs/errors.js';
+} from "#src/libs/tokens.js";
+import { parseScopesFlag } from "#src/libs/scopes.js";
+import { checkConfig } from "#src/libs/config.js";
+import { getApiToken } from "#src/libs/api.js";
+import { failWithMessage } from "#src/libs/errors.js";
 import {
   confirmRefusal,
   isInteractiveTerminal,
   isPromptAbort,
   sanitizeForTerminal,
-} from '#src/libs/terminal.js';
+} from "#src/libs/terminal.js";
 import {
   failWithSubcommandUsage,
   failWithUsage,
   parseOrFailWithUsage,
-} from '#src/libs/usage.js';
-import { hasJsonFlag, printJson } from '#src/libs/output.js';
+} from "#src/libs/usage.js";
+import { hasJsonFlag, printJson } from "#src/libs/output.js";
 import {
   findLostCommandScopes,
   formatLostScopesWarning,
-} from '#src/libs/token-scopes.js';
-import { CreateTokenInput, Token } from '#src/types/tokens.types.js';
-import type { ScopeName } from '#src/types/vendor/markpost-scopes.generated.js';
+} from "#src/libs/token-scopes.js";
+import { CreateTokenInput, Token } from "#src/types/tokens.types.js";
+import type { ScopeName } from "#src/types/vendor/markpost-scopes.generated.js";
 
 export const USAGE = `Usage: markpost tokens <list|create|update|revoke> [id] [--yes]
 
@@ -39,12 +39,12 @@ export const USAGE = `Usage: markpost tokens <list|create|update|revoke> [id] [-
                                                    Replace an existing token's scopes, or restore full access, without rotating its secret (pass --json for machine-readable output). When it narrows the token this CLI is configured with, asks to confirm first; pass --yes to skip the prompt (for scripts)
   revoke <id>                                      Revoke an API token by id. Asks to confirm first (revoking is irreversible); pass --yes to skip the prompt (for scripts)`;
 
-const LIST_SUBCOMMAND = 'list';
-const CREATE_SUBCOMMAND = 'create';
-const UPDATE_SUBCOMMAND = 'update';
+const LIST_SUBCOMMAND = "list";
+const CREATE_SUBCOMMAND = "create";
+const UPDATE_SUBCOMMAND = "update";
 // `revoke` is the only subcommand `--yes` applies to, so it's named for the
 // guard that rejects the flag elsewhere as well as its handler-map key.
-const REVOKE_SUBCOMMAND = 'revoke';
+const REVOKE_SUBCOMMAND = "revoke";
 
 // The confirmation escape hatch, read straight from argv the same way
 // `hasJsonFlag` reads `--json`, so the runner can reject it on the wrong
@@ -52,8 +52,8 @@ const REVOKE_SUBCOMMAND = 'revoke';
 // reaches the same outcome via a single unified `parseArgs` call instead;
 // this file keeps `--json` and `--yes` consistent with each other rather
 // than matching that mechanism exactly.
-const YES_FLAG = '--yes';
-const ARGS_TERMINATOR = '--';
+const YES_FLAG = "--yes";
+const ARGS_TERMINATOR = "--";
 
 // Unlike a plain `args.includes(YES_FLAG)`, this stops scanning at a literal
 // `--`, so `tokens revoke -- --yes` (an id that happens to be the string
@@ -70,13 +70,13 @@ const JSON_SUBCOMMANDS = new Set([LIST_SUBCOMMAND, UPDATE_SUBCOMMAND]);
 const YES_SUBCOMMANDS = new Set([UPDATE_SUBCOMMAND, REVOKE_SUBCOMMAND]);
 
 const TOKEN_SECRET_NOTICE =
-  'API token (shown once — copy it now, it cannot be retrieved later):';
+  "API token (shown once — copy it now, it cannot be retrieved later):";
 
 // markpost reveals the freshly minted raw secret exactly once, in the create
 // response only (never list). Mirrors `printProviderSecret` in
 // commands/sources.ts.
 const printTokenSecret = (token: string): void => {
-  console.log('');
+  console.log("");
   console.log(chalk.yellowBright(`  ${TOKEN_SECRET_NOTICE}`));
   // The secret is untrusted API output like every other field printToken
   // handles, so it's sanitized too.
@@ -96,7 +96,7 @@ const sanitizedOrFallback = (
 // fallback handles the display text. Split out so the scopes print line
 // below isn't a nested ternary.
 const formatScopes = (scopes: string[] | null): string | null =>
-  scopes && scopes.length > 0 ? scopes.join(', ') : null;
+  scopes && scopes.length > 0 ? scopes.join(", ") : null;
 
 // Every field here comes from the untrusted API response, so each is
 // stripped of control/ANSI escapes before printing (see terminal.ts). Prints
@@ -108,12 +108,12 @@ const printToken = (token: Token): void => {
   console.log(`  id:         ${sanitizeForTerminal(token.id)}`);
   console.log(`  prefix:     ${sanitizeForTerminal(token.prefix)}`);
   console.log(`  created:    ${sanitizeForTerminal(token.createdAt)}`);
-  console.log(`  expires:    ${sanitizedOrFallback(token.expiresAt, 'never')}`);
+  console.log(`  expires:    ${sanitizedOrFallback(token.expiresAt, "never")}`);
   console.log(
-    `  last used:  ${sanitizedOrFallback(token.lastUsedAt, 'never used')}`,
+    `  last used:  ${sanitizedOrFallback(token.lastUsedAt, "never used")}`,
   );
   console.log(
-    `  scopes:     ${sanitizedOrFallback(formatScopes(token.scopes), 'full access')}`,
+    `  scopes:     ${sanitizedOrFallback(formatScopes(token.scopes), "full access")}`,
   );
 };
 
@@ -139,7 +139,7 @@ const serializeTokenForJson = (token: Token): Required<Token> => ({
 // silently running the plain-text path with exit 0 — the same guarantee
 // `create` and `revoke` already have for their own arguments (issue #218).
 const parseListArgs = (rest: string[]) =>
-  parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+  parseArgs({ args: rest, options: { json: { type: "boolean" } } });
 
 const listTokensCommand = async (
   rest: string[],
@@ -159,7 +159,7 @@ const listTokensCommand = async (
   }
 
   if (tokens.length === 0) {
-    console.log('No API tokens found.');
+    console.log("No API tokens found.");
     return;
   }
 
@@ -199,9 +199,9 @@ const parseCreateArgs = (rest: string[]) =>
   parseArgs({
     args: rest,
     options: {
-      name: { type: 'string' },
-      'expires-in-days': { type: 'string' },
-      scopes: { type: 'string' },
+      name: { type: "string" },
+      "expires-in-days": { type: "string" },
+      scopes: { type: "string" },
     },
   });
 
@@ -215,15 +215,15 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
   const { values } = parsed;
 
   if (!values.name) {
-    failWithUsage('`tokens create` requires --name <name>.', USAGE);
+    failWithUsage("`tokens create` requires --name <name>.", USAGE);
     return;
   }
 
-  const expiresInDays = resolveExpiresInDays(values['expires-in-days']);
+  const expiresInDays = resolveExpiresInDays(values["expires-in-days"]);
 
   if (expiresInDays === null) {
     failWithUsage(
-      `--expires-in-days must be a whole number, got \`${values['expires-in-days']}\`.`,
+      `--expires-in-days must be a whole number, got \`${values["expires-in-days"]}\`.`,
       USAGE,
     );
     return;
@@ -252,7 +252,7 @@ const createTokenCommand = async (rest: string[]): Promise<void> => {
     // console.error) so a scripted `tokens create ... || alert` catches the
     // failure via a non-zero exit instead of reading it as success.
     failWithMessage(
-      'Failed to create token. Run `markpost tokens list` to check whether it was created anyway — if it was, its one-time secret is unrecoverable, so revoke it and run `tokens create` again to mint a new one.',
+      "Failed to create token. Run `markpost tokens list` to check whether it was created anyway — if it was, its one-time secret is unrecoverable, so revoke it and run `tokens create` again to mint a new one.",
     );
     return;
   }
@@ -287,10 +287,10 @@ const parseUpdateArgs = (rest: string[]) =>
     args: rest,
     allowPositionals: true,
     options: {
-      scopes: { type: 'string' },
-      'full-access': { type: 'boolean' },
-      json: { type: 'boolean' },
-      yes: { type: 'boolean' },
+      scopes: { type: "string" },
+      "full-access": { type: "boolean" },
+      json: { type: "boolean" },
+      yes: { type: "boolean" },
     },
   });
 
@@ -310,18 +310,18 @@ const resolveUpdateInvocation = (
 
   if (!id || extraPositionals.length > 0) {
     failWithUsage(
-      '`tokens update` takes exactly one id: `markpost tokens update <id> --scopes <a,b>`.',
+      "`tokens update` takes exactly one id: `markpost tokens update <id> --scopes <a,b>`.",
       USAGE,
       json,
     );
     return null;
   }
 
-  const fullAccess = parsed.values['full-access'] === true;
+  const fullAccess = parsed.values["full-access"] === true;
 
   if (fullAccess && parsed.values.scopes !== undefined) {
     failWithUsage(
-      '`tokens update` takes either --scopes <a,b> or --full-access, not both.',
+      "`tokens update` takes either --scopes <a,b> or --full-access, not both.",
       USAGE,
       json,
     );
@@ -334,7 +334,7 @@ const resolveUpdateInvocation = (
 
   if (parsed.values.scopes === undefined) {
     failWithUsage(
-      '`tokens update` requires --scopes <a,b> or --full-access.',
+      "`tokens update` requires --scopes <a,b> or --full-access.",
       USAGE,
       json,
     );
@@ -391,7 +391,7 @@ const narrowingWarningFor = async (
 };
 
 const NARROWING_NEEDS_CONFIRMATION =
-  'Refusing to narrow the configured token without confirmation; pass --yes (`markpost tokens update <id> --scopes <a,b> --yes`) to proceed.';
+  "Refusing to narrow the configured token without confirmation; pass --yes (`markpost tokens update <id> --scopes <a,b> --yes`) to proceed.";
 
 // Prints the warning to stderr, then: --yes proceeds, an interactive terminal
 // gets a confirm prompt (default no), anything else refuses rather than hang
@@ -413,12 +413,12 @@ const confirmNarrowing = async (
   }
 
   const confirmed = await confirm({
-    message: 'Update the token anyway?',
+    message: "Update the token anyway?",
     default: false,
   });
 
   if (!confirmed) {
-    console.log('Update cancelled.');
+    console.log("Update cancelled.");
   }
 
   return confirmed;
@@ -452,7 +452,7 @@ const updateTokenCommand = async (
   });
 
   if (!updated) {
-    failWithMessage('Failed to update token.', json);
+    failWithMessage("Failed to update token.", json);
     return;
   }
 
@@ -505,8 +505,8 @@ const isConfiguredToken = (token: Token): boolean => {
 // falls back to the bare id rather than blocking a revoke that would
 // otherwise succeed. The three outcomes stay distinct so a failed load is
 // never mis-reported as a confirmed non-match.
-const LOOKUP_FAILED_NOTE = 'token name unavailable — could not load the list';
-const NO_MATCH_NOTE = 'no matching token found';
+const LOOKUP_FAILED_NOTE = "token name unavailable — could not load the list";
+const NO_MATCH_NOTE = "no matching token found";
 
 type RevokeConfirmation = {
   label: string;
@@ -539,13 +539,13 @@ const revokeConfirmationDetails = async (
 // flow stays unit-testable by mocking the prompt — mirrors `confirmDeletion`
 // in commands/sources.ts.
 const CONFIGURED_TOKEN_WARNING =
-  'WARNING: this is the token this CLI is currently configured with — revoking it will lock this CLI out until you set a new one, either by exporting API_TOKEN or with `markpost config set apiToken <token>`.';
+  "WARNING: this is the token this CLI is currently configured with — revoking it will lock this CLI out until you set a new one, either by exporting API_TOKEN or with `markpost config set apiToken <token>`.";
 
 const confirmRevocation = async (
   label: string,
   isConfigured: boolean,
 ): Promise<boolean> => {
-  const configuredWarning = isConfigured ? ` ${CONFIGURED_TOKEN_WARNING}` : '';
+  const configuredWarning = isConfigured ? ` ${CONFIGURED_TOKEN_WARNING}` : "";
 
   return confirm({
     message: `Revoke token ${sanitizeForTerminal(
@@ -570,7 +570,7 @@ const parseRevokeArgs = (rest: string[]) =>
   parseArgs({
     args: rest,
     allowPositionals: true,
-    options: { yes: { type: 'boolean' } },
+    options: { yes: { type: "boolean" } },
   });
 
 const revokeTokenCommand = async (
@@ -594,7 +594,7 @@ const revokeTokenCommand = async (
 
   if (!id || extraPositionals.length > 0) {
     failWithUsage(
-      '`tokens revoke` takes exactly one id: `markpost tokens revoke <id>`.',
+      "`tokens revoke` takes exactly one id: `markpost tokens revoke <id>`.",
       USAGE,
     );
     return;
@@ -603,7 +603,7 @@ const revokeTokenCommand = async (
   const confirmed = skipConfirm || (await confirmTokenRevocation(id));
 
   if (!confirmed) {
-    console.log('Revocation cancelled.');
+    console.log("Revocation cancelled.");
     return;
   }
 
@@ -612,7 +612,7 @@ const revokeTokenCommand = async (
   if (!revoked) {
     // Exit non-zero so a scripted `revoke <id> || notify` catches a failed
     // revoke instead of reading it as done.
-    failWithMessage('Failed to revoke token.');
+    failWithMessage("Failed to revoke token.");
     return;
   }
 
@@ -653,7 +653,7 @@ const revokeIdGiven = (rest: string[]): boolean => {
     const { positionals } = parseArgs({
       args: rest,
       allowPositionals: true,
-      options: { yes: { type: 'boolean' } },
+      options: { yes: { type: "boolean" } },
     });
     return positionals.length > 0;
   } catch {
@@ -680,7 +680,7 @@ const usageErrorFor = (
   if (json && !JSON_SUBCOMMANDS.has(subcommand)) {
     const supported = [...JSON_SUBCOMMANDS]
       .map((name) => `\`tokens ${name}\``)
-      .join(' and ');
+      .join(" and ");
     return `--json is only supported by ${supported}.`;
   }
 
@@ -705,11 +705,11 @@ const usageErrorFor = (
   if (subcommand === REVOKE_SUBCOMMAND) {
     return confirmRefusal(
       {
-        command: 'tokens',
+        command: "tokens",
         subcommand: REVOKE_SUBCOMMAND,
-        argument: '<id>',
-        verb: 'revoke',
-        requirement: 'an id with --yes',
+        argument: "<id>",
+        verb: "revoke",
+        requirement: "an id with --yes",
       },
       { skipConfirm, isInteractive },
     );

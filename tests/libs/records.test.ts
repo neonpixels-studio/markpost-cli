@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createRecord,
@@ -14,21 +14,21 @@ import {
   MAX_DELETE_BATCH_SIZE,
   MAX_MARK_SYNCED_BATCH_SIZE,
   updateRecord,
-} from '#src/libs/records.js';
+} from "#src/libs/records.js";
 import {
   ApiTimeoutError,
   InvalidBaseUrlError,
   MAX_GET_ATTEMPTS,
-} from '#src/libs/api.js';
-import { ApiDeleteMeta } from '#src/types/api.types.js';
-import { Record } from '#src/types/records.types.js';
+} from "#src/libs/api.js";
+import { ApiDeleteMeta } from "#src/types/api.types.js";
+import { Record } from "#src/types/records.types.js";
 
 // #src/libs/api.js imports #src/libs/config.js, which constructs a real
 // `conf`-backed store (touching the developer's actual config directory) as
 // soon as it's loaded. Mock it so loading api.js doesn't pull in that side
 // effect — the stubbed API_TOKEN below resolves the token before the store is
 // consulted.
-vi.mock('#src/libs/config.js', () => ({
+vi.mock("#src/libs/config.js", () => ({
   config: { get: vi.fn() },
 }));
 
@@ -42,8 +42,8 @@ vi.mock('#src/libs/config.js', () => ({
 // production error-parsing logic instead of a hand-copied stand-in that could
 // silently drift from it.
 beforeEach(() => {
-  vi.stubEnv('BASE_URL', 'https://example.com');
-  vi.stubEnv('API_TOKEN', 'test-token');
+  vi.stubEnv("BASE_URL", "https://example.com");
+  vi.stubEnv("API_TOKEN", "test-token");
 });
 
 afterEach(() => {
@@ -51,10 +51,10 @@ afterEach(() => {
 });
 
 const mockRecord: Record = {
-  uuid: 'abc-123',
-  title: 'Test Title',
-  content: 'Test Content',
-  createdAt: '2024-01-01T00:00:00Z',
+  uuid: "abc-123",
+  title: "Test Title",
+  content: "Test Content",
+  createdAt: "2024-01-01T00:00:00Z",
 };
 
 const mockMeta: ApiDeleteMeta = { deleted: 1 };
@@ -71,31 +71,31 @@ function mockFetch(responseBody: object, ok = true) {
 function mockFetchTimeout() {
   global.fetch = vi
     .fn()
-    .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    .mockRejectedValue(new DOMException("timed out", "TimeoutError"));
 }
 
 const mockRecord2: Record = {
-  uuid: 'def-456',
-  title: 'Test Title 2',
-  content: 'Test Content 2',
-  createdAt: '2024-01-02T00:00:00Z',
+  uuid: "def-456",
+  title: "Test Title 2",
+  content: "Test Content 2",
+  createdAt: "2024-01-02T00:00:00Z",
 };
 
-describe('fetchAllRecords', () => {
+describe("fetchAllRecords", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   // A failed INITIAL fetch must surface as `{ ok: false }` — never an empty
   // array, which the caller can't tell apart from a legitimately empty account
   // and would report as "No new records" while exiting 0 (issue #63).
-  it('returns { ok: false } when the initial fetch fails', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("returns { ok: false } when the initial fetch fails", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
     expect(await fetchAllRecords()).toEqual({ ok: false });
   });
 
-  it('rejects with InvalidBaseUrlError in --json mode instead of a generic failure', async () => {
-    vi.stubEnv('BASE_URL', 'http://example.com');
+  it("rejects with InvalidBaseUrlError in --json mode instead of a generic failure", async () => {
+    vi.stubEnv("BASE_URL", "http://example.com");
     global.fetch = vi.fn();
 
     try {
@@ -111,22 +111,22 @@ describe('fetchAllRecords', () => {
   // markpost answers an invalid filter[source] with a 400; that must surface as
   // `{ ok: false }`, never an empty array the caller renders as "No records
   // found." — the same silent-failure concern as a network error above.
-  it('returns { ok: false } when the server rejects the request (e.g. an invalid filter)', async () => {
+  it("returns { ok: false } when the server rejects the request (e.g. an invalid filter)", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       json: () =>
         Promise.resolve({
           errors: [
             {
-              status: '400',
-              title: 'Invalid filter[source]',
-              detail: 'filter[source] must be one of: webhook, email',
+              status: "400",
+              title: "Invalid filter[source]",
+              detail: "filter[source] must be one of: webhook, email",
             },
           ],
         }),
     });
 
-    expect(await fetchAllRecords({ source: 'bogus' })).toEqual({ ok: false });
+    expect(await fetchAllRecords({ source: "bogus" })).toEqual({ ok: false });
   });
 
   // A systemic auth (401) failure on the initial page must PROPAGATE (like a
@@ -134,7 +134,7 @@ describe('fetchAllRecords', () => {
   // real, classified cause (expired token) instead of a generic failed-fetch
   // message (issue #89). Distinct from a 400 filter rejection above, which
   // stays `{ ok: false }`.
-  it('propagates a systemic auth (401) failure instead of returning { ok: false }', async () => {
+  it("propagates a systemic auth (401) failure instead of returning { ok: false }", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -150,7 +150,7 @@ describe('fetchAllRecords', () => {
   // A systemic failure partway through pagination must fail loud — discard the
   // pages already collected and propagate — never return page 1 as if complete
   // (mirrors the mid-pagination timeout behavior).
-  it('propagates a systemic failure that strikes on a later page', async () => {
+  it("propagates a systemic failure that strikes on a later page", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -160,7 +160,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=abc-123&page[size]=1',
+              next: "/api/records?page[after]=abc-123&page[size]=1",
               prev: null,
             },
           }),
@@ -187,7 +187,7 @@ describe('fetchAllRecords', () => {
   });
 
   // A legitimately empty account is a success, distinct from a failed fetch.
-  it('returns { ok: true, records: [] } when the account has no records', async () => {
+  it("returns { ok: true, records: [] } when the account has no records", async () => {
     mockFetch({
       data: [],
       meta: { total: 0, size: 100, hasMore: false },
@@ -200,7 +200,7 @@ describe('fetchAllRecords', () => {
     });
   });
 
-  it('returns records directly when there is only one page', async () => {
+  it("returns records directly when there is only one page", async () => {
     mockFetch({
       data: [{ attributes: mockRecord }],
       meta: { total: 1, size: 100, hasMore: false },
@@ -219,7 +219,7 @@ describe('fetchAllRecords', () => {
   // is null (a malformed `links` is defaulted to `next: null` upstream). That
   // is still a truncation, so the read must be flagged `partial: true` rather
   // than reported complete.
-  it('flags partial when meta.hasMore is true but links.next is null', async () => {
+  it("flags partial when meta.hasMore is true but links.next is null", async () => {
     mockFetch({
       data: [{ attributes: mockRecord }],
       meta: { total: 2, size: 1, hasMore: true },
@@ -234,7 +234,7 @@ describe('fetchAllRecords', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('follows links.next until hasMore is false, combining all pages', async () => {
+  it("follows links.next until hasMore is false, combining all pages", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -244,7 +244,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=abc-123&page[size]=1',
+              next: "/api/records?page[after]=abc-123&page[size]=1",
               prev: null,
             },
           }),
@@ -269,14 +269,14 @@ describe('fetchAllRecords', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123',
+      "https://example.com/api/records?page[size]=100&page[after]=abc-123",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('threads the filters into every page request', async () => {
+  it("threads the filters into every page request", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -286,7 +286,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=abc-123&page[size]=1',
+              next: "/api/records?page[after]=abc-123&page[size]=1",
               prev: null,
             },
           }),
@@ -301,30 +301,30 @@ describe('fetchAllRecords', () => {
           }),
       });
 
-    await fetchAllRecords({ source: 'webhook', status: 'pending' });
+    await fetchAllRecords({ source: "webhook", status: "pending" });
 
     expect(global.fetch).toHaveBeenNthCalledWith(
       1,
-      'https://example.com/api/records?page[size]=100&filter[source]=webhook&filter[status]=pending',
+      "https://example.com/api/records?page[size]=100&filter[source]=webhook&filter[status]=pending",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[source]=webhook&filter[status]=pending',
+      "https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[source]=webhook&filter[status]=pending",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('keeps following the cursor across more than two pages', async () => {
+  it("keeps following the cursor across more than two pages", async () => {
     const mockRecord3: Record = {
-      uuid: 'ghi-789',
-      title: 'Test Title 3',
-      content: 'Test Content 3',
-      createdAt: '2024-01-03T00:00:00Z',
+      uuid: "ghi-789",
+      title: "Test Title 3",
+      content: "Test Content 3",
+      createdAt: "2024-01-03T00:00:00Z",
     };
 
     global.fetch = vi
@@ -336,7 +336,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 3, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=abc-123&page[size]=1',
+              next: "/api/records?page[after]=abc-123&page[size]=1",
               prev: null,
             },
           }),
@@ -348,7 +348,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord2 }],
             meta: { total: 3, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=def-456&page[size]=1',
+              next: "/api/records?page[after]=def-456&page[size]=1",
               prev: null,
             },
           }),
@@ -371,7 +371,7 @@ describe('fetchAllRecords', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
-  it('returns partial results if a subsequent page fetch fails', async () => {
+  it("returns partial results if a subsequent page fetch fails", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -381,12 +381,12 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=abc-123&page[size]=1',
+              next: "/api/records?page[after]=abc-123&page[size]=1",
               prev: null,
             },
           }),
       })
-      .mockRejectedValueOnce(new Error('Network error'));
+      .mockRejectedValueOnce(new Error("Network error"));
     // A later page failing keeps the pages already collected but flags the
     // read `partial: true`, so the caller can surface the truncation rather
     // than presenting one page as the whole set.
@@ -402,7 +402,7 @@ describe('fetchAllRecords', () => {
   // errors.ts / issue #194). fetchPaginatedRecords's own plain-text
   // diagnostic for the same page failure must stay silent in that mode, or
   // stderr would carry a stray non-JSON line ahead of it.
-  it('stays silent on stderr for a subsequent-page failure when json is true', async () => {
+  it("stays silent on stderr for a subsequent-page failure when json is true", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -412,12 +412,12 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=abc-123&page[size]=1',
+              next: "/api/records?page[after]=abc-123&page[size]=1",
               prev: null,
             },
           }),
       })
-      .mockRejectedValueOnce(new Error('Network error'));
+      .mockRejectedValueOnce(new Error("Network error"));
 
     expect(await fetchAllRecords({}, true)).toEqual({
       ok: true,
@@ -427,7 +427,7 @@ describe('fetchAllRecords', () => {
     expect(console.error).not.toHaveBeenCalled();
   });
 
-  it('stops instead of looping forever if the server repeats the same cursor', async () => {
+  it("stops instead of looping forever if the server repeats the same cursor", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -435,7 +435,7 @@ describe('fetchAllRecords', () => {
           data: [{ attributes: mockRecord }],
           meta: { total: 2, size: 1, hasMore: true },
           links: {
-            next: '/api/records?page[after]=abc-123&page[size]=1',
+            next: "/api/records?page[after]=abc-123&page[size]=1",
             prev: null,
           },
         }),
@@ -453,12 +453,12 @@ describe('fetchAllRecords', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('stops instead of looping forever on a longer cursor cycle (A -> B -> A)', async () => {
+  it("stops instead of looping forever on a longer cursor cycle (A -> B -> A)", async () => {
     const mockRecord3: Record = {
-      uuid: 'ghi-789',
-      title: 'Test Title 3',
-      content: 'Test Content 3',
-      createdAt: '2024-01-03T00:00:00Z',
+      uuid: "ghi-789",
+      title: "Test Title 3",
+      content: "Test Content 3",
+      createdAt: "2024-01-03T00:00:00Z",
     };
 
     global.fetch = vi
@@ -471,7 +471,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 3, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=cursor-a&page[size]=1',
+              next: "/api/records?page[after]=cursor-a&page[size]=1",
               prev: null,
             },
           }),
@@ -484,7 +484,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord2 }],
             meta: { total: 3, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=cursor-b&page[size]=1',
+              next: "/api/records?page[after]=cursor-b&page[size]=1",
               prev: null,
             },
           }),
@@ -497,7 +497,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord3 }],
             meta: { total: 3, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=cursor-a&page[size]=1',
+              next: "/api/records?page[after]=cursor-a&page[size]=1",
               prev: null,
             },
           }),
@@ -525,7 +525,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=abc%2Bxyz&page[size]=1',
+              next: "/api/records?page[after]=abc%2Bxyz&page[size]=1",
               prev: null,
             },
           }),
@@ -547,14 +547,14 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc%2Bxyz',
+      "https://example.com/api/records?page[size]=100&page[after]=abc%2Bxyz",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('extracts the cursor when links.next percent-encodes the key, matching markpost\'s own link builder', async () => {
+  it("extracts the cursor when links.next percent-encodes the key, matching markpost's own link builder", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -566,7 +566,7 @@ describe('fetchAllRecords', () => {
             // markpost builds links with `new URLSearchParams(...).toString()`,
             // which percent-encodes `[` and `]` to `%5B`/`%5D`.
             links: {
-              next: '/api/records?page%5Bafter%5D=abc-123&page%5Bsize%5D=1',
+              next: "/api/records?page%5Bafter%5D=abc-123&page%5Bsize%5D=1",
               prev: null,
             },
           }),
@@ -588,14 +588,14 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123',
+      "https://example.com/api/records?page[size]=100&page[after]=abc-123",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('stops pagination instead of throwing when links.next has a malformed cursor', async () => {
+  it("stops pagination instead of throwing when links.next has a malformed cursor", async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: () =>
@@ -606,7 +606,7 @@ describe('fetchAllRecords', () => {
           // `decodeURIComponent`; this must not crash `fetchAllRecords` and
           // discard the page already fetched.
           links: {
-            next: '/api/records?page[after]=50%off&page[size]=1',
+            next: "/api/records?page[after]=50%off&page[size]=1",
             prev: null,
           },
         }),
@@ -633,7 +633,7 @@ describe('fetchAllRecords', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=YWJj==&page[size]=1',
+              next: "/api/records?page[after]=YWJj==&page[size]=1",
               prev: null,
             },
           }),
@@ -655,129 +655,129 @@ describe('fetchAllRecords', () => {
     });
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'https://example.com/api/records?page[size]=100&page[after]=YWJj%3D%3D',
+      "https://example.com/api/records?page[size]=100&page[after]=YWJj%3D%3D",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 });
 
-describe('fetchPaginatedRecords', () => {
+describe("fetchPaginatedRecords", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   // An unfiltered request sends no filter[status], so `records list` can page
   // any status. Scoping the sync to pending (the #50 duplicate guard) is the
   // caller's job now — see index.test.ts, which asserts the sync passes
   // { status: 'pending' }.
-  it('sends no filter[status] when no filters are given', async () => {
+  it("sends no filter[status] when no filters are given", async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
     await fetchPaginatedRecords();
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100',
+      "https://example.com/api/records?page[size]=100",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('calls fetch with the cursor and page[size] and auth header', async () => {
+  it("calls fetch with the cursor and page[size] and auth header", async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
-    await fetchPaginatedRecords('abc-123', 50);
+    await fetchPaginatedRecords("abc-123", 50);
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=50&page[after]=abc-123',
+      "https://example.com/api/records?page[size]=50&page[after]=abc-123",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('appends filter[source], filter[status], and filter[q] when filters are given', async () => {
-    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
-    await fetchPaginatedRecords(undefined, 100, {
-      source: 'webhook',
-      status: 'pending',
-      search: 'notes',
-    });
-    expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100&filter[source]=webhook&filter[status]=pending&filter[q]=notes',
-      expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
-      }),
-    );
-  });
-
-  it('only appends the filters that are provided', async () => {
-    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
-    await fetchPaginatedRecords(undefined, 100, { status: 'error' });
-    expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100&filter[status]=error',
-      expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
-      }),
-    );
-  });
-
-  it('percent-encodes a search value containing spaces and special characters', async () => {
-    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
-    await fetchPaginatedRecords(undefined, 100, { search: 'foo bar & baz' });
-    expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100&filter[q]=foo%20bar%20%26%20baz',
-      expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
-      }),
-    );
-  });
-
-  it('sends each tag as a repeated, percent-encoded filter[tag] followed by sort', async () => {
+  it("appends filter[source], filter[status], and filter[q] when filters are given", async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
     await fetchPaginatedRecords(undefined, 100, {
-      tags: ['alpha', 'b c&d'],
-      sort: '-createdAt',
+      source: "webhook",
+      status: "pending",
+      search: "notes",
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100&filter[tag]=alpha&filter[tag]=b%20c%26d&sort=-createdAt',
+      "https://example.com/api/records?page[size]=100&filter[source]=webhook&filter[status]=pending&filter[q]=notes",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer test-token" },
+      }),
+    );
+  });
+
+  it("only appends the filters that are provided", async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords(undefined, 100, { status: "error" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://example.com/api/records?page[size]=100&filter[status]=error",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer test-token" },
+      }),
+    );
+  });
+
+  it("percent-encodes a search value containing spaces and special characters", async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords(undefined, 100, { search: "foo bar & baz" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://example.com/api/records?page[size]=100&filter[q]=foo%20bar%20%26%20baz",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer test-token" },
+      }),
+    );
+  });
+
+  it("sends each tag as a repeated, percent-encoded filter[tag] followed by sort", async () => {
+    mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
+    await fetchPaginatedRecords(undefined, 100, {
+      tags: ["alpha", "b c&d"],
+      sort: "-createdAt",
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://example.com/api/records?page[size]=100&filter[tag]=alpha&filter[tag]=b%20c%26d&sort=-createdAt",
       expect.anything(),
     );
   });
 
-  it('omits filter[tag] for an empty tag list and sort when unset', async () => {
+  it("omits filter[tag] for an empty tag list and sort when unset", async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
     await fetchPaginatedRecords(undefined, 100, { tags: [] });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100',
+      "https://example.com/api/records?page[size]=100",
       expect.anything(),
     );
   });
 
-  it('keeps tags and sort on a cursored page', async () => {
+  it("keeps tags and sort on a cursored page", async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
-    await fetchPaginatedRecords('abc-123', 100, {
-      tags: ['a', 'b'],
-      sort: 'createdAt',
+    await fetchPaginatedRecords("abc-123", 100, {
+      tags: ["a", "b"],
+      sort: "createdAt",
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[tag]=a&filter[tag]=b&sort=createdAt',
+      "https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[tag]=a&filter[tag]=b&sort=createdAt",
       expect.anything(),
     );
   });
 
-  it('keeps the cursor and filters together on a paged request', async () => {
+  it("keeps the cursor and filters together on a paged request", async () => {
     mockFetch({ data: [mockRecord], meta: mockPaginatedMeta });
-    await fetchPaginatedRecords('abc-123', 100, { source: 'email' });
+    await fetchPaginatedRecords("abc-123", 100, { source: "email" });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[source]=email',
+      "https://example.com/api/records?page[size]=100&page[after]=abc-123&filter[source]=email",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('returns records, meta, and links on success', async () => {
+  it("returns records, meta, and links on success", async () => {
     mockFetch({
       data: [{ attributes: mockRecord }],
       meta: mockPaginatedMeta,
@@ -790,7 +790,7 @@ describe('fetchPaginatedRecords', () => {
     });
   });
 
-  it('defaults links to { next: null, prev: null } when omitted', async () => {
+  it("defaults links to { next: null, prev: null } when omitted", async () => {
     mockFetch({ data: [{ attributes: mockRecord }], meta: mockPaginatedMeta });
     expect(await fetchPaginatedRecords()).toEqual({
       records: [mockRecord],
@@ -799,7 +799,7 @@ describe('fetchPaginatedRecords', () => {
     });
   });
 
-  it('defaults meta to a stop-pagination-safe value when omitted', async () => {
+  it("defaults meta to a stop-pagination-safe value when omitted", async () => {
     mockFetch({ data: [{ attributes: mockRecord }] });
     expect(await fetchPaginatedRecords()).toEqual({
       records: [mockRecord],
@@ -808,9 +808,9 @@ describe('fetchPaginatedRecords', () => {
     });
   });
 
-  it('returns null when the response contains errors', async () => {
+  it("returns null when the response contains errors", async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Error', detail: 'Server error' }] } },
+      { data: { errors: [{ title: "Error", detail: "Server error" }] } },
       false,
     );
     expect(await fetchPaginatedRecords()).toBeNull();
@@ -820,7 +820,7 @@ describe('fetchPaginatedRecords', () => {
     mockFetch(
       {
         data: {
-          errors: [{ title: 'Unauthorized', detail: 'Invalid API token' }],
+          errors: [{ title: "Unauthorized", detail: "Invalid API token" }],
         },
       },
       false,
@@ -828,10 +828,10 @@ describe('fetchPaginatedRecords', () => {
 
     expect(await fetchPaginatedRecords()).toBeNull();
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Unauthorized: Invalid API token'),
+      expect.stringContaining("Unauthorized: Invalid API token"),
     );
     expect(consoleErrorSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('Unknown error occurred'),
+      expect.stringContaining("Unknown error occurred"),
     );
   });
 
@@ -841,25 +841,25 @@ describe('fetchPaginatedRecords', () => {
   // plain-text line must not sneak onto stderr ahead of it. A thrown network
   // error (rather than an HTTP-status fixture) keeps this unambiguously
   // non-systemic, mirroring the network-failure test just below.
-  it('does not log to stderr on a non-systemic failure when json is true', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("does not log to stderr on a non-systemic failure when json is true", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
     expect(await fetchPaginatedRecords(undefined, 100, {}, true)).toBeNull();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
     expect(await fetchPaginatedRecords()).toBeNull();
   });
 
   // Regression coverage for #29: see the equivalent note in the createRecord
   // describe block above.
-  it('extracts attributes from full JSON:API resource objects in a list response', async () => {
+  it("extracts attributes from full JSON:API resource objects in a list response", async () => {
     mockFetch({
       data: [
         {
-          type: 'records',
+          type: "records",
           id: mockRecord.uuid,
           attributes: mockRecord,
           links: { self: `/api/records/${mockRecord.uuid}` },
@@ -878,9 +878,9 @@ describe('fetchPaginatedRecords', () => {
   // Regression coverage: a resource with no `attributes` at all must be
   // skipped (not passed through as `undefined`) and the skip must be
   // reported so it's visible instead of silently shrinking the result.
-  it('skips a resource with no attributes and reports the count', async () => {
+  it("skips a resource with no attributes and reports the count", async () => {
     mockFetch({
-      data: [{ attributes: mockRecord }, { type: 'records', id: 'x' }],
+      data: [{ attributes: mockRecord }, { type: "records", id: "x" }],
       meta: { total: 2, size: 100, hasMore: false },
       links: { next: null, prev: null },
     });
@@ -891,16 +891,16 @@ describe('fetchPaginatedRecords', () => {
       links: { next: null, prev: null },
     });
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Skipped 1 record(s) with no attributes'),
+      expect.stringContaining("Skipped 1 record(s) with no attributes"),
     );
   });
 
   // Regression coverage: `attributes: null` is off-contract but must be
   // caught by the same skip logic as a missing `attributes` key, not passed
   // through as a `null` element typed as a `Record`.
-  it('skips a resource with attributes explicitly null', async () => {
+  it("skips a resource with attributes explicitly null", async () => {
     mockFetch({
-      data: [{ attributes: mockRecord }, { type: 'records', attributes: null }],
+      data: [{ attributes: mockRecord }, { type: "records", attributes: null }],
       meta: { total: 2, size: 100, hasMore: false },
       links: { next: null, prev: null },
     });
@@ -911,7 +911,7 @@ describe('fetchPaginatedRecords', () => {
       links: { next: null, prev: null },
     });
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Skipped 1 record(s) with no attributes'),
+      expect.stringContaining("Skipped 1 record(s) with no attributes"),
     );
   });
 
@@ -920,7 +920,7 @@ describe('fetchPaginatedRecords', () => {
   // createRecord) instead of collapsing to null — that distinction is what
   // lets the sync fail-fast on an expired token rather than report "no
   // records" and exit 0 (issue #89).
-  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+  it("re-throws a systemic auth (401) failure instead of returning null", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -933,7 +933,7 @@ describe('fetchPaginatedRecords', () => {
     });
   });
 
-  it('re-throws a systemic server (5xx) failure instead of returning null', async () => {
+  it("re-throws a systemic server (5xx) failure instead of returning null", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 503,
@@ -949,13 +949,13 @@ describe('fetchPaginatedRecords', () => {
   // A per-request 4xx (a bad filter value the payload caused) is NOT systemic:
   // it stays a null return so the caller reports it as a failed fetch without
   // treating it as a batch-wide abort.
-  it('returns null for a non-systemic 4xx failure', async () => {
+  it("returns null for a non-systemic 4xx failure", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
       json: () =>
         Promise.resolve({
-          errors: [{ title: 'Invalid filter[source]', detail: 'bad' }],
+          errors: [{ title: "Invalid filter[source]", detail: "bad" }],
         }),
     });
 
@@ -963,71 +963,71 @@ describe('fetchPaginatedRecords', () => {
   });
 });
 
-describe('createRecord', () => {
+describe("createRecord", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('calls fetch with POST, correct headers, and JSON:API body', async () => {
+  it("calls fetch with POST, correct headers, and JSON:API body", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    await createRecord('Test Title', 'Test Content');
+    await createRecord("Test Title", "Test Content");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records',
+      "https://example.com/api/records",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: 'Bearer test-token',
+          "Content-Type": "application/vnd.api+json",
+          Authorization: "Bearer test-token",
         },
         body: JSON.stringify({
           data: {
-            type: 'records',
-            attributes: { title: 'Test Title', content: 'Test Content' },
+            type: "records",
+            attributes: { title: "Test Title", content: "Test Content" },
           },
         }),
       }),
     );
   });
 
-  it('returns the record attributes on success', async () => {
+  it("returns the record attributes on success", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    expect(await createRecord('Test Title', 'Test Content')).toEqual(
+    expect(await createRecord("Test Title", "Test Content")).toEqual(
       mockRecord,
     );
   });
 
-  it('re-throws the server detail when the response contains errors', async () => {
+  it("re-throws the server detail when the response contains errors", async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Error', detail: 'Bad request' }] } },
+      { data: { errors: [{ title: "Error", detail: "Bad request" }] } },
       false,
     );
     await expect(
-      createRecord('Test Title', 'Test Content'),
-    ).rejects.toMatchObject({ message: 'Error: Bad request' });
+      createRecord("Test Title", "Test Content"),
+    ).rejects.toMatchObject({ message: "Error: Bad request" });
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await createRecord('Test Title', 'Test Content')).toBeNull();
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    expect(await createRecord("Test Title", "Test Content")).toBeNull();
   });
 
   // Regression coverage for issue #170: push previously called createRecord
   // with only title/content, so a pulled-edited-repushed note's frontmatter
   // tags never reached markpost even though POST /api/records accepts a
   // tags array (server/api/records/index.post.ts).
-  it('includes tags in the request body when provided', async () => {
+  it("includes tags in the request body when provided", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    await createRecord('Test Title', 'Test Content', ['ci', 'deploy']);
+    await createRecord("Test Title", "Test Content", ["ci", "deploy"]);
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records',
+      "https://example.com/api/records",
       expect.objectContaining({
         body: JSON.stringify({
           data: {
-            type: 'records',
+            type: "records",
             attributes: {
-              title: 'Test Title',
-              content: 'Test Content',
-              tags: ['ci', 'deploy'],
+              title: "Test Title",
+              content: "Test Content",
+              tags: ["ci", "deploy"],
             },
           },
         }),
@@ -1039,32 +1039,32 @@ describe('createRecord', () => {
   // key is not the same as an empty array — so an empty tags list is omitted
   // rather than sent as `[]`, preserving the request shape a tagless push
   // sent before issue #170.
-  it('omits tags from the request body when the list is empty', async () => {
+  it("omits tags from the request body when the list is empty", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    await createRecord('Test Title', 'Test Content', []);
+    await createRecord("Test Title", "Test Content", []);
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records',
+      "https://example.com/api/records",
       expect.objectContaining({
         body: JSON.stringify({
           data: {
-            type: 'records',
-            attributes: { title: 'Test Title', content: 'Test Content' },
+            type: "records",
+            attributes: { title: "Test Title", content: "Test Content" },
           },
         }),
       }),
     );
   });
 
-  it('omits tags from the request body when no tags argument is given', async () => {
+  it("omits tags from the request body when no tags argument is given", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    await createRecord('Test Title', 'Test Content');
+    await createRecord("Test Title", "Test Content");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records',
+      "https://example.com/api/records",
       expect.objectContaining({
         body: JSON.stringify({
           data: {
-            type: 'records',
-            attributes: { title: 'Test Title', content: 'Test Content' },
+            type: "records",
+            attributes: { title: "Test Title", content: "Test Content" },
           },
         }),
       }),
@@ -1074,29 +1074,29 @@ describe('createRecord', () => {
   // A per-file 4xx (the payload's fault) is re-thrown with the server's detail
   // (not collapsed to null) so push can report why this file was rejected,
   // while still treating it as non-systemic and pressing on with the batch.
-  it('re-throws a non-systemic 4xx with the server detail', async () => {
+  it("re-throws a non-systemic 4xx with the server detail", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 422,
       json: () =>
         Promise.resolve({
-          data: { errors: [{ title: 'Unprocessable', detail: 'Bad' }] },
+          data: { errors: [{ title: "Unprocessable", detail: "Bad" }] },
         }),
     });
 
     await expect(
-      createRecord('Test Title', 'Test Content'),
+      createRecord("Test Title", "Test Content"),
     ).rejects.toMatchObject({
       statusCode: 422,
       isSystemic: false,
-      message: 'Unprocessable: Bad',
+      message: "Unprocessable: Bad",
     });
   });
 
   // Auth/5xx doom every other file in a batch, so createRecord surfaces them
   // (as a systemic ApiRequestError) instead of swallowing them as null — that
   // distinction is what lets push fail-fast.
-  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+  it("re-throws a systemic auth (401) failure instead of returning null", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -1104,14 +1104,14 @@ describe('createRecord', () => {
     });
 
     await expect(
-      createRecord('Test Title', 'Test Content'),
+      createRecord("Test Title", "Test Content"),
     ).rejects.toMatchObject({ statusCode: 401, isSystemic: true });
   });
 
   // End-to-end message check: a real bare-401 response (no data.errors, the
   // shape markpost's requireUser actually sends) must surface an actionable
   // message, not "Unknown error occurred", once composed for display.
-  it('surfaces an actionable message for a real errorless 401 response', async () => {
+  it("surfaces an actionable message for a real errorless 401 response", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -1119,15 +1119,15 @@ describe('createRecord', () => {
     });
 
     await expect(
-      createRecord('Test Title', 'Test Content'),
+      createRecord("Test Title", "Test Content"),
     ).rejects.toMatchObject({
       statusCode: 401,
       message:
-        'Invalid or missing API token — run `markpost config` to set a valid one',
+        "Invalid or missing API token — run `markpost config` to set a valid one",
     });
   });
 
-  it('re-throws a systemic server (5xx) failure instead of returning null', async () => {
+  it("re-throws a systemic server (5xx) failure instead of returning null", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 503,
@@ -1135,7 +1135,7 @@ describe('createRecord', () => {
     });
 
     await expect(
-      createRecord('Test Title', 'Test Content'),
+      createRecord("Test Title", "Test Content"),
     ).rejects.toMatchObject({ statusCode: 503, isSystemic: true });
   });
 
@@ -1144,70 +1144,70 @@ describe('createRecord', () => {
   // markpost's server/utils/response.ts), which the CLI's old `ApiData` type
   // couldn't even describe. Extraction must still work with the full shape,
   // not just the attributes-only shape the old type modeled.
-  it('extracts attributes from a full JSON:API resource object (type/id/links included)', async () => {
+  it("extracts attributes from a full JSON:API resource object (type/id/links included)", async () => {
     mockFetch({
       data: {
-        type: 'records',
+        type: "records",
         id: mockRecord.uuid,
         attributes: mockRecord,
         links: { self: `/api/records/${mockRecord.uuid}` },
       },
     });
-    expect(await createRecord('Test Title', 'Test Content')).toEqual(
+    expect(await createRecord("Test Title", "Test Content")).toEqual(
       mockRecord,
     );
   });
 });
 
-describe('fetchRecord', () => {
+describe("fetchRecord", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('calls fetch with the correct UUID in the URL', async () => {
+  it("calls fetch with the correct UUID in the URL", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    await fetchRecord('abc-123');
+    await fetchRecord("abc-123");
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records/abc-123',
+      "https://example.com/api/records/abc-123",
       expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: "Bearer test-token" },
       }),
     );
   });
 
-  it('returns the record attributes on success', async () => {
+  it("returns the record attributes on success", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    expect(await fetchRecord('abc-123')).toEqual(mockRecord);
+    expect(await fetchRecord("abc-123")).toEqual(mockRecord);
   });
 
-  it('re-throws the server detail when the response contains errors', async () => {
+  it("re-throws the server detail when the response contains errors", async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Not Found', detail: 'Record missing' }] } },
+      { data: { errors: [{ title: "Not Found", detail: "Record missing" }] } },
       false,
     );
-    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
-      message: 'Not Found: Record missing',
+    await expect(fetchRecord("abc-123")).rejects.toMatchObject({
+      message: "Not Found: Record missing",
     });
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await fetchRecord('abc-123')).toBeNull();
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    expect(await fetchRecord("abc-123")).toBeNull();
   });
 
-  it('does not log to stderr on a non-systemic failure when json is true', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("does not log to stderr on a non-systemic failure when json is true", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
-    expect(await fetchRecord('abc-123', true)).toBeNull();
+    expect(await fetchRecord("abc-123", true)).toBeNull();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
-  it('logs its own diagnostic on a non-systemic failure when json is false', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("logs its own diagnostic on a non-systemic failure when json is false", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
-    expect(await fetchRecord('abc-123')).toBeNull();
+    expect(await fetchRecord("abc-123")).toBeNull();
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('fetchRecord["abc-123"]'),
     );
@@ -1216,14 +1216,14 @@ describe('fetchRecord', () => {
   // A systemic auth (401) failure is not "record not found" — fetchRecord
   // re-throws it (like createRecord) so `get` reports the real cause with a
   // non-zero exit, distinct from the null a genuine 404 returns (issue #89).
-  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+  it("re-throws a systemic auth (401) failure instead of returning null", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
       json: () => Promise.resolve({ data: { errors: [] } }),
     });
 
-    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+    await expect(fetchRecord("abc-123")).rejects.toMatchObject({
       statusCode: 401,
       isSystemic: true,
     });
@@ -1231,121 +1231,121 @@ describe('fetchRecord', () => {
 
   // A 404 and a 422 are both non-systemic per-record rejections, but each is
   // re-thrown with its own status and server detail so they read differently.
-  it('re-throws a non-systemic 404 with its status and server detail', async () => {
+  it("re-throws a non-systemic 404 with its status and server detail", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
       json: () =>
         Promise.resolve({
-          errors: [{ title: 'Not Found', detail: 'No record was found' }],
+          errors: [{ title: "Not Found", detail: "No record was found" }],
         }),
     });
 
-    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+    await expect(fetchRecord("abc-123")).rejects.toMatchObject({
       statusCode: 404,
       isSystemic: false,
-      message: 'Not Found: No record was found',
+      message: "Not Found: No record was found",
     });
   });
 
-  it('re-throws a non-systemic 422 with its status and server detail', async () => {
+  it("re-throws a non-systemic 422 with its status and server detail", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 422,
       json: () =>
         Promise.resolve({
-          errors: [{ title: 'Invalid Attribute', detail: 'uuid is malformed' }],
+          errors: [{ title: "Invalid Attribute", detail: "uuid is malformed" }],
         }),
     });
 
-    await expect(fetchRecord('abc-123')).rejects.toMatchObject({
+    await expect(fetchRecord("abc-123")).rejects.toMatchObject({
       statusCode: 422,
       isSystemic: false,
-      message: 'Invalid Attribute: uuid is malformed',
+      message: "Invalid Attribute: uuid is malformed",
     });
   });
 
   // Regression coverage for #29: see the equivalent note in the createRecord
   // describe block above.
-  it('extracts attributes from a full JSON:API resource object (type/id/links included)', async () => {
+  it("extracts attributes from a full JSON:API resource object (type/id/links included)", async () => {
     mockFetch({
       data: {
-        type: 'records',
+        type: "records",
         id: mockRecord.uuid,
         attributes: mockRecord,
         links: { self: `/api/records/${mockRecord.uuid}` },
       },
     });
-    expect(await fetchRecord('abc-123')).toEqual(mockRecord);
+    expect(await fetchRecord("abc-123")).toEqual(mockRecord);
   });
 });
 
-describe('updateRecord', () => {
+describe("updateRecord", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('PATCHes the correct UUID with the given attributes', async () => {
+  it("PATCHes the correct UUID with the given attributes", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    await updateRecord('abc-123', { title: 'New Title' });
+    await updateRecord("abc-123", { title: "New Title" });
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records/abc-123',
+      "https://example.com/api/records/abc-123",
       expect.objectContaining({
-        method: 'PATCH',
+        method: "PATCH",
         headers: {
-          Authorization: 'Bearer test-token',
-          'Content-Type': 'application/vnd.api+json',
+          Authorization: "Bearer test-token",
+          "Content-Type": "application/vnd.api+json",
         },
         body: JSON.stringify({
-          data: { type: 'records', attributes: { title: 'New Title' } },
+          data: { type: "records", attributes: { title: "New Title" } },
         }),
       }),
     );
   });
 
-  it('returns the updated record attributes on success', async () => {
+  it("returns the updated record attributes on success", async () => {
     mockFetch({ data: { attributes: mockRecord } });
-    expect(
-      await updateRecord('abc-123', { title: 'Test Title' }),
-    ).toEqual(mockRecord);
+    expect(await updateRecord("abc-123", { title: "Test Title" })).toEqual(
+      mockRecord,
+    );
   });
 
-  it('re-throws the server detail when the response contains errors', async () => {
+  it("re-throws the server detail when the response contains errors", async () => {
     mockFetch(
       {
         data: {
           errors: [
-            { title: 'Invalid Attribute', detail: 'Title cannot be empty' },
+            { title: "Invalid Attribute", detail: "Title cannot be empty" },
           ],
         },
       },
       false,
     );
-    await expect(updateRecord('abc-123', { title: '' })).rejects.toMatchObject({
-      message: 'Invalid Attribute: Title cannot be empty',
+    await expect(updateRecord("abc-123", { title: "" })).rejects.toMatchObject({
+      message: "Invalid Attribute: Title cannot be empty",
     });
   });
 
-  it('returns null on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+  it("returns null on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    expect(await updateRecord("abc-123", { title: "New Title" })).toBeNull();
   });
 
-  it('does not log to stderr on a non-systemic failure when json is true', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("does not log to stderr on a non-systemic failure when json is true", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
     expect(
-      await updateRecord('abc-123', { title: 'New Title' }, true),
+      await updateRecord("abc-123", { title: "New Title" }, true),
     ).toBeNull();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
-  it('logs its own diagnostic on a non-systemic failure when json is false', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("logs its own diagnostic on a non-systemic failure when json is false", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
-    expect(await updateRecord('abc-123', { title: 'New Title' })).toBeNull();
+    expect(await updateRecord("abc-123", { title: "New Title" })).toBeNull();
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('updateRecord["abc-123"]'),
     );
@@ -1355,7 +1355,7 @@ describe('updateRecord', () => {
   // updateRecord re-throws it (like fetchRecord/createRecord) so the command
   // reports the real cause with a non-zero exit, distinct from the null a
   // genuine 4xx returns (mirrors issue #89's fix on the read path).
-  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+  it("re-throws a systemic auth (401) failure instead of returning null", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -1363,7 +1363,7 @@ describe('updateRecord', () => {
     });
 
     await expect(
-      updateRecord('abc-123', { title: 'New Title' }),
+      updateRecord("abc-123", { title: "New Title" }),
     ).rejects.toMatchObject({
       statusCode: 401,
       isSystemic: true,
@@ -1372,41 +1372,41 @@ describe('updateRecord', () => {
 
   // A 404 and a 422 are both non-systemic per-record rejections, but each is
   // re-thrown with its own status and server detail so they read differently.
-  it('re-throws a non-systemic 404 with its status and server detail', async () => {
+  it("re-throws a non-systemic 404 with its status and server detail", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
       json: () =>
         Promise.resolve({
-          errors: [{ title: 'Not Found', detail: 'No record was found' }],
+          errors: [{ title: "Not Found", detail: "No record was found" }],
         }),
     });
 
     await expect(
-      updateRecord('abc-123', { title: 'New Title' }),
+      updateRecord("abc-123", { title: "New Title" }),
     ).rejects.toMatchObject({
       statusCode: 404,
       isSystemic: false,
-      message: 'Not Found: No record was found',
+      message: "Not Found: No record was found",
     });
   });
 
-  it('re-throws a non-systemic 422 with its status and server detail', async () => {
+  it("re-throws a non-systemic 422 with its status and server detail", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 422,
       json: () =>
         Promise.resolve({
-          errors: [{ title: 'Invalid Attribute', detail: 'Title is too long' }],
+          errors: [{ title: "Invalid Attribute", detail: "Title is too long" }],
         }),
     });
 
     await expect(
-      updateRecord('abc-123', { title: 'New Title' }),
+      updateRecord("abc-123", { title: "New Title" }),
     ).rejects.toMatchObject({
       statusCode: 422,
       isSystemic: false,
-      message: 'Invalid Attribute: Title is too long',
+      message: "Invalid Attribute: Title is too long",
     });
   });
 
@@ -1414,68 +1414,68 @@ describe('updateRecord', () => {
   // requeue (markpost#306): an edited, previously-synced record comes back
   // `pending` with `syncedAt: null`, which the `records update` command reads
   // to confirm the resync to the user.
-  it('surfaces the requeued pending status on the returned record', async () => {
+  it("surfaces the requeued pending status on the returned record", async () => {
     const requeuedRecord: Record = {
       ...mockRecord,
-      status: 'pending',
+      status: "pending",
       syncedAt: null,
     };
     mockFetch({ data: { attributes: requeuedRecord } });
 
-    const result = await updateRecord('abc-123', { title: 'New Title' });
+    const result = await updateRecord("abc-123", { title: "New Title" });
 
-    expect(result).toMatchObject({ status: 'pending', syncedAt: null });
+    expect(result).toMatchObject({ status: "pending", syncedAt: null });
   });
 });
 
-describe('deleteRecords', () => {
+describe("deleteRecords", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('calls fetch with DELETE, correct headers, and JSON:API body', async () => {
+  it("calls fetch with DELETE, correct headers, and JSON:API body", async () => {
     mockFetch({ meta: mockMeta });
-    await deleteRecords(['abc-123', 'def-456']);
+    await deleteRecords(["abc-123", "def-456"]);
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records',
+      "https://example.com/api/records",
       expect.objectContaining({
-        method: 'DELETE',
+        method: "DELETE",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: 'Bearer test-token',
+          "Content-Type": "application/vnd.api+json",
+          Authorization: "Bearer test-token",
         },
         body: JSON.stringify({
           data: {
-            type: 'records',
-            attributes: { uuids: ['abc-123', 'def-456'] },
+            type: "records",
+            attributes: { uuids: ["abc-123", "def-456"] },
           },
         }),
       }),
     );
   });
 
-  it('returns meta on success', async () => {
+  it("returns meta on success", async () => {
     mockFetch({ meta: mockMeta });
-    expect(await deleteRecords(['abc-123'])).toEqual({
+    expect(await deleteRecords(["abc-123"])).toEqual({
       meta: mockMeta,
       permanentlyFailed: false,
     });
   });
 
-  it('reports a non-permanent failure when the response contains errors', async () => {
+  it("reports a non-permanent failure when the response contains errors", async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Error', detail: 'Bad request' }] } },
+      { data: { errors: [{ title: "Error", detail: "Bad request" }] } },
       false,
     );
-    expect(await deleteRecords(['abc-123'])).toEqual({
+    expect(await deleteRecords(["abc-123"])).toEqual({
       meta: null,
       permanentlyFailed: false,
     });
   });
 
-  it('reports a non-permanent failure on network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    expect(await deleteRecords(['abc-123'])).toEqual({
+  it("reports a non-permanent failure on network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+    expect(await deleteRecords(["abc-123"])).toEqual({
       meta: null,
       permanentlyFailed: false,
     });
@@ -1485,27 +1485,27 @@ describe('deleteRecords', () => {
   // deleteRecords re-throws it (like createRecord) rather than swallowing to
   // null — the sync then surfaces the real cause and leaves the records on the
   // server (issue #89).
-  it('re-throws a systemic auth (401) failure instead of returning null', async () => {
+  it("re-throws a systemic auth (401) failure instead of returning null", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
       json: () => Promise.resolve({ data: { errors: [] } }),
     });
 
-    await expect(deleteRecords(['abc-123'])).rejects.toMatchObject({
+    await expect(deleteRecords(["abc-123"])).rejects.toMatchObject({
       statusCode: 401,
       isSystemic: true,
     });
   });
 
-  it('re-throws a systemic server (5xx) failure instead of returning null', async () => {
+  it("re-throws a systemic server (5xx) failure instead of returning null", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
       json: () => Promise.resolve({ data: { errors: [] } }),
     });
 
-    await expect(deleteRecords(['abc-123'])).rejects.toMatchObject({
+    await expect(deleteRecords(["abc-123"])).rejects.toMatchObject({
       statusCode: 500,
       isSystemic: true,
     });
@@ -1554,8 +1554,8 @@ describe('deleteRecords', () => {
   // Regression coverage for #158: markpost's DELETE handler rejects a
   // uuids[] array over MAX_DELETE_BATCH_SIZE with a 422, so a sync settling
   // over 100 records must chunk instead of firing one oversized request.
-  describe('chunking to the server cap (#158)', () => {
-    it('deletes every uuid in a single request at exactly the batch size', async () => {
+  describe("chunking to the server cap (#158)", () => {
+    it("deletes every uuid in a single request at exactly the batch size", async () => {
       mockBulkDeleteEcho();
       const result = await deleteRecords(uuids(MAX_DELETE_BATCH_SIZE));
       // A full-but-not-over chunk is one request — the off-by-one boundary.
@@ -1567,7 +1567,7 @@ describe('deleteRecords', () => {
       });
     });
 
-    it('splits one-over-the-batch-size into two requests (ceil(N/100))', async () => {
+    it("splits one-over-the-batch-size into two requests (ceil(N/100))", async () => {
       mockBulkDeleteEcho();
       const result = await deleteRecords(uuids(MAX_DELETE_BATCH_SIZE + 1));
       // 101 uuids must not go in one over-cap request markpost would 422.
@@ -1579,7 +1579,7 @@ describe('deleteRecords', () => {
       });
     });
 
-    it('chunks 250 uuids into 100/100/50 requests, each within the cap', async () => {
+    it("chunks 250 uuids into 100/100/50 requests, each within the cap", async () => {
       mockBulkDeleteEcho();
       const result = await deleteRecords(uuids(250));
       expect(global.fetch).toHaveBeenCalledTimes(3);
@@ -1610,8 +1610,8 @@ describe('deleteRecords', () => {
     // actually distinguishes "continues past a plain failure" from "stops at
     // the first failure" — the second chunk only ever fires if the loop kept
     // going.
-    it('still attempts every chunk after a plain failure, but surfaces it instead of reporting a partial delete as complete', async () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it("still attempts every chunk after a plain failure, but surfaces it instead of reporting a partial delete as complete", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       global.fetch = vi
         .fn()
@@ -1619,7 +1619,7 @@ describe('deleteRecords', () => {
           ok: false,
           json: () =>
             Promise.resolve({
-              data: { errors: [{ title: 'Error', detail: 'Bad request' }] },
+              data: { errors: [{ title: "Error", detail: "Bad request" }] },
             }),
         })
         .mockResolvedValueOnce({
@@ -1640,11 +1640,11 @@ describe('deleteRecords', () => {
       // failed) must still be logged, worded so it doesn't claim they were
       // deleted "before" the failure — they weren't.
       expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Partially settled: 50/150'),
+        expect.stringContaining("Partially settled: 50/150"),
       );
     });
 
-    it('returns a zero-count success without calling the API for an empty list', async () => {
+    it("returns a zero-count success without calling the API for an empty list", async () => {
       global.fetch = vi.fn();
       const result = await deleteRecords([]);
       expect(global.fetch).not.toHaveBeenCalled();
@@ -1660,7 +1660,7 @@ describe('deleteRecords', () => {
     // Summing per-chunk counts (rather than assuming each chunk fully
     // succeeds) is what lets the caller's `deleted === settleableRecords.length`
     // settle check correctly treat this as short of a full delete.
-    it('sums a short per-chunk count rather than assuming every chunk fully succeeded', async () => {
+    it("sums a short per-chunk count rather than assuming every chunk fully succeeded", async () => {
       global.fetch = vi
         .fn()
         .mockResolvedValueOnce({
@@ -1685,7 +1685,7 @@ describe('deleteRecords', () => {
     // poison the run-wide total into `NaN` — which is truthy and would slip
     // past the caller's `!deleteMeta` failure check while printing "Deleted
     // NaN records!" and exiting 0.
-    it('treats a chunk with a non-numeric deleted count as a chunk failure, not NaN', async () => {
+    it("treats a chunk with a non-numeric deleted count as a chunk failure, not NaN", async () => {
       global.fetch = vi
         .fn()
         .mockResolvedValueOnce({
@@ -1713,8 +1713,8 @@ describe('deleteRecords', () => {
     // already-successful chunk before the abort — this is the only ordering
     // that actually exercises "genuinely deleted server-side records must
     // not be silently discarded when a later chunk aborts the run".
-    it('aborts remaining chunks on a systemic (401) failure after an earlier chunk succeeded', async () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it("aborts remaining chunks on a systemic (401) failure after an earlier chunk succeeded", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       global.fetch = vi
         .fn()
@@ -1738,7 +1738,7 @@ describe('deleteRecords', () => {
       // The 100 uuids the first chunk actually deleted must be logged before
       // the error propagates — not silently discarded along with the throw.
       expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Partially settled: 100/150'),
+        expect.stringContaining("Partially settled: 100/150"),
       );
     });
   });
@@ -1749,7 +1749,7 @@ describe('deleteRecords', () => {
   // PATCH's) — hammering the API with every one of ceil(N/100) doomed
   // requests instead of stopping once the envelope itself was confirmed
   // wrong. Mirrors the markRecordsSynced request-shape abort coverage above.
-  describe('request-shape abort (#183)', () => {
+  describe("request-shape abort (#183)", () => {
     // Reject every chunk the given way (a 400/422 error response), so a test
     // can drive the two-chunk request-shape confirmation without
     // hand-writing the mock — mirrors markRecordsSynced's `mockAllChunksReject`.
@@ -1759,14 +1759,14 @@ describe('deleteRecords', () => {
         status,
         json: () =>
           Promise.resolve({
-            data: { errors: [{ title: 'Rejected', detail }] },
+            data: { errors: [{ title: "Rejected", detail }] },
           }),
       });
     };
 
-    it('aborts after two request-shape (422) rejections with nothing deleted', async () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      mockAllChunksReject(422, 'Unknown attribute: uuids');
+    it("aborts after two request-shape (422) rejections with nothing deleted", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockAllChunksReject(422, "Unknown attribute: uuids");
 
       const result = await deleteRecords(uuids(250));
 
@@ -1779,12 +1779,12 @@ describe('deleteRecords', () => {
       // failed delete (the caller's generic "Failed to delete records"
       // message doesn't otherwise say anything was skipped).
       expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('50 of them were never attempted'),
+        expect.stringContaining("50 of them were never attempted"),
       );
     });
 
-    it('aborts after two malformed-payload (400) rejections with nothing deleted', async () => {
-      mockAllChunksReject(400, 'Invalid body');
+    it("aborts after two malformed-payload (400) rejections with nothing deleted", async () => {
+      mockAllChunksReject(400, "Invalid body");
 
       const result = await deleteRecords(uuids(250));
 
@@ -1796,9 +1796,9 @@ describe('deleteRecords', () => {
     // every chunk was actually attempted — `unattemptedCount` is 0, so the log
     // must not claim uuids were "never attempted" (an early stop that didn't
     // happen) while still reporting that nothing was confirmed deleted.
-    it('logs an accurate message when the abort lands on the last chunk (nothing skipped)', async () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      mockAllChunksReject(422, 'bad batch');
+    it("logs an accurate message when the abort lands on the last chunk (nothing skipped)", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockAllChunksReject(422, "bad batch");
 
       // 200 uuids -> exactly two chunks (100/100); the SECOND is also the LAST.
       const result = await deleteRecords(uuids(200));
@@ -1807,17 +1807,19 @@ describe('deleteRecords', () => {
       expect(result).toEqual({ meta: null, permanentlyFailed: true });
       const loggedMessage = errorSpy.mock.calls
         .map((call) => String(call[0]))
-        .find((message) => message.includes('Aborted after two consecutive'));
+        .find((message) => message.includes("Aborted after two consecutive"));
       expect(loggedMessage).toBeDefined();
-      expect(loggedMessage).not.toContain('never attempted');
-      expect(loggedMessage).toContain('none of the 200 requested uuid(s) were confirmed deleted');
+      expect(loggedMessage).not.toContain("never attempted");
+      expect(loggedMessage).toContain(
+        "none of the 200 requested uuid(s) were confirmed deleted",
+      );
     });
 
     // Two 4xx rejections with DIFFERENT messages look like two isolated
     // per-uuid problems, not one envelope fault — so the run must keep going
     // rather than abort. Only a repeated, identical categorical error is
     // strong enough evidence.
-    it('does not abort on two request-shape rejections with different messages', async () => {
+    it("does not abort on two request-shape rejections with different messages", async () => {
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation(() => {
         callCount += 1;
@@ -1827,7 +1829,7 @@ describe('deleteRecords', () => {
           json: () =>
             Promise.resolve({
               data: {
-                errors: [{ title: 'Rejected', detail: `problem ${callCount}` }],
+                errors: [{ title: "Rejected", detail: `problem ${callCount}` }],
               },
             }),
         });
@@ -1843,7 +1845,7 @@ describe('deleteRecords', () => {
     // A single request-shape rejection is not enough to abort — the next
     // chunk still fires, since a lone 4xx could be an isolated per-chunk
     // rejection rather than proof the envelope itself is wrong.
-    it('does not abort on a lone request-shape rejection — the next chunk still fires', async () => {
+    it("does not abort on a lone request-shape rejection — the next chunk still fires", async () => {
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation((_url, init: RequestInit) => {
         callCount += 1;
@@ -1854,7 +1856,7 @@ describe('deleteRecords', () => {
             status: 422,
             json: () =>
               Promise.resolve({
-                data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+                data: { errors: [{ title: "Rejected", detail: "bad batch" }] },
               }),
           });
         }
@@ -1882,7 +1884,7 @@ describe('deleteRecords', () => {
     // Once a chunk has actually deleted records, that success has already
     // proven the request shape valid — a LATER request-shape rejection must
     // not abort the run, matching markRecordsSynced's `anySynced` guard.
-    it('does not abort on request-shape rejections once a chunk has deleted records', async () => {
+    it("does not abort on request-shape rejections once a chunk has deleted records", async () => {
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation((_url, init: RequestInit) => {
         callCount += 1;
@@ -1903,7 +1905,7 @@ describe('deleteRecords', () => {
           status: 422,
           json: () =>
             Promise.resolve({
-              data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+              data: { errors: [{ title: "Rejected", detail: "bad batch" }] },
             }),
         });
       });
@@ -1922,7 +1924,7 @@ describe('deleteRecords', () => {
     // "has anything been deleted" (a volume check) instead of "has any chunk
     // settled successfully", which would wrongly let a later pair of matching
     // request-shape rejections abort the run.
-    it('does not abort on request-shape rejections once a chunk has settled with a zero count', async () => {
+    it("does not abort on request-shape rejections once a chunk has settled with a zero count", async () => {
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation(() => {
         callCount += 1;
@@ -1939,7 +1941,7 @@ describe('deleteRecords', () => {
           status: 422,
           json: () =>
             Promise.resolve({
-              data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+              data: { errors: [{ title: "Rejected", detail: "bad batch" }] },
             }),
         });
       });
@@ -1959,7 +1961,7 @@ describe('deleteRecords', () => {
     // instead of acceptance, which would otherwise let a later pair of
     // matching request-shape rejections abort even though the server already
     // proved it could parse this envelope.
-    it('does not abort on request-shape rejections once a chunk was accepted with an unusable count', async () => {
+    it("does not abort on request-shape rejections once a chunk was accepted with an unusable count", async () => {
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation(() => {
         callCount += 1;
@@ -1977,7 +1979,7 @@ describe('deleteRecords', () => {
           status: 422,
           json: () =>
             Promise.resolve({
-              data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+              data: { errors: [{ title: "Rejected", detail: "bad batch" }] },
             }),
         });
       });
@@ -1999,7 +2001,7 @@ describe('deleteRecords', () => {
     // all" instead of the actual HTTP status, which would otherwise let a
     // later pair of matching request-shape rejections abort even though this
     // chunk proved the envelope valid.
-    it('does not abort on request-shape rejections once a chunk was accepted with an errors-carrying 2xx', async () => {
+    it("does not abort on request-shape rejections once a chunk was accepted with an errors-carrying 2xx", async () => {
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation(() => {
         callCount += 1;
@@ -2010,7 +2012,7 @@ describe('deleteRecords', () => {
             status: 200,
             json: () =>
               Promise.resolve({
-                data: { errors: [{ title: 'Error', detail: 'partial issue' }] },
+                data: { errors: [{ title: "Error", detail: "partial issue" }] },
               }),
           });
         }
@@ -2020,7 +2022,7 @@ describe('deleteRecords', () => {
           status: 422,
           json: () =>
             Promise.resolve({
-              data: { errors: [{ title: 'Rejected', detail: 'bad batch' }] },
+              data: { errors: [{ title: "Rejected", detail: "bad batch" }] },
             }),
         });
       });
@@ -2040,15 +2042,15 @@ describe('deleteRecords', () => {
     // four chunks fire is if chunk 2's plain failure actually reset the
     // tracking between chunks 1 and 3 (without the reset, chunk 3 would wrongly
     // match chunk 1's stale message and abort there, so chunk 4 would never fire).
-    it('does not abort when a plain failure splits two matching request-shape rejections', async () => {
-      const chunkDetails = ['bad batch', null, 'bad batch', 'different batch'];
+    it("does not abort when a plain failure splits two matching request-shape rejections", async () => {
+      const chunkDetails = ["bad batch", null, "bad batch", "different batch"];
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation(() => {
         const detail = chunkDetails[callCount];
         callCount += 1;
 
         if (detail === null) {
-          return Promise.reject(new Error('Network error'));
+          return Promise.reject(new Error("Network error"));
         }
 
         return Promise.resolve({
@@ -2056,7 +2058,7 @@ describe('deleteRecords', () => {
           status: 422,
           json: () =>
             Promise.resolve({
-              data: { errors: [{ title: 'Rejected', detail }] },
+              data: { errors: [{ title: "Rejected", detail }] },
             }),
         });
       });
@@ -2080,8 +2082,8 @@ describe('deleteRecords', () => {
     // not an envelope one. 401/403/429 are excluded from this path entirely
     // (they re-throw as systemic before reaching here), so 404 is the
     // realistic non-request-shape 4xx this guards against.
-    it('does not abort on repeated 404 rejections — a per-uuid 4xx is not request-shape', async () => {
-      mockAllChunksReject(404, 'Record not found');
+    it("does not abort on repeated 404 rejections — a per-uuid 4xx is not request-shape", async () => {
+      mockAllChunksReject(404, "Record not found");
 
       const result = await deleteRecords(uuids(250));
 
@@ -2095,19 +2097,19 @@ describe('deleteRecords', () => {
 // otherwise the sync reports "no records" (exit 0) on a hung server, the
 // exact failure this timeout guards against. Each public function re-throws
 // the timeout instead of swallowing it.
-describe('records API timeout propagation', () => {
+describe("records API timeout propagation", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it('fetchPaginatedRecords rejects with ApiTimeoutError instead of returning null', async () => {
+  it("fetchPaginatedRecords rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
     await expect(fetchPaginatedRecords()).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
   });
 
-  it('fetchAllRecords propagates the timeout rather than returning []', async () => {
+  it("fetchAllRecords propagates the timeout rather than returning []", async () => {
     mockFetchTimeout();
     await expect(fetchAllRecords()).rejects.toBeInstanceOf(ApiTimeoutError);
   });
@@ -2115,7 +2117,7 @@ describe('records API timeout propagation', () => {
   // A timeout partway through pagination must discard the pages already
   // collected and fail loud, NOT return page 1 as if complete — otherwise
   // the sync would write and (with autoDelete) delete a partial set.
-  it('fetchAllRecords rejects on a mid-pagination timeout instead of returning page 1', async () => {
+  it("fetchAllRecords rejects on a mid-pagination timeout instead of returning page 1", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -2125,51 +2127,51 @@ describe('records API timeout propagation', () => {
             data: [{ attributes: mockRecord }],
             meta: { total: 2, size: 1, hasMore: true },
             links: {
-              next: '/api/records?page[after]=abc-123&page[size]=1',
+              next: "/api/records?page[after]=abc-123&page[size]=1",
               prev: null,
             },
           }),
       })
-      .mockRejectedValueOnce(new DOMException('timed out', 'TimeoutError'));
+      .mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"));
 
     await expect(fetchAllRecords()).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
-  it('fetchRecord and updateRecord still reject on a timeout when json is true', async () => {
+  it("fetchRecord and updateRecord still reject on a timeout when json is true", async () => {
     mockFetchTimeout();
-    await expect(fetchRecord('abc-123', true)).rejects.toBeInstanceOf(
+    await expect(fetchRecord("abc-123", true)).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
     await expect(
-      updateRecord('abc-123', { title: 'T' }, true),
+      updateRecord("abc-123", { title: "T" }, true),
     ).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 
-  it('createRecord rejects with ApiTimeoutError instead of returning null', async () => {
+  it("createRecord rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
-    await expect(createRecord('t', 'c')).rejects.toBeInstanceOf(
+    await expect(createRecord("t", "c")).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
   });
 
-  it('fetchRecord rejects with ApiTimeoutError instead of returning null', async () => {
+  it("fetchRecord rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
-    await expect(fetchRecord('abc-123')).rejects.toBeInstanceOf(
+    await expect(fetchRecord("abc-123")).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
   });
 
-  it('deleteRecords rejects with ApiTimeoutError instead of returning null', async () => {
+  it("deleteRecords rejects with ApiTimeoutError instead of returning null", async () => {
     mockFetchTimeout();
-    await expect(deleteRecords(['abc-123'])).rejects.toBeInstanceOf(
+    await expect(deleteRecords(["abc-123"])).rejects.toBeInstanceOf(
       ApiTimeoutError,
     );
   });
 });
 
-describe('markRecordsSynced', () => {
+describe("markRecordsSynced", () => {
   beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   // Build `count` items with predictable uuids/paths so a test can assert
@@ -2198,7 +2200,7 @@ describe('markRecordsSynced', () => {
       json: () =>
         Promise.resolve({
           data: updated.map((record) => ({
-            type: 'records',
+            type: "records",
             attributes: { uuid: record.uuid },
           })),
           meta: { updated: updated.length },
@@ -2220,28 +2222,28 @@ describe('markRecordsSynced', () => {
       return body.data.attributes.records.length as number;
     });
 
-  it('sends one bulk PATCH per record chunk with the synced attributes', async () => {
+  it("sends one bulk PATCH per record chunk with the synced attributes", async () => {
     mockBulkPatchEcho();
     await markRecordsSynced([
-      { uuid: 'abc-123', filePath: '/vault/test-title.md' },
+      { uuid: "abc-123", filePath: "/vault/test-title.md" },
     ]);
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://example.com/api/records',
+      "https://example.com/api/records",
       expect.objectContaining({
-        method: 'PATCH',
+        method: "PATCH",
         headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Authorization: 'Bearer test-token',
+          "Content-Type": "application/vnd.api+json",
+          Authorization: "Bearer test-token",
         },
         body: JSON.stringify({
           data: {
-            type: 'records',
+            type: "records",
             attributes: {
               records: [
                 {
-                  uuid: 'abc-123',
-                  status: 'synced',
-                  filePath: '/vault/test-title.md',
+                  uuid: "abc-123",
+                  status: "synced",
+                  filePath: "/vault/test-title.md",
                 },
               ],
             },
@@ -2251,20 +2253,20 @@ describe('markRecordsSynced', () => {
     );
   });
 
-  it('sends the vault-relative filePath it is given in the bulk PATCH body', async () => {
+  it("sends the vault-relative filePath it is given in the bulk PATCH body", async () => {
     mockBulkPatchEcho();
 
     await markRecordsSynced([
-      { uuid: 'rel-1', filePath: '99-incoming/2026-01-01-hello.md' },
+      { uuid: "rel-1", filePath: "99-incoming/2026-01-01-hello.md" },
     ]);
 
     const [, requestInit] = vi.mocked(global.fetch).mock.calls[0];
     const sentBody = JSON.parse(String(requestInit?.body));
 
     expect(sentBody.data.attributes.records[0]).toEqual({
-      uuid: 'rel-1',
-      status: 'synced',
-      filePath: '99-incoming/2026-01-01-hello.md',
+      uuid: "rel-1",
+      status: "synced",
+      filePath: "99-incoming/2026-01-01-hello.md",
     });
   });
 
@@ -2278,15 +2280,15 @@ describe('markRecordsSynced', () => {
   // that no record in the body — across a MULTI-chunk run, not just a lone
   // record — ever carries `syncedAt`, so a regression can't hide behind only
   // the first chunk being checked.
-  it('never sends a client-computed syncedAt in the bulk PATCH body, across chunks', async () => {
+  it("never sends a client-computed syncedAt in the bulk PATCH body, across chunks", async () => {
     mockBulkPatchEcho();
     await markRecordsSynced(items(MAX_MARK_SYNCED_BATCH_SIZE + 50));
     const calls = vi.mocked(global.fetch).mock.calls;
     expect(chunkSizes()).toEqual([MAX_MARK_SYNCED_BATCH_SIZE, 50]);
 
     calls.forEach(([requestUrl, requestInit]) => {
-      expect(requestUrl).toBe('https://example.com/api/records');
-      expect(requestInit?.method).toBe('PATCH');
+      expect(requestUrl).toBe("https://example.com/api/records");
+      expect(requestInit?.method).toBe("PATCH");
     });
 
     const sentRecords = calls.flatMap(([, requestInit]) => {
@@ -2297,21 +2299,21 @@ describe('markRecordsSynced', () => {
 
     sentRecords.forEach((sentRecord) => {
       expect(Object.keys(sentRecord).sort()).toEqual([
-        'filePath',
-        'status',
-        'uuid',
+        "filePath",
+        "status",
+        "uuid",
       ]);
     });
   });
 
-  it('sends nothing and reports no outcomes for an empty input', async () => {
+  it("sends nothing and reports no outcomes for an empty input", async () => {
     global.fetch = vi.fn();
     const result = await markRecordsSynced([]);
     expect(global.fetch).not.toHaveBeenCalled();
     expect(result).toEqual({ outcomes: [], abortReason: null });
   });
 
-  it('marks every record synced in a single request at exactly the batch size', async () => {
+  it("marks every record synced in a single request at exactly the batch size", async () => {
     mockBulkPatchEcho();
     const result = await markRecordsSynced(items(MAX_MARK_SYNCED_BATCH_SIZE));
     // A full-but-not-over chunk is one request — the off-by-one boundary.
@@ -2324,7 +2326,7 @@ describe('markRecordsSynced', () => {
     expect(result.abortReason).toBe(null);
   });
 
-  it('splits one-over-the-batch-size into two requests (ceil(N/100))', async () => {
+  it("splits one-over-the-batch-size into two requests (ceil(N/100))", async () => {
     mockBulkPatchEcho();
     const result = await markRecordsSynced(
       items(MAX_MARK_SYNCED_BATCH_SIZE + 1),
@@ -2338,20 +2340,20 @@ describe('markRecordsSynced', () => {
     );
   });
 
-  it('chunks 250 records into 100/100/50 requests, each within the cap', async () => {
+  it("chunks 250 records into 100/100/50 requests, each within the cap", async () => {
     mockBulkPatchEcho();
     const result = await markRecordsSynced(items(250));
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(chunkSizes()).toEqual([100, 100, 50]);
     // No chunk may ever exceed the server cap.
-    expect(chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE)).toBe(
-      true,
-    );
+    expect(
+      chunkSizes().every((size) => size <= MAX_MARK_SYNCED_BATCH_SIZE),
+    ).toBe(true);
     expect(result.outcomes).toHaveLength(250);
     expect(result.abortReason).toBe(null);
   });
 
-  it('pairs each record its own uuid and filePath across chunks', async () => {
+  it("pairs each record its own uuid and filePath across chunks", async () => {
     mockBulkPatchEcho();
     await markRecordsSynced(items(250));
     // Inspect the SECOND chunk's body: a mis-pairing (e.g. every record getting
@@ -2361,24 +2363,24 @@ describe('markRecordsSynced', () => {
     );
     const secondRecords = secondBody.data.attributes.records;
     expect(secondRecords[0]).toEqual({
-      uuid: 'uuid-100',
-      status: 'synced',
-      filePath: '/vault/note-100.md',
+      uuid: "uuid-100",
+      status: "synced",
+      filePath: "/vault/note-100.md",
     });
     expect(secondRecords[49]).toEqual({
-      uuid: 'uuid-149',
-      status: 'synced',
-      filePath: '/vault/note-149.md',
+      uuid: "uuid-149",
+      status: "synced",
+      filePath: "/vault/note-149.md",
     });
   });
 
-  it('reports MARK_FAILED for a uuid the server did not return (partial success)', async () => {
+  it("reports MARK_FAILED for a uuid the server did not return (partial success)", async () => {
     // The server updates every record except uuid-2 (e.g. it no longer exists);
     // an absent uuid in the response means that record stays pending.
     global.fetch = vi
       .fn()
       .mockImplementation((_url, init) =>
-        echoBulkPatch(init, (uuid) => uuid !== 'uuid-2'),
+        echoBulkPatch(init, (uuid) => uuid !== "uuid-2"),
       );
 
     const result = await markRecordsSynced(items(5));
@@ -2392,14 +2394,14 @@ describe('markRecordsSynced', () => {
     expect(result.abortReason).toBe(null);
   });
 
-  it('aligns a per-record failure to its index when it lands in a later chunk', async () => {
+  it("aligns a per-record failure to its index when it lands in a later chunk", async () => {
     // uuid-120 sits in the second chunk (records 100-149). The accumulated
     // outcomes array must map it to index 120 — pins cross-chunk index
     // alignment, which a uniform-outcome multi-chunk test can't catch.
     global.fetch = vi
       .fn()
       .mockImplementation((_url, init) =>
-        echoBulkPatch(init, (uuid) => uuid !== 'uuid-120'),
+        echoBulkPatch(init, (uuid) => uuid !== "uuid-120"),
       );
 
     const result = await markRecordsSynced(items(150));
@@ -2413,14 +2415,14 @@ describe('markRecordsSynced', () => {
     expect(result.abortReason).toBe(null);
   });
 
-  it('aborts remaining chunks on a timeout and marks the timed-out chunk pending', async () => {
+  it("aborts remaining chunks on a timeout and marks the timed-out chunk pending", async () => {
     // First chunk succeeds; the second times out. The third chunk must never be
     // sent — a hung server would otherwise burn the full timeout on every chunk.
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
       callCount += 1;
       if (callCount === 2) {
-        return Promise.reject(new DOMException('timed out', 'TimeoutError'));
+        return Promise.reject(new DOMException("timed out", "TimeoutError"));
       }
 
       return echoBulkPatch(init);
@@ -2429,7 +2431,7 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // Only two requests fire — the third chunk is never attempted.
     expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result.abortReason).toBe('timeout');
+    expect(result.abortReason).toBe("timeout");
     // Chunk 1 synced (100), chunk 2 all timed out (100); chunk 3 has no outcome.
     expect(result.outcomes).toHaveLength(200);
     expect(
@@ -2442,14 +2444,14 @@ describe('markRecordsSynced', () => {
     ).toBe(true);
   });
 
-  it('does not abort remaining chunks on a plain (non-timeout) failure', async () => {
+  it("does not abort remaining chunks on a plain (non-timeout) failure", async () => {
     // Chunk 1 rejects with a plain network error; unlike a timeout, that must NOT
     // stop the run — chunks 2 and 3 still fire and settle their records.
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
       callCount += 1;
       if (callCount === 1) {
-        return Promise.reject(new Error('Network error'));
+        return Promise.reject(new Error("Network error"));
       }
 
       return echoBulkPatch(init);
@@ -2473,7 +2475,7 @@ describe('markRecordsSynced', () => {
   // the authoritative "nothing matched" signal, not a shape to treat as success.
   // Reporting those records MARK_FAILED (fail loud) is deliberate — it leaves
   // them pending to retry rather than falsely claiming a sync that didn't happen.
-  it('marks every record MARK_FAILED when the server returns an empty data set', async () => {
+  it("marks every record MARK_FAILED when the server returns an empty data set", async () => {
     mockFetch({ data: [], meta: { updated: 0 } });
     const result = await markRecordsSynced(items(3));
     expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
@@ -2483,7 +2485,7 @@ describe('markRecordsSynced', () => {
   // Off-contract safety net: the declared contract always sends `data` as an
   // array, but a proxy or future shape could send a meta-only body. Fall back to
   // `meta.updated` rather than crashing or spuriously failing the chunk.
-  it('accepts the chunk via meta.updated when the response omits the data array', async () => {
+  it("accepts the chunk via meta.updated when the response omits the data array", async () => {
     mockFetch({ meta: { updated: 3 } });
     const result = await markRecordsSynced(items(3));
     expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED, MARK_SYNCED]);
@@ -2493,21 +2495,24 @@ describe('markRecordsSynced', () => {
   // `data: null` is off-contract (markpost always sends the updated array), so
   // with no `meta.updated` to confirm it, fail the chunk loud rather than
   // guessing success — the records retry next run.
-  it('fails the chunk when data is null and no meta.updated confirms it', async () => {
+  it("fails the chunk when data is null and no meta.updated confirms it", async () => {
     mockFetch({ data: null });
     const result = await markRecordsSynced(items(2));
     expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED]);
   });
 
-  it('does not crash on a non-array data object, falling back to meta.updated', async () => {
+  it("does not crash on a non-array data object, falling back to meta.updated", async () => {
     // A single resource object (the old per-uuid shape) must not throw a
     // TypeError through the catch; meta.updated confirms the whole chunk.
-    mockFetch({ data: { attributes: { uuid: 'uuid-0' } }, meta: { updated: 2 } });
+    mockFetch({
+      data: { attributes: { uuid: "uuid-0" } },
+      meta: { updated: 2 },
+    });
     const result = await markRecordsSynced(items(2));
     expect(result.outcomes).toEqual([MARK_SYNCED, MARK_SYNCED]);
   });
 
-  it('fails the chunk when data is unreadable and meta.updated does not confirm all', async () => {
+  it("fails the chunk when data is unreadable and meta.updated does not confirm all", async () => {
     // No data array and a short/absent updated count — fail loud so the records
     // retry next run rather than being falsely reported synced.
     mockFetch({ meta: { updated: 1 } });
@@ -2515,7 +2520,7 @@ describe('markRecordsSynced', () => {
     expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED, MARK_FAILED]);
   });
 
-  it('aborts remaining chunks and reports permanent on a 401 failure', async () => {
+  it("aborts remaining chunks and reports permanent on a 401 failure", async () => {
     // A 401 (dead token) is a PERMANENT systemic failure: it recurs for every
     // remaining chunk and every future pass, so the run backs off after the first
     // chunk AND reports `abortReason: 'permanent'` so the caller stops the daemon.
@@ -2529,7 +2534,7 @@ describe('markRecordsSynced', () => {
     // Only the first chunk is attempted — the other two are never sent.
     expect(global.fetch).toHaveBeenCalledTimes(1);
     // A permanent abort — the caller both fails loud and stops the autoSync daemon.
-    expect(result.abortReason).toBe('permanent');
+    expect(result.abortReason).toBe("permanent");
     // The attempted chunk is all pending; the unsent chunks have no outcome.
     expect(result.outcomes).toHaveLength(100);
     expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
@@ -2537,7 +2542,7 @@ describe('markRecordsSynced', () => {
     );
   });
 
-  it('aborts remaining chunks and reports transient on a 503 failure', async () => {
+  it("aborts remaining chunks and reports transient on a 503 failure", async () => {
     // A 503 (or 429) is a TRANSIENT systemic failure: it aborts the remaining
     // chunks to back off (it may recur), reported as `abortReason: 'transient'`
     // so the caller can say the run stopped early — but it must NOT stop the
@@ -2551,16 +2556,16 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     expect(global.fetch).toHaveBeenCalledTimes(1);
     // Aborted the run with a non-permanent reason — the daemon stays alive.
-    expect(result.abortReason).toBe('transient');
+    expect(result.abortReason).toBe("transient");
     expect(result.outcomes).toHaveLength(100);
     expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
       true,
     );
   });
 
-  it('marks a whole chunk MARK_FAILED when the request rejects with an error response', async () => {
+  it("marks a whole chunk MARK_FAILED when the request rejects with an error response", async () => {
     mockFetch(
-      { data: { errors: [{ title: 'Unprocessable', detail: 'bad batch' }] } },
+      { data: { errors: [{ title: "Unprocessable", detail: "bad batch" }] } },
       false,
     );
     const result = await markRecordsSynced(items(3));
@@ -2568,16 +2573,16 @@ describe('markRecordsSynced', () => {
     expect(result.abortReason).toBe(null);
   });
 
-  it('marks a whole chunk MARK_FAILED on a network failure', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  it("marks a whole chunk MARK_FAILED on a network failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
     const result = await markRecordsSynced(items(2));
     expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED]);
   });
 
-  it('marks the chunk MARK_FAILED for a 2xx response whose body is not valid JSON', async () => {
+  it("marks the chunk MARK_FAILED for a 2xx response whose body is not valid JSON", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.reject(new Error('Unexpected token < in JSON')),
+      json: () => Promise.reject(new Error("Unexpected token < in JSON")),
     });
     const result = await markRecordsSynced(items(1));
     expect(result.outcomes).toEqual([MARK_FAILED]);
@@ -2588,14 +2593,14 @@ describe('markRecordsSynced', () => {
   // 'permanent'` and the caller stops the autoSync daemon. Its records stay
   // MARK_FAILED (pending). The 401 and transient-503 counterparts sit with the
   // other chunk-abort tests above.
-  it('aborts with a permanent reason on a forbidden (403) failure', async () => {
+  it("aborts with a permanent reason on a forbidden (403) failure", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 403,
       json: () => Promise.resolve({ data: { errors: [] } }),
     });
     const result = await markRecordsSynced(items(2));
-    expect(result.abortReason).toBe('permanent');
+    expect(result.abortReason).toBe("permanent");
     expect(result.outcomes).toEqual([MARK_FAILED, MARK_FAILED]);
   });
 
@@ -2607,7 +2612,7 @@ describe('markRecordsSynced', () => {
       status,
       json: () =>
         Promise.resolve({
-          data: { errors: [{ title: 'Rejected', detail }] },
+          data: { errors: [{ title: "Rejected", detail }] },
         }),
     });
   };
@@ -2618,44 +2623,48 @@ describe('markRecordsSynced', () => {
   // the run aborts with MARK_ABORTED rather than fire the same doomed request
   // again — but a LONE rejection is not enough (a chunk could be an isolated
   // reject), so the first fatal chunk keeps the run going.
-  it('aborts after two request-shape rejections with nothing synced', async () => {
+  it("aborts after two request-shape rejections with nothing synced", async () => {
     // Chunks 1 and 2 both 422 with nothing synced — the second confirms the shape
     // is wrong, so chunk 3 must never be sent.
-    mockAllChunksReject(422, 'Unknown attribute: filePath');
+    mockAllChunksReject(422, "Unknown attribute: filePath");
 
     const result = await markRecordsSynced(items(250));
     // Only two requests fire — the third chunk is never attempted.
     expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result.abortReason).toBe('request-shape');
+    expect(result.abortReason).toBe("request-shape");
     // Chunk 1 was run past (MARK_FAILED); only the stopping chunk 2 is MARK_ABORTED.
     expect(result.outcomes).toHaveLength(200);
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
-  it('aborts after two malformed-payload 400 rejections with nothing synced', async () => {
-    mockAllChunksReject(400, 'Invalid body');
+  it("aborts after two malformed-payload 400 rejections with nothing synced", async () => {
+    mockAllChunksReject(400, "Invalid body");
 
     const result = await markRecordsSynced(items(250));
     expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(result.abortReason).toBe('request-shape');
+    expect(result.abortReason).toBe("request-shape");
     expect(result.outcomes).toHaveLength(200);
     expect(
       result.outcomes.slice(0, 100).every((outcome) => outcome === MARK_FAILED),
     ).toBe(true);
     expect(
-      result.outcomes.slice(100, 200).every((outcome) => outcome === MARK_ABORTED),
+      result.outcomes
+        .slice(100, 200)
+        .every((outcome) => outcome === MARK_ABORTED),
     ).toBe(true);
   });
 
   // Two 4xx rejections with DIFFERENT messages look like two isolated per-record
   // problems, not one envelope fault — so the run must keep going rather than
   // abort. Only a repeated, identical categorical error is strong enough evidence.
-  it('does not abort on two request-shape rejections with different messages', async () => {
+  it("does not abort on two request-shape rejections with different messages", async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation(() => {
       callCount += 1;
@@ -2665,7 +2674,7 @@ describe('markRecordsSynced', () => {
         json: () =>
           Promise.resolve({
             data: {
-              errors: [{ title: 'Rejected', detail: `problem ${callCount}` }],
+              errors: [{ title: "Rejected", detail: `problem ${callCount}` }],
             },
           }),
       });
@@ -2684,12 +2693,12 @@ describe('markRecordsSynced', () => {
 
   // Two identical rejections with a non-request-shape chunk BETWEEN them are not
   // consecutive, so they don't confirm an envelope fault — the run keeps going.
-  it('does not abort on two matching rejections split by a plain failure', async () => {
+  it("does not abort on two matching rejections split by a plain failure", async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation(() => {
       callCount += 1;
       if (callCount === 2) {
-        return Promise.reject(new Error('Network error'));
+        return Promise.reject(new Error("Network error"));
       }
 
       return Promise.resolve({
@@ -2697,7 +2706,7 @@ describe('markRecordsSynced', () => {
         status: 422,
         json: () =>
           Promise.resolve({
-            data: { errors: [{ title: 'Rejected', detail: 'nope' }] },
+            data: { errors: [{ title: "Rejected", detail: "nope" }] },
           }),
       });
     });
@@ -2716,7 +2725,7 @@ describe('markRecordsSynced', () => {
   // A single request-shape rejection is not enough to abort — the next chunk
   // still fires, and if it succeeds the shape is proven valid. Guards against
   // stranding syncable records behind one isolated rejection.
-  it('does not abort on a lone request-shape rejection — the next chunk still fires', async () => {
+  it("does not abort on a lone request-shape rejection — the next chunk still fires", async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
       callCount += 1;
@@ -2726,7 +2735,7 @@ describe('markRecordsSynced', () => {
           status: 422,
           json: () =>
             Promise.resolve({
-              data: { errors: [{ title: 'Rejected', detail: 'nope' }] },
+              data: { errors: [{ title: "Rejected", detail: "nope" }] },
             }),
         });
       }
@@ -2750,7 +2759,7 @@ describe('markRecordsSynced', () => {
   // Once a chunk has synced, the envelope is proven valid, so a later 400/422 is
   // an isolated per-chunk rejection, not proof the shape is wrong — the run must
   // NOT abort even if two later chunks are rejected the same way.
-  it('does not abort on request-shape rejections once a chunk has synced', async () => {
+  it("does not abort on request-shape rejections once a chunk has synced", async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
       callCount += 1;
@@ -2760,7 +2769,7 @@ describe('markRecordsSynced', () => {
           status: 422,
           json: () =>
             Promise.resolve({
-              data: { errors: [{ title: 'Rejected', detail: 'nope' }] },
+              data: { errors: [{ title: "Rejected", detail: "nope" }] },
             }),
         });
       }
@@ -2784,7 +2793,7 @@ describe('markRecordsSynced', () => {
   // A 404 is neither a request-shape 4xx nor systemic, so it stays a plain chunk
   // failure that does NOT abort — a later chunk may still succeed. Guards the
   // fatal-request abort against widening beyond 400/422.
-  it('does not abort on a 404 — the chunk is MARK_FAILED and the run continues', async () => {
+  it("does not abort on a 404 — the chunk is MARK_FAILED and the run continues", async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
       callCount += 1;
@@ -2795,7 +2804,7 @@ describe('markRecordsSynced', () => {
           json: () =>
             Promise.resolve({
               data: {
-                errors: [{ title: 'Not Found', detail: 'No such record' }],
+                errors: [{ title: "Not Found", detail: "No such record" }],
               },
             }),
         });
@@ -2820,14 +2829,14 @@ describe('markRecordsSynced', () => {
   // request-shape rejection — it maps to MARK_FAILED with `abortReason: 'transient'`
   // (the daemon stays alive), never MARK_ABORTED / 'request-shape'. Guards the
   // fatal-request abort against catching a transient rate-limit.
-  it('treats a 429 as a transient systemic abort (MARK_FAILED, not MARK_ABORTED)', async () => {
+  it("treats a 429 as a transient systemic abort (MARK_FAILED, not MARK_ABORTED)", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 429,
       json: () =>
         Promise.resolve({
           data: {
-            errors: [{ title: 'Too Many Requests', detail: 'Slow down' }],
+            errors: [{ title: "Too Many Requests", detail: "Slow down" }],
           },
         }),
     });
@@ -2835,7 +2844,7 @@ describe('markRecordsSynced', () => {
     const result = await markRecordsSynced(items(250));
     // Systemic abort after the first chunk — the other two never fire.
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(result.abortReason).toBe('transient');
+    expect(result.abortReason).toBe("transient");
     expect(result.outcomes).toHaveLength(100);
     expect(result.outcomes.every((outcome) => outcome === MARK_FAILED)).toBe(
       true,
@@ -2845,7 +2854,7 @@ describe('markRecordsSynced', () => {
   // A 4xx delivered as a non-JSON body (an HTML WAF/proxy interstitial) throws
   // while parsing before it can be classified as request-shape, so it must
   // degrade to a plain failure — never an abort — failing in the safe direction.
-  it('does not abort on a 422 whose body is not JSON — the chunk is MARK_FAILED', async () => {
+  it("does not abort on a 422 whose body is not JSON — the chunk is MARK_FAILED", async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
       callCount += 1;
@@ -2853,7 +2862,7 @@ describe('markRecordsSynced', () => {
         return Promise.resolve({
           ok: false,
           status: 422,
-          json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+          json: () => Promise.reject(new SyntaxError("Unexpected token <")),
         });
       }
 

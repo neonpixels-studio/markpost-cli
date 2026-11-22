@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Spinner } from 'yocto-spinner';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Spinner } from "yocto-spinner";
 
-import { Record } from '#src/types/records.types.js';
-import { UserSettings, ConflictStrategy } from '#src/types/settings.types.js';
-import { SettingsReadResult } from '#src/libs/settings.js';
+import { Record } from "#src/types/records.types.js";
+import { UserSettings, ConflictStrategy } from "#src/types/settings.types.js";
+import { SettingsReadResult } from "#src/libs/settings.js";
 import {
   MARK_ABORTED,
   MARK_FAILED,
@@ -11,22 +11,22 @@ import {
   MARK_TIMED_OUT,
   MarkSyncedOutcome,
   MarkSyncedResult,
-} from '#src/libs/records.js';
-import type { WrittenRecordState } from '#src/libs/markdown.js';
+} from "#src/libs/records.js";
+import type { WrittenRecordState } from "#src/libs/markdown.js";
 
-vi.mock('#src/libs/config.js', () => ({
+vi.mock("#src/libs/config.js", () => ({
   checkConfig: vi.fn().mockResolvedValue(true),
 }));
 // Keep the real module's exports (notably the MARK_* outcome constants and
 // PENDING_STATUS) so the tests compare against the same literals production
 // code does; only the network-touching functions are stubbed.
-vi.mock('#src/libs/records.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('#src/libs/records.js')>()),
+vi.mock("#src/libs/records.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#src/libs/records.js")>()),
   fetchAllRecords: vi.fn(),
   deleteRecords: vi.fn(),
   markRecordsSynced: vi.fn(),
 }));
-vi.mock('#src/libs/markdown.js', () => ({
+vi.mock("#src/libs/markdown.js", () => ({
   writeMarkdown: vi.fn(),
   ensureOutputDirectory: vi.fn(),
   buildWritePreview: vi.fn(),
@@ -35,51 +35,51 @@ vi.mock('#src/libs/markdown.js', () => ({
   // written path through so the settle/report orchestration can be asserted.
   toVaultRelativePath: vi.fn((path: string) => path),
 }));
-vi.mock('#src/libs/settings.js', () => ({ fetchSettings: vi.fn() }));
+vi.mock("#src/libs/settings.js", () => ({ fetchSettings: vi.fn() }));
 // The ledger is a conf-backed store under the developer's real config
 // directory; stub its writer so sync tests never touch it.
-vi.mock('#src/libs/vault-ledger.js', () => ({
+vi.mock("#src/libs/vault-ledger.js", () => ({
   recordLedgerEntries: vi.fn(),
   removeLedgerEntries: vi.fn(),
 }));
 // Run the sync once synchronously instead of arming a real timer: the
 // scheduling decision itself is covered in tests/libs/scheduler.test.ts.
-vi.mock('#src/libs/scheduler.js', () => ({
+vi.mock("#src/libs/scheduler.js", () => ({
   runSyncWithAutoSchedule: vi.fn(async (runSync: () => Promise<boolean>) => {
     await runSync();
   }),
 }));
-vi.mock('#src/commands/push.js', () => ({
+vi.mock("#src/commands/push.js", () => ({
   runPushCommand: vi.fn(),
-  USAGE: 'Usage: markpost push <path...>',
+  USAGE: "Usage: markpost push <path...>",
 }));
-vi.mock('#src/commands/get.js', () => ({
+vi.mock("#src/commands/get.js", () => ({
   runGetCommand: vi.fn(),
-  USAGE: 'Usage: markpost get <uuid>',
+  USAGE: "Usage: markpost get <uuid>",
 }));
-vi.mock('#src/commands/sources.js', () => ({
+vi.mock("#src/commands/sources.js", () => ({
   runSourcesCommand: vi.fn(),
-  USAGE: 'Usage: markpost sources <list|create|update|delete> [uuid]',
+  USAGE: "Usage: markpost sources <list|create|update|delete> [uuid]",
 }));
-vi.mock('#src/commands/records.js', () => ({
+vi.mock("#src/commands/records.js", () => ({
   runRecordsCommand: vi.fn(),
-  USAGE: 'Usage: markpost records <list>',
+  USAGE: "Usage: markpost records <list>",
 }));
-vi.mock('#src/commands/events.js', () => ({
+vi.mock("#src/commands/events.js", () => ({
   runEventsCommand: vi.fn(),
-  USAGE: 'Usage: markpost events <list>',
+  USAGE: "Usage: markpost events <list>",
 }));
-vi.mock('#src/commands/export.js', () => ({
+vi.mock("#src/commands/export.js", () => ({
   runExportCommand: vi.fn(),
-  USAGE: 'Usage: markpost export [options]',
+  USAGE: "Usage: markpost export [options]",
 }));
-vi.mock('#src/commands/config.js', () => ({
+vi.mock("#src/commands/config.js", () => ({
   runConfigCommand: vi.fn(),
-  USAGE: 'Usage: markpost config <get|set|path> [key] [value]',
+  USAGE: "Usage: markpost config <get|set|path> [key] [value]",
 }));
-vi.mock('yocto-spinner', () => ({ default: vi.fn() }));
-vi.mock('cli-spinners', () => ({ default: { dots: {} } }));
-vi.mock('chalk', () => ({
+vi.mock("yocto-spinner", () => ({ default: vi.fn() }));
+vi.mock("cli-spinners", () => ({ default: { dots: {} } }));
+vi.mock("chalk", () => ({
   default: {
     redBright: vi.fn((s: unknown) => s),
     dim: vi.fn((s: unknown) => s),
@@ -88,10 +88,10 @@ vi.mock('chalk', () => ({
 }));
 
 const mockRecord: Record = {
-  uuid: 'abc-123',
-  title: 'Test Title',
-  content: 'Test Content',
-  createdAt: '2024-01-01T00:00:00Z',
+  uuid: "abc-123",
+  title: "Test Title",
+  content: "Test Content",
+  createdAt: "2024-01-01T00:00:00Z",
 };
 
 // The bulk mark-synced call resolves one outcome per input record in order.
@@ -116,7 +116,7 @@ const markResultBy =
 const markResultAll = (outcome: MarkSyncedOutcome) =>
   markResultBy(() => outcome);
 
-describe('index', () => {
+describe("index", () => {
   // The production code only calls start/success/error on the spinner, so the
   // mock implements just those three. Typed as the full Spinner it satisfies
   // yoctoSpinner's mocked return type without stubbing methods nothing calls.
@@ -134,10 +134,10 @@ describe('index', () => {
     // The sync now runs only under the explicit `sync` subcommand, so the
     // default-sync tests below invoke it that way. Dispatch, help, and
     // no-arg tests override process.argv themselves.
-    process.argv = ['node', 'index.js', 'sync'];
+    process.argv = ["node", "index.js", "sync"];
     process.exitCode = undefined;
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -148,15 +148,15 @@ describe('index', () => {
   });
 
   it('dispatches to runSourcesCommand and skips the sync flow when the "sources" command is given', async () => {
-    process.argv = [...originalArgv.slice(0, 2), 'sources', 'list'];
-    const { runSourcesCommand } = await import('#src/commands/sources.js');
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+    process.argv = [...originalArgv.slice(0, 2), "sources", "list"];
+    const { runSourcesCommand } = await import("#src/commands/sources.js");
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(runSourcesCommand).toHaveBeenCalledWith(['list']);
+    expect(runSourcesCommand).toHaveBeenCalledWith(["list"]);
     expect(fetchAllRecords).not.toHaveBeenCalled();
     expect(mockSpinner.start).not.toHaveBeenCalled();
   });
@@ -165,103 +165,103 @@ describe('index', () => {
   // (stderr, exit 1). This pins the invariant their comments rely on: a
   // subcommand-position help flag is intercepted here and never reaches the
   // handler, so it still prints usage to stdout and exits 0.
-  it.each(['--help', '-h'])(
+  it.each(["--help", "-h"])(
     'prints a subcommand group\'s usage and exits 0 for "sources %s" without invoking the handler',
     async (helpFlag) => {
-      process.argv = [...originalArgv.slice(0, 2), 'sources', helpFlag];
-      const { runSourcesCommand } = await import('#src/commands/sources.js');
+      process.argv = [...originalArgv.slice(0, 2), "sources", helpFlag];
+      const { runSourcesCommand } = await import("#src/commands/sources.js");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(runSourcesCommand).not.toHaveBeenCalled();
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost sources'),
+        expect.stringContaining("Usage: markpost sources"),
       );
       expect(process.exitCode).toBeUndefined();
     },
   );
 
   it('dispatches to runRecordsCommand and skips the sync flow when the "records" command is given', async () => {
-    process.argv = [...originalArgv.slice(0, 2), 'records', 'list'];
-    const { runRecordsCommand } = await import('#src/commands/records.js');
+    process.argv = [...originalArgv.slice(0, 2), "records", "list"];
+    const { runRecordsCommand } = await import("#src/commands/records.js");
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(runRecordsCommand).toHaveBeenCalledWith(['list']);
+    expect(runRecordsCommand).toHaveBeenCalledWith(["list"]);
     expect(fetchAllRecords).not.toHaveBeenCalled();
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(mockSpinner.start).not.toHaveBeenCalled();
   });
 
   it('dispatches to runEventsCommand and skips the sync flow when the "events" command is given', async () => {
-    process.argv = [...originalArgv.slice(0, 2), 'events', 'list'];
-    const { runEventsCommand } = await import('#src/commands/events.js');
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+    process.argv = [...originalArgv.slice(0, 2), "events", "list"];
+    const { runEventsCommand } = await import("#src/commands/events.js");
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(runEventsCommand).toHaveBeenCalledWith(['list']);
+    expect(runEventsCommand).toHaveBeenCalledWith(["list"]);
     expect(fetchAllRecords).not.toHaveBeenCalled();
     expect(mockSpinner.start).not.toHaveBeenCalled();
   });
 
   it('dispatches to runExportCommand and skips the sync flow when the "export" command is given', async () => {
-    process.argv = [...originalArgv.slice(0, 2), 'export', '--json'];
-    const { runExportCommand } = await import('#src/commands/export.js');
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+    process.argv = [...originalArgv.slice(0, 2), "export", "--json"];
+    const { runExportCommand } = await import("#src/commands/export.js");
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(runExportCommand).toHaveBeenCalledWith(['--json']);
+    expect(runExportCommand).toHaveBeenCalledWith(["--json"]);
     expect(fetchAllRecords).not.toHaveBeenCalled();
     expect(mockSpinner.start).not.toHaveBeenCalled();
   });
 
-  it('dispatches to runPushCommand and skips the default sync when the push command is given', async () => {
-    process.argv = ['node', 'index.js', 'push', './notes/test.md'];
-    const { runPushCommand } = await import('#src/commands/push.js');
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("dispatches to runPushCommand and skips the default sync when the push command is given", async () => {
+    process.argv = ["node", "index.js", "push", "./notes/test.md"];
+    const { runPushCommand } = await import("#src/commands/push.js");
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(runPushCommand).toHaveBeenCalledWith(['./notes/test.md']);
+    expect(runPushCommand).toHaveBeenCalledWith(["./notes/test.md"]);
     expect(fetchAllRecords).not.toHaveBeenCalled();
     expect(yoctoSpinner).not.toHaveBeenCalled();
   });
 
-  it('dispatches to runGetCommand and skips the default sync when the get command is given', async () => {
-    process.argv = ['node', 'index.js', 'get', 'abc-123'];
-    const { runGetCommand } = await import('#src/commands/get.js');
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("dispatches to runGetCommand and skips the default sync when the get command is given", async () => {
+    process.argv = ["node", "index.js", "get", "abc-123"];
+    const { runGetCommand } = await import("#src/commands/get.js");
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(runGetCommand).toHaveBeenCalledWith(['abc-123']);
+    expect(runGetCommand).toHaveBeenCalledWith(["abc-123"]);
     expect(fetchAllRecords).not.toHaveBeenCalled();
     expect(yoctoSpinner).not.toHaveBeenCalled();
   });
 
-  it('errors out on an unrecognized command instead of falling through to the default sync', async () => {
-    process.argv = ['node', 'index.js', 'puhs', 'file.md'];
-    const { runPushCommand } = await import('#src/commands/push.js');
-    const { runGetCommand } = await import('#src/commands/get.js');
-    const { runSourcesCommand } = await import('#src/commands/sources.js');
-    const { runRecordsCommand } = await import('#src/commands/records.js');
+  it("errors out on an unrecognized command instead of falling through to the default sync", async () => {
+    process.argv = ["node", "index.js", "puhs", "file.md"];
+    const { runPushCommand } = await import("#src/commands/push.js");
+    const { runGetCommand } = await import("#src/commands/get.js");
+    const { runSourcesCommand } = await import("#src/commands/sources.js");
+    const { runRecordsCommand } = await import("#src/commands/records.js");
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(runPushCommand).not.toHaveBeenCalled();
     expect(runGetCommand).not.toHaveBeenCalled();
@@ -271,22 +271,22 @@ describe('index', () => {
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(yoctoSpinner).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Unknown command: puhs'),
+      expect.stringContaining("Unknown command: puhs"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it.each(['toString', 'constructor', 'hasOwnProperty', '__proto__'])(
+  it.each(["toString", "constructor", "hasOwnProperty", "__proto__"])(
     'treats "%s" as an unknown command rather than resolving it off Object.prototype',
     async (command) => {
-      process.argv = ['node', 'index.js', command];
-      const { runPushCommand } = await import('#src/commands/push.js');
-      const { runGetCommand } = await import('#src/commands/get.js');
-      const { runSourcesCommand } = await import('#src/commands/sources.js');
-      const { runRecordsCommand } = await import('#src/commands/records.js');
-      const { fetchAllRecords } = await import('#src/libs/records.js');
+      process.argv = ["node", "index.js", command];
+      const { runPushCommand } = await import("#src/commands/push.js");
+      const { runGetCommand } = await import("#src/commands/get.js");
+      const { runSourcesCommand } = await import("#src/commands/sources.js");
+      const { runRecordsCommand } = await import("#src/commands/records.js");
+      const { fetchAllRecords } = await import("#src/libs/records.js");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(runPushCommand).not.toHaveBeenCalled();
       expect(runGetCommand).not.toHaveBeenCalled();
@@ -300,37 +300,37 @@ describe('index', () => {
     },
   );
 
-  it.each(['--help', 'help', '-h'])(
+  it.each(["--help", "help", "-h"])(
     'prints aggregated usage and exits 0 for "%s" without touching the sync',
     async (helpFlag) => {
-      process.argv = ['node', 'index.js', helpFlag];
+      process.argv = ["node", "index.js", helpFlag];
       const { fetchAllRecords, deleteRecords } =
-        await import('#src/libs/records.js');
-      const { default: yoctoSpinner } = await import('yocto-spinner');
+        await import("#src/libs/records.js");
+      const { default: yoctoSpinner } = await import("yocto-spinner");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       // Aggregates every subcommand's own USAGE string.
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost sync'),
+        expect.stringContaining("Usage: markpost sync"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost push'),
+        expect.stringContaining("Usage: markpost push"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost get'),
+        expect.stringContaining("Usage: markpost get"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost sources'),
+        expect.stringContaining("Usage: markpost sources"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost records'),
+        expect.stringContaining("Usage: markpost records"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost events'),
+        expect.stringContaining("Usage: markpost events"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost export'),
+        expect.stringContaining("Usage: markpost export"),
       );
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(deleteRecords).not.toHaveBeenCalled();
@@ -340,26 +340,26 @@ describe('index', () => {
   );
 
   it('prints only the targeted command usage for "help <command>"', async () => {
-    process.argv = ['node', 'index.js', 'help', 'sync'];
+    process.argv = ["node", "index.js", "help", "sync"];
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Usage: markpost sync'),
+      expect.stringContaining("Usage: markpost sync"),
     );
     expect(console.log).not.toHaveBeenCalledWith(
-      expect.stringContaining('Usage: markpost push'),
+      expect.stringContaining("Usage: markpost push"),
     );
     expect(process.exitCode).toBeUndefined();
   });
 
-  it('falls back to the full help for an unknown help topic', async () => {
-    process.argv = ['node', 'index.js', 'help', 'bogus'];
+  it("falls back to the full help for an unknown help topic", async () => {
+    process.argv = ["node", "index.js", "help", "bogus"];
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Usage: markpost <command>'),
+      expect.stringContaining("Usage: markpost <command>"),
     );
     expect(process.exitCode).toBeUndefined();
   });
@@ -367,33 +367,33 @@ describe('index', () => {
   // `version` isn't a COMMANDS entry, so without a special case this would
   // fall through to the full HELP_TEXT — contradicting the line HELP_TEXT
   // itself prints about `markpost --version`.
-  it.each(['version', '--version', '-v'])(
+  it.each(["version", "--version", "-v"])(
     'prints only the version usage for "help %s" instead of the full help',
     async (versionTopic) => {
-      process.argv = ['node', 'index.js', 'help', versionTopic];
+      process.argv = ["node", "index.js", "help", versionTopic];
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
-      expect(console.log).toHaveBeenCalledWith('Usage: markpost --version');
+      expect(console.log).toHaveBeenCalledWith("Usage: markpost --version");
       expect(console.log).not.toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost <command>'),
+        expect.stringContaining("Usage: markpost <command>"),
       );
       expect(process.exitCode).toBeUndefined();
     },
   );
 
-  it.each(['--version', '-v', 'version'])(
+  it.each(["--version", "-v", "version"])(
     'prints only the installed package version and exits 0 for "%s" without touching the sync',
     async (versionFlag) => {
-      process.argv = ['node', 'index.js', versionFlag];
+      process.argv = ["node", "index.js", versionFlag];
       const { fetchAllRecords, deleteRecords } =
-        await import('#src/libs/records.js');
-      const { default: yoctoSpinner } = await import('yocto-spinner');
-      const packageJson = await import('../package.json', {
-        with: { type: 'json' },
+        await import("#src/libs/records.js");
+      const { default: yoctoSpinner } = await import("yocto-spinner");
+      const packageJson = await import("../package.json", {
+        with: { type: "json" },
       });
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       // Exactly one console.log call, and it's the bare version string — pins
       // the version path against accidentally also dumping HELP_TEXT.
@@ -416,20 +416,20 @@ describe('index', () => {
   // trailing word after `--version` isn't meaningful, so it must be treated as
   // a genuine usage mistake (fail loud) rather than silently printing the
   // version and ignoring the rest of the line.
-  it.each(['--version', '-v', 'version'])(
+  it.each(["--version", "-v", "version"])(
     'rejects extra arguments after "%s" instead of printing the version',
     async (versionToken) => {
-      process.argv = ['node', 'index.js', versionToken, 'sync'];
+      process.argv = ["node", "index.js", versionToken, "sync"];
       const { fetchAllRecords, deleteRecords } =
-        await import('#src/libs/records.js');
+        await import("#src/libs/records.js");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('Unexpected arguments: sync'),
+        expect.stringContaining("Unexpected arguments: sync"),
       );
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost --version'),
+        expect.stringContaining("Usage: markpost --version"),
       );
       expect(process.exitCode).toBe(1);
       expect(fetchAllRecords).not.toHaveBeenCalled();
@@ -442,16 +442,16 @@ describe('index', () => {
   // — otherwise `markpost version --help` would fall into the
   // unexpected-arguments guard instead of behaving like every other
   // command's `--help`.
-  it.each(['--help', '-h'])(
+  it.each(["--help", "-h"])(
     'prints version usage for "version %s" instead of rejecting it as an unexpected argument',
     async (helpFlag) => {
-      process.argv = ['node', 'index.js', 'version', helpFlag];
+      process.argv = ["node", "index.js", "version", helpFlag];
       const { fetchAllRecords, deleteRecords } =
-        await import('#src/libs/records.js');
+        await import("#src/libs/records.js");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
-      expect(console.log).toHaveBeenCalledWith('Usage: markpost --version');
+      expect(console.log).toHaveBeenCalledWith("Usage: markpost --version");
       expect(console.error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
       expect(fetchAllRecords).not.toHaveBeenCalled();
@@ -464,12 +464,12 @@ describe('index', () => {
   // must still reach the handler untouched, exactly like HELP_FLAG_ARGS
   // doesn't intercept a `-h`/`--help` sub-argument outside its own check.
   it('passes "-v" through to the command handler when it is a sub-argument, not the command itself', async () => {
-    process.argv = ['node', 'index.js', 'push', '-v'];
-    const { runPushCommand } = await import('#src/commands/push.js');
+    process.argv = ["node", "index.js", "push", "-v"];
+    const { runPushCommand } = await import("#src/commands/push.js");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(runPushCommand).toHaveBeenCalledWith(['-v']);
+    expect(runPushCommand).toHaveBeenCalledWith(["-v"]);
   });
 
   // The sync command rejects unexpected arguments outright (see
@@ -477,37 +477,37 @@ describe('index', () => {
   // silently swallowed as a version request or as a no-op — it's a genuine
   // usage mistake and must fail loud like any other unrecognized sync flag.
   it('rejects "--version" as a sync sub-argument instead of printing the version', async () => {
-    process.argv = ['node', 'index.js', 'sync', '--version'];
+    process.argv = ["node", "index.js", "sync", "--version"];
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
+      await import("#src/libs/records.js");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Unexpected arguments: --version'),
+      expect.stringContaining("Unexpected arguments: --version"),
     );
     expect(process.exitCode).toBe(1);
     expect(fetchAllRecords).not.toHaveBeenCalled();
     expect(deleteRecords).not.toHaveBeenCalled();
   });
 
-  it('prints help, fails loud, and never runs the destructive sync when invoked with no arguments', async () => {
-    process.argv = ['node', 'index.js'];
+  it("prints help, fails loud, and never runs the destructive sync when invoked with no arguments", async () => {
+    process.argv = ["node", "index.js"];
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // A bare invocation is a missing-command error: help goes to stderr and
     // the exit code is non-zero so a cron job or wrapper can't "succeed"
     // while silently syncing nothing.
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Usage: markpost <command>'),
+      expect.stringContaining("Usage: markpost <command>"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('No command given'),
+      expect.stringContaining("No command given"),
     );
     expect(process.exitCode).toBe(1);
     // The whole point of the fix: a bare invocation must not fetch, write, or
@@ -518,18 +518,18 @@ describe('index', () => {
     expect(yoctoSpinner).not.toHaveBeenCalled();
   });
 
-  it.each(['--help', '-h'])(
+  it.each(["--help", "-h"])(
     'prints sync usage instead of syncing for "sync %s"',
     async (helpFlag) => {
-      process.argv = ['node', 'index.js', 'sync', helpFlag];
+      process.argv = ["node", "index.js", "sync", helpFlag];
       const { fetchAllRecords, deleteRecords } =
-        await import('#src/libs/records.js');
-      const { default: yoctoSpinner } = await import('yocto-spinner');
+        await import("#src/libs/records.js");
+      const { default: yoctoSpinner } = await import("yocto-spinner");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: markpost sync'),
+        expect.stringContaining("Usage: markpost sync"),
       );
       expect(fetchAllRecords).not.toHaveBeenCalled();
       expect(deleteRecords).not.toHaveBeenCalled();
@@ -539,24 +539,24 @@ describe('index', () => {
   );
 
   it.each([
-    ['push', '--help'],
-    ['get', '-h'],
-    ['sources', '--help'],
-    ['records', '-h'],
-    ['events', '--help'],
-    ['export', '-h'],
+    ["push", "--help"],
+    ["get", "-h"],
+    ["sources", "--help"],
+    ["records", "-h"],
+    ["events", "--help"],
+    ["export", "-h"],
   ])(
     'prints %s usage for "%s %s" without invoking the command handler',
     async (name, helpFlag) => {
-      process.argv = ['node', 'index.js', name, helpFlag];
-      const pushModule = await import('#src/commands/push.js');
-      const getModule = await import('#src/commands/get.js');
-      const sourcesModule = await import('#src/commands/sources.js');
-      const recordsModule = await import('#src/commands/records.js');
-      const eventsModule = await import('#src/commands/events.js');
-      const exportModule = await import('#src/commands/export.js');
+      process.argv = ["node", "index.js", name, helpFlag];
+      const pushModule = await import("#src/commands/push.js");
+      const getModule = await import("#src/commands/get.js");
+      const sourcesModule = await import("#src/commands/sources.js");
+      const recordsModule = await import("#src/commands/records.js");
+      const eventsModule = await import("#src/commands/events.js");
+      const exportModule = await import("#src/commands/export.js");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining(`Usage: markpost ${name}`),
@@ -573,16 +573,16 @@ describe('index', () => {
     },
   );
 
-  it('errors and skips the sync when the sync command is given unexpected arguments', async () => {
-    process.argv = ['node', 'index.js', 'sync', 'oops'];
+  it("errors and skips the sync when the sync command is given unexpected arguments", async () => {
+    process.argv = ["node", "index.js", "sync", "oops"];
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Unexpected arguments: oops'),
+      expect.stringContaining("Unexpected arguments: oops"),
     );
     expect(process.exitCode).toBe(1);
     expect(fetchAllRecords).not.toHaveBeenCalled();
@@ -591,12 +591,12 @@ describe('index', () => {
   });
 
   it('runs the sync only under the explicit "sync" command', async () => {
-    process.argv = ['node', 'index.js', 'sync'];
+    process.argv = ["node", "index.js", "sync"];
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -605,47 +605,47 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Scoped to pending so the sync never re-fetches already-synced records
     // (regression guard for the `-2`/`-3` duplicate bug).
-    expect(fetchAllRecords).toHaveBeenCalledWith({ status: 'pending' });
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(fetchAllRecords).toHaveBeenCalledWith({ status: "pending" });
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
   });
 
   // checkConfig now signals failure by resolving false rather than terminating
   // the process, so the sync must abort before reading settings or fetching
   // records instead of falling through with unconfigured credentials.
-  it('aborts the sync without fetching when checkConfig resolves false', async () => {
-    process.argv = ['node', 'index.js', 'sync'];
-    const { checkConfig } = await import('#src/libs/config.js');
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("aborts the sync without fetching when checkConfig resolves false", async () => {
+    process.argv = ["node", "index.js", "sync"];
+    const { checkConfig } = await import("#src/libs/config.js");
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     // Once so the false result can't leak past this test's single sync call
     // (beforeEach clears call history, not implementations).
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(fetchSettings).not.toHaveBeenCalled();
     expect(fetchAllRecords).not.toHaveBeenCalled();
   });
 
-  it('fetches all records and writes each as markdown', async () => {
+  it("fetches all records and writes each as markdown", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -654,32 +654,32 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(mockSpinner.start).toHaveBeenCalledWith('Fetching records...');
+    expect(mockSpinner.start).toHaveBeenCalledWith("Fetching records...");
     expect(fetchAllRecords).toHaveBeenCalled();
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
-      'suffix',
+      "suffix",
       expect.any(Map),
       true,
       expect.any(Map),
       expect.any(Set),
     );
-    expect(mockSpinner.success).toHaveBeenCalledWith('Fetched 1 records!');
-    expect(mockSpinner.start).toHaveBeenCalledWith('Writing records...');
-    expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
+    expect(mockSpinner.success).toHaveBeenCalledWith("Fetched 1 records!");
+    expect(mockSpinner.start).toHaveBeenCalledWith("Writing records...");
+    expect(mockSpinner.success).toHaveBeenCalledWith("Wrote 1 records!");
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('/mock/output/test-title.md'),
+      expect.stringContaining("/mock/output/test-title.md"),
     );
-    expect(mockSpinner.start).toHaveBeenCalledWith('Deleting records...');
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(mockSpinner.start).toHaveBeenCalledWith("Deleting records...");
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
   });
 
   // Shared arrange for the two-record delete-count scenarios below: two
@@ -689,16 +689,16 @@ describe('index', () => {
   // otherwise have duplicated this same seven-line setup a third time.
   const arrangeTwoRecordDelete = async ({ deleted }: { deleted: number }) => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -708,8 +708,8 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown)
-      .mockReturnValueOnce('/mock/output/test-title.md')
-      .mockReturnValueOnce('/mock/output/title-2.md');
+      .mockReturnValueOnce("/mock/output/test-title.md")
+      .mockReturnValueOnce("/mock/output/title-2.md");
     vi.mocked(deleteRecords).mockResolvedValueOnce({
       meta: { deleted },
       permanentlyFailed: false,
@@ -718,19 +718,19 @@ describe('index', () => {
     return { mockRecord2, fetchAllRecords, deleteRecords, writeMarkdown };
   };
 
-  it('writes one markdown file per record', async () => {
+  it("writes one markdown file per record", async () => {
     // Full delete — this test is about the write fan-out, not the delete
     // count, so it stays on the clean-exit path rather than incidentally
     // exercising the partial-delete branch covered below.
     const { mockRecord2, writeMarkdown, deleteRecords } =
       await arrangeTwoRecordDelete({ deleted: 2 });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
-      'suffix',
+      "suffix",
       expect.any(Map),
       true,
       expect.any(Map),
@@ -738,7 +738,7 @@ describe('index', () => {
     );
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord2,
-      'suffix',
+      "suffix",
       expect.any(Map),
       true,
       expect.any(Map),
@@ -751,23 +751,23 @@ describe('index', () => {
     const [firstCall, secondCall] = vi.mocked(writeMarkdown).mock.calls;
     expect(secondCall[2]).toBe(firstCall[2]);
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('/mock/output/test-title.md'),
+      expect.stringContaining("/mock/output/test-title.md"),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('/mock/output/title-2.md'),
+      expect.stringContaining("/mock/output/title-2.md"),
     );
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123", "def-456"]);
   });
 
   // Issue #185: a full delete must still exit clean. Locks down the happy
   // path so the partial-count test below is a meaningful contrast, not just
   // an assertion no other test would catch either way.
-  it('exits 0 on a full delete', async () => {
+  it("exits 0 on a full delete", async () => {
     await arrangeTwoRecordDelete({ deleted: 2 });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(mockSpinner.success).toHaveBeenCalledWith('Deleted 2 records!');
+    expect(mockSpinner.success).toHaveBeenCalledWith("Deleted 2 records!");
     // Exact (not scoped by message) so a regression that reroutes a full
     // delete into either fail-loud branch still fails this assertion, not
     // just the exitCode check below.
@@ -781,16 +781,16 @@ describe('index', () => {
   // this fix the branch only checked `!deleteMeta`, so a short count still
   // hit the plain `spinner.success` and exit 0, silently lying about records
   // left pending on the server.
-  it('treats a non-null short delete count as partial success and exits non-zero', async () => {
+  it("treats a non-null short delete count as partial success and exits non-zero", async () => {
     // Both records were written and are settleable, but only one was
     // actually deleted server-side.
     const { deleteRecords } = await arrangeTwoRecordDelete({ deleted: 1 });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123", "def-456"]);
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      expect.stringContaining('Deleted'),
+      expect.stringContaining("Deleted"),
     );
     // "remain pending" would overclaim: markpost also silently drops
     // nonexistent/foreign uuids per chunk, so an undeleted uuid may already
@@ -798,7 +798,7 @@ describe('index', () => {
     // count can support.
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining(
-        'Deleted 1 of 2 records — the rest were not confirmed deleted',
+        "Deleted 1 of 2 records — the rest were not confirmed deleted",
       ),
     );
     expect(process.exitCode).toBe(1);
@@ -809,14 +809,14 @@ describe('index', () => {
   // guards the `> settleableRecords.length` branch added alongside the
   // short-count fix so it can't quietly regress back to treating any
   // non-strict-match count as a full delete.
-  it('treats an impossible over-count as untrustworthy and exits non-zero', async () => {
+  it("treats an impossible over-count as untrustworthy and exits non-zero", async () => {
     const { deleteRecords } = await arrangeTwoRecordDelete({ deleted: 3 });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123", "def-456"]);
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      expect.stringContaining('Deleted'),
+      expect.stringContaining("Deleted"),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining(
@@ -831,14 +831,14 @@ describe('index', () => {
   // negative. A negative count is exactly as untrustworthy as an over-count —
   // it must not fall through to the short-count branch and get framed as a
   // legitimate "may still be pending" partial settle.
-  it('treats a negative delete count as untrustworthy and exits non-zero', async () => {
+  it("treats a negative delete count as untrustworthy and exits non-zero", async () => {
     const { deleteRecords } = await arrangeTwoRecordDelete({ deleted: -1 });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123', 'def-456']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123", "def-456"]);
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      expect.stringContaining('Deleted'),
+      expect.stringContaining("Deleted"),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining(
@@ -848,18 +848,18 @@ describe('index', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('warns about and excludes a dropped-server-change record from the delete', async () => {
+  it("warns about and excludes a dropped-server-change record from the delete", async () => {
     const droppedRecord: Record = {
-      uuid: 'dropped-1',
-      title: 'Dropped',
-      content: 'x',
-      createdAt: '2024-01-03T00:00:00Z',
+      uuid: "dropped-1",
+      title: "Dropped",
+      content: "x",
+      createdAt: "2024-01-03T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -884,28 +884,28 @@ describe('index', () => {
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Only the clean record is deleted; the dropped one is held back so its
     // server revision survives.
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Deferred 1 record(s)'),
+      expect.stringContaining("Deferred 1 record(s)"),
     );
   });
 
-  it('warns about and excludes a dropped-server-change record from the mark-synced step', async () => {
+  it("warns about and excludes a dropped-server-change record from the mark-synced step", async () => {
     const droppedRecord: Record = {
-      uuid: 'dropped-1',
-      title: 'Dropped',
-      content: 'x',
-      createdAt: '2024-01-03T00:00:00Z',
+      uuid: "dropped-1",
+      title: "Dropped",
+      content: "x",
+      createdAt: "2024-01-03T00:00:00Z",
     };
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -927,49 +927,49 @@ describe('index', () => {
     );
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Only the clean record is marked synced; the dropped one is held back from
     // the bulk call so it stays pending and a later run can re-surface the
     // unreconciled server revision.
     expect(markRecordsSynced).toHaveBeenCalledTimes(1);
     expect(markRecordsSynced).toHaveBeenCalledWith([
-      { uuid: 'abc-123', filePath: '/mock/output/abc-123.md' },
+      { uuid: "abc-123", filePath: "/mock/output/abc-123.md" },
     ]);
     // The written path is routed through toVaultRelativePath so the stored value
     // is vault-relative (no home directory) and round-trips on a re-queue.
-    const { toVaultRelativePath } = await import('#src/libs/markdown.js');
-    expect(toVaultRelativePath).toHaveBeenCalledWith('/mock/output/abc-123.md');
+    const { toVaultRelativePath } = await import("#src/libs/markdown.js");
+    expect(toVaultRelativePath).toHaveBeenCalledWith("/mock/output/abc-123.md");
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Deferred 1 record(s)'),
+      expect.stringContaining("Deferred 1 record(s)"),
     );
   });
 
-  it('passes the same seenSlugs map instance to every autoSync pass', async () => {
+  it("passes the same seenSlugs map instance to every autoSync pass", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
-    const SHARED_SLUG = 'same-title';
+    const SHARED_SLUG = "same-title";
     const passOneRecord: Record = {
-      uuid: 'pass-1',
-      title: 'Same Title',
-      content: 'One',
-      createdAt: '2024-01-01T00:00:00Z',
+      uuid: "pass-1",
+      title: "Same Title",
+      content: "One",
+      createdAt: "2024-01-01T00:00:00Z",
     };
     const passTwoRecord: Record = {
-      uuid: 'pass-2',
-      title: 'Same Title',
-      content: 'Two',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "pass-2",
+      title: "Same Title",
+      content: "Two",
+      createdAt: "2024-01-02T00:00:00Z",
     };
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ conflictStrategy: 'overwrite' }),
+      mockSettings({ conflictStrategy: "overwrite" }),
     );
     // Each pass fetches a distinct record that slugifies to the same slug.
     vi.mocked(fetchAllRecords)
@@ -1000,7 +1000,6 @@ describe('index', () => {
       record: Record,
       _conflictStrategy?: ConflictStrategy,
       seenSlugs?: Map<string, string>,
-      _includeFrontmatter?: boolean,
     ): string | null => {
       ownerAtCall.push(seenSlugs?.get(SHARED_SLUG));
       if (seenSlugs && !seenSlugs.has(SHARED_SLUG)) {
@@ -1023,7 +1022,7 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
     const [firstCall, secondCall] = vi.mocked(writeMarkdown).mock.calls;
@@ -1035,14 +1034,14 @@ describe('index', () => {
     // Pass one recorded pass-1 as the slug's owner; pass two still sees it, so a
     // different record is downgraded to suffix (behavior proven end-to-end in
     // markdown.test.ts). A per-pass map would make this [undefined, undefined].
-    expect(ownerAtCall).toEqual([undefined, 'pass-1']);
+    expect(ownerAtCall).toEqual([undefined, "pass-1"]);
   });
 
-  it('exits early when no records are fetched', async () => {
+  it("exits early when no records are fetched", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchAllRecords).mockResolvedValue({
@@ -1051,10 +1050,10 @@ describe('index', () => {
       partial: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.success).toHaveBeenCalledWith(
-      'No new records, exiting...',
+      "No new records, exiting...",
     );
     expect(writeMarkdown).not.toHaveBeenCalled();
     expect(deleteRecords).not.toHaveBeenCalled();
@@ -1063,27 +1062,27 @@ describe('index', () => {
   // A failed fetch (`ok: false`) must fail loud with a non-zero exit — never
   // report "No new records" and exit 0, which would silently mask a broken
   // sync in cron (issue #63). It must also write and delete nothing.
-  it('fails loud and exits non-zero when the record fetch fails', async () => {
+  it("fails loud and exits non-zero when the record fetch fails", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
     vi.mocked(fetchAllRecords).mockResolvedValue({ ok: false });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Pin the fail-loud branch specifically: assert its exact message rather
     // than a bare `spinner.error` call, so deleting this branch (and letting
     // the generic catch's "Something went wrong!" fire instead) fails here.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      'Failed to fetch records from the server — nothing synced.',
+      "Failed to fetch records from the server — nothing synced.",
     );
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      'No new records, exiting...',
+      "No new records, exiting...",
     );
     expect(writeMarkdown).not.toHaveBeenCalled();
     expect(deleteRecords).not.toHaveBeenCalled();
@@ -1096,14 +1095,14 @@ describe('index', () => {
   // never report "No new records, exiting..." and exit 0 (a silent failure a
   // cron job would treat as success). It must also write and delete nothing,
   // and stop autoSync from rescheduling into the same dead token.
-  it('fails loud and exits non-zero on an expired-token (401) sync — not a silent success', async () => {
+  it("fails loud and exits non-zero on an expired-token (401) sync — not a silent success", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { ApiRequestError } = await import('#src/libs/api.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { ApiRequestError } = await import("#src/libs/api.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     let scheduledAutoSync: boolean | undefined;
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
@@ -1124,25 +1123,25 @@ describe('index', () => {
       ),
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // The classified systemic message prints via console.error (guaranteed
     // output), not the generic "Something went wrong!" — so a cron log says the
     // token is the problem.
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Authentication failed (HTTP 401)'),
+      expect.stringContaining("Authentication failed (HTTP 401)"),
     );
     // The server-derived escape must be stripped before printing.
     const printedEscape = vi
       .mocked(console.error)
       .mock.calls.some(
-        ([arg]) => typeof arg === 'string' && arg.includes(escape),
+        ([arg]) => typeof arg === "string" && arg.includes(escape),
       );
     expect(printedEscape).toBe(false);
-    expect(mockSpinner.error).not.toHaveBeenCalledWith('Something went wrong!');
+    expect(mockSpinner.error).not.toHaveBeenCalledWith("Something went wrong!");
     // The silent-success path must never fire.
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      'No new records, exiting...',
+      "No new records, exiting...",
     );
     expect(writeMarkdown).not.toHaveBeenCalled();
     expect(deleteRecords).not.toHaveBeenCalled();
@@ -1155,12 +1154,12 @@ describe('index', () => {
   // classified message surfaces and the run never reports "No new records".
   // BUT a 5xx is transient, so — unlike a dead token — it must NOT kill the
   // autoSync daemon: the run reports autoSync back so the scheduler retries.
-  it('fails loud on a systemic server (503) fetch failure but keeps autoSync alive to retry', async () => {
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { ApiRequestError } = await import('#src/libs/api.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("fails loud on a systemic server (503) fetch failure but keeps autoSync alive to retry", async () => {
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { ApiRequestError } = await import("#src/libs/api.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     let scheduledAutoSync: boolean | undefined;
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
@@ -1173,16 +1172,16 @@ describe('index', () => {
       mockSettings({ autoSync: true }),
     );
     vi.mocked(fetchAllRecords).mockRejectedValue(
-      new ApiRequestError('Service unavailable', 503),
+      new ApiRequestError("Service unavailable", 503),
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Server error (HTTP 503)'),
+      expect.stringContaining("Server error (HTTP 503)"),
     );
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      'No new records, exiting...',
+      "No new records, exiting...",
     );
     expect(process.exitCode).toBe(1);
     // Transient failure: the daemon must retry, so autoSync is preserved.
@@ -1192,12 +1191,12 @@ describe('index', () => {
   // A partial read (a later page failed mid-pagination) must fail loud too —
   // exit non-zero and mark the spinner errored — while still syncing the pages
   // that were fetched, so cron never treats a truncated sync as clean.
-  it('fails loud but still syncs the fetched pages on a partial fetch', async () => {
+  it("fails loud but still syncs the fetched pages on a partial fetch", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -1206,45 +1205,45 @@ describe('index', () => {
       records: [mockRecord],
       partial: true,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('a later page failed'),
+      expect.stringContaining("a later page failed"),
     );
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      'No new records, exiting...',
+      "No new records, exiting...",
     );
     // The fetched page is still written and (with autoDelete on) deleted.
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
-      'suffix',
+      "suffix",
       expect.any(Map),
       true,
       expect.any(Map),
       expect.any(Set),
     );
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
     // The run ends on the truncation warning, not the green delete-success line.
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Sync was incomplete'),
+      expect.stringContaining("Sync was incomplete"),
     );
     expect(process.exitCode).toBe(1);
   });
 
   // A partial read that fetched zero records must fail loud and return without
   // running the write path (no confusing "Wrote 0 records!" after the error).
-  it('fails loud and writes nothing on a partial fetch that returned no records', async () => {
+  it("fails loud and writes nothing on a partial fetch that returned no records", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -1254,27 +1253,27 @@ describe('index', () => {
       partial: true,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('a later page failed'),
+      expect.stringContaining("a later page failed"),
     );
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      'No new records, exiting...',
+      "No new records, exiting...",
     );
     expect(writeMarkdown).not.toHaveBeenCalled();
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 
-  it('calls spinner.error and logs to console.error when fetchAllRecords throws', async () => {
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("calls spinner.error and logs to console.error when fetchAllRecords throws", async () => {
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
-    vi.mocked(fetchAllRecords).mockRejectedValue(new Error('Network error'));
+    vi.mocked(fetchAllRecords).mockRejectedValue(new Error("Network error"));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalled();
     expect(console.error).toHaveBeenCalled();
@@ -1286,26 +1285,26 @@ describe('index', () => {
   ): SettingsReadResult => ({
     ok: true,
     settings: {
-      userId: 'user-1',
-      vaultDir: '',
-      filenameTemplate: '',
+      userId: "user-1",
+      vaultDir: "",
+      filenameTemplate: "",
       autoSync: true,
       autoDelete: true,
       frontmatter: true,
-      conflictStrategy: 'suffix',
-      theme: 'system',
-      accentColor: '#a855f7',
-      updatedAt: '2024-01-01T00:00:00Z',
+      conflictStrategy: "suffix",
+      theme: "system",
+      accentColor: "#a855f7",
+      updatedAt: "2024-01-01T00:00:00Z",
       ...overrides,
     },
   });
 
-  it('writes but mutates nothing on the server (no delete, no mark) when settings cannot be read', async () => {
+  it("writes but mutates nothing on the server (no delete, no mark) when settings cannot be read", async () => {
     const { fetchAllRecords, deleteRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue({ ok: false });
@@ -1314,64 +1313,64 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
-      'suffix',
+      "suffix",
       expect.any(Map),
       true,
       expect.any(Map),
       expect.any(Set),
     );
-    expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
+    expect(mockSpinner.success).toHaveBeenCalledWith("Wrote 1 records!");
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Could not read settings'),
+      expect.stringContaining("Could not read settings"),
     );
     // With an unknown autoDelete preference the run must not mutate the server
     // at all: marking synced would be permanent and could strand records a
     // user with autoDelete on wanted deleted. They stay pending for a later
     // run instead.
-    expect(mockSpinner.start).not.toHaveBeenCalledWith('Deleting records...');
+    expect(mockSpinner.start).not.toHaveBeenCalledWith("Deleting records...");
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(mockSpinner.start).not.toHaveBeenCalledWith(
-      'Marking records synced...',
+      "Marking records synced...",
     );
     expect(markRecordsSynced).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Settings unreadable'),
+      expect.stringContaining("Settings unreadable"),
     );
   });
 
   it("passes the user's conflict strategy from settings to writeMarkdown", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ conflictStrategy: 'overwrite' }),
+      mockSettings({ conflictStrategy: "overwrite" }),
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({
       ok: true,
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
-      'overwrite',
+      "overwrite",
       expect.any(Map),
       true,
       expect.any(Map),
@@ -1379,33 +1378,33 @@ describe('index', () => {
     );
   });
 
-  it('normalizes an unknown conflict strategy from settings to suffix', async () => {
+  it("normalizes an unknown conflict strategy from settings to suffix", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ conflictStrategy: 'bogus-value' }),
+      mockSettings({ conflictStrategy: "bogus-value" }),
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({
       ok: true,
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
-      'suffix',
+      "suffix",
       expect.any(Map),
       true,
       expect.any(Map),
@@ -1413,12 +1412,12 @@ describe('index', () => {
     );
   });
 
-  it('passes includeFrontmatter=false to writeMarkdown when the frontmatter setting is off', async () => {
+  it("passes includeFrontmatter=false to writeMarkdown when the frontmatter setting is off", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1429,17 +1428,17 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
-      'suffix',
+      "suffix",
       expect.any(Map),
       false,
       expect.any(Map),
@@ -1447,11 +1446,11 @@ describe('index', () => {
     );
   });
 
-  it('drives the default sync through the auto-sync scheduler', async () => {
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("drives the default sync through the auto-sync scheduler", async () => {
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -1461,17 +1460,17 @@ describe('index', () => {
       partial: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(runSyncWithAutoSchedule).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it('marks records synced (not deleted) when autoDelete is false', async () => {
+  it("marks records synced (not deleted) when autoDelete is false", async () => {
     const { fetchAllRecords, deleteRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1482,37 +1481,37 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
-    expect(mockSpinner.start).not.toHaveBeenCalledWith('Deleting records...');
+    expect(mockSpinner.success).toHaveBeenCalledWith("Wrote 1 records!");
+    expect(mockSpinner.start).not.toHaveBeenCalledWith("Deleting records...");
     expect(deleteRecords).not.toHaveBeenCalled();
     // The whole fix for #50: written records must be marked synced so the next
     // pending-only fetch skips them instead of re-writing duplicates.
-    expect(mockSpinner.start).toHaveBeenCalledWith('Marking records synced...');
+    expect(mockSpinner.start).toHaveBeenCalledWith("Marking records synced...");
     expect(markRecordsSynced).toHaveBeenCalledWith([
-      { uuid: 'abc-123', filePath: '/mock/output/test-title.md' },
+      { uuid: "abc-123", filePath: "/mock/output/test-title.md" },
     ]);
     expect(mockSpinner.success).toHaveBeenCalledWith(
-      'Marked 1 records synced!',
+      "Marked 1 records synced!",
     );
   });
 
-  it('marks every written record synced, not just the first', async () => {
+  it("marks every written record synced, not just the first", async () => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1524,39 +1523,39 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown)
-      .mockReturnValueOnce('/mock/output/test-title.md')
-      .mockReturnValueOnce('/mock/output/title-2.md');
+      .mockReturnValueOnce("/mock/output/test-title.md")
+      .mockReturnValueOnce("/mock/output/title-2.md");
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Both written records go up in a single bulk call, in write order.
     expect(markRecordsSynced).toHaveBeenCalledTimes(1);
     expect(markRecordsSynced).toHaveBeenCalledWith([
-      { uuid: 'abc-123', filePath: '/mock/output/test-title.md' },
-      { uuid: 'def-456', filePath: '/mock/output/title-2.md' },
+      { uuid: "abc-123", filePath: "/mock/output/test-title.md" },
+      { uuid: "def-456", filePath: "/mock/output/title-2.md" },
     ]);
     expect(mockSpinner.success).toHaveBeenCalledWith(
-      'Marked 2 records synced!',
+      "Marked 2 records synced!",
     );
   });
 
-  it('excludes skipped records (null write result) from the mark-synced calls', async () => {
+  it("excludes skipped records (null write result) from the mark-synced calls", async () => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoDelete: false, conflictStrategy: 'skip' }),
+      mockSettings({ autoDelete: false, conflictStrategy: "skip" }),
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({
       ok: true,
@@ -1564,36 +1563,36 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown)
-      .mockReturnValueOnce('/mock/output/test-title.md')
+      .mockReturnValueOnce("/mock/output/test-title.md")
       .mockReturnValueOnce(null);
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // The skipped record never lands on disk, so it must not appear in the bulk
     // payload — only the one written record is sent.
     expect(markRecordsSynced).toHaveBeenCalledTimes(1);
     expect(markRecordsSynced).toHaveBeenCalledWith([
-      { uuid: 'abc-123', filePath: '/mock/output/test-title.md' },
+      { uuid: "abc-123", filePath: "/mock/output/test-title.md" },
     ]);
   });
 
-  it('does not mark synced when every record was skipped', async () => {
+  it("does not mark synced when every record was skipped", async () => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoDelete: false, conflictStrategy: 'skip' }),
+      mockSettings({ autoDelete: false, conflictStrategy: "skip" }),
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({
       ok: true,
@@ -1602,20 +1601,20 @@ describe('index', () => {
     });
     vi.mocked(writeMarkdown).mockReturnValue(null);
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.start).not.toHaveBeenCalledWith(
-      'Marking records synced...',
+      "Marking records synced...",
     );
     expect(markRecordsSynced).not.toHaveBeenCalled();
   });
 
-  it('reports a mark-synced failure loudly instead of claiming success', async () => {
+  it("reports a mark-synced failure loudly instead of claiming success", async () => {
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1626,32 +1625,32 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_FAILED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to mark 1 record(s) synced'),
+      expect.stringContaining("Failed to mark 1 record(s) synced"),
     );
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      expect.stringContaining('Marked'),
+      expect.stringContaining("Marked"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('reports only the records whose mark-synced failed, not the whole batch', async () => {
+  it("reports only the records whose mark-synced failed, not the whole batch", async () => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1663,44 +1662,44 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown)
-      .mockReturnValueOnce('/mock/output/test-title.md')
-      .mockReturnValueOnce('/mock/output/title-2.md');
+      .mockReturnValueOnce("/mock/output/test-title.md")
+      .mockReturnValueOnce("/mock/output/title-2.md");
     // First record succeeds, second fails — the bulk response reports only
     // def-456 as unmatched, so the count and listed path must reflect exactly
     // the one failure, guarding against an off-by-one in the settle partition.
     vi.mocked(markRecordsSynced).mockImplementation(
-      markResultBy((uuid) => (uuid === 'abc-123' ? MARK_SYNCED : MARK_FAILED)),
+      markResultBy((uuid) => (uuid === "abc-123" ? MARK_SYNCED : MARK_FAILED)),
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to mark 1 record(s) synced'),
+      expect.stringContaining("Failed to mark 1 record(s) synced"),
     );
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      expect.stringContaining('Marked'),
+      expect.stringContaining("Marked"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('/mock/output/title-2.md'),
+      expect.stringContaining("/mock/output/title-2.md"),
     );
     expect(console.error).not.toHaveBeenCalledWith(
-      expect.stringContaining('! abc-123'),
+      expect.stringContaining("! abc-123"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('sends every written record in one bulk call and pinpoints a single failure', async () => {
+  it("sends every written record in one bulk call and pinpoints a single failure", async () => {
     const records: Record[] = Array.from({ length: 11 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1717,10 +1716,10 @@ describe('index', () => {
     // Every record goes up in a single bulk request; only uuid-10 comes back
     // unmatched, exercising the per-record settle/report over one bulk response.
     vi.mocked(markRecordsSynced).mockImplementation(
-      markResultBy((uuid) => (uuid === 'uuid-10' ? MARK_FAILED : MARK_SYNCED)),
+      markResultBy((uuid) => (uuid === "uuid-10" ? MARK_FAILED : MARK_SYNCED)),
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(markRecordsSynced).toHaveBeenCalledTimes(1);
     expect(markRecordsSynced).toHaveBeenCalledWith(
@@ -1730,13 +1729,13 @@ describe('index', () => {
       })),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to mark 1 record(s) synced'),
+      expect.stringContaining("Failed to mark 1 record(s) synced"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-10 -> /mock/output/uuid-10.md'),
+      expect.stringContaining("! uuid-10 -> /mock/output/uuid-10.md"),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 10 record(s) synced despite'),
+      expect.stringContaining("Marked 10 record(s) synced despite"),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -1745,18 +1744,18 @@ describe('index', () => {
   // covered in tests/libs/records.test.ts); here the bulk call resolves a short
   // outcomes array — a timed-out record plus a trailing record with no outcome
   // because its chunk was never sent. Both must be reported pending.
-  it('reports timed-out and never-attempted records as pending after an abort', async () => {
+  it("reports timed-out and never-attempted records as pending after an abort", async () => {
     const records: Record[] = Array.from({ length: 3 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1774,42 +1773,42 @@ describe('index', () => {
     // outcome). The short outcomes array models the real timeout abort.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_SYNCED, MARK_TIMED_OUT],
-      abortReason: 'timeout',
+      abortReason: "timeout",
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Timed-out (uuid-1) plus the never-attempted uuid-2 = two pending.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('2 record(s) still pending'),
+      expect.stringContaining("2 record(s) still pending"),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Timed out marking records synced'),
+      expect.stringContaining("Timed out marking records synced"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-1 -> /mock/output/uuid-1.md'),
+      expect.stringContaining("! uuid-1 -> /mock/output/uuid-1.md"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-2 -> /mock/output/uuid-2.md'),
+      expect.stringContaining("! uuid-2 -> /mock/output/uuid-2.md"),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 1 record(s) synced despite'),
+      expect.stringContaining("Marked 1 record(s) synced despite"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('uses the abort wording when a request-shape 4xx stops the run', async () => {
+  it("uses the abort wording when a request-shape 4xx stops the run", async () => {
     const records: Record[] = Array.from({ length: 3 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1828,50 +1827,50 @@ describe('index', () => {
     // real abort, and abortReason drives the abort-specific headline.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_SYNCED, MARK_ABORTED],
-      abortReason: 'request-shape',
+      abortReason: "request-shape",
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Rejected uuid-1 plus the never-attempted uuid-2 = two pending.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('2 record(s) still pending'),
+      expect.stringContaining("2 record(s) still pending"),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Aborted marking records synced'),
+      expect.stringContaining("Aborted marking records synced"),
     );
     // The abort headline must not read as a timeout or a plain scatter of
     // failures — guards the reason wiring.
     expect(mockSpinner.error).not.toHaveBeenCalledWith(
-      expect.stringContaining('Timed out marking records synced'),
+      expect.stringContaining("Timed out marking records synced"),
     );
     expect(mockSpinner.error).not.toHaveBeenCalledWith(
-      expect.stringContaining('Failed to mark'),
+      expect.stringContaining("Failed to mark"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-1 -> /mock/output/uuid-1.md'),
+      expect.stringContaining("! uuid-1 -> /mock/output/uuid-1.md"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-2 -> /mock/output/uuid-2.md'),
+      expect.stringContaining("! uuid-2 -> /mock/output/uuid-2.md"),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 1 record(s) synced despite'),
+      expect.stringContaining("Marked 1 record(s) synced despite"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('omits the not-attempted clause when the abort left nothing unattempted', async () => {
+  it("omits the not-attempted clause when the abort left nothing unattempted", async () => {
     const records: Record[] = Array.from({ length: 2 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1890,32 +1889,32 @@ describe('index', () => {
     // attempted."
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_ABORTED, MARK_ABORTED],
-      abortReason: 'request-shape',
+      abortReason: "request-shape",
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Aborted marking records synced'),
+      expect.stringContaining("Aborted marking records synced"),
     );
     expect(mockSpinner.error).not.toHaveBeenCalledWith(
-      expect.stringContaining('the rest were not attempted'),
+      expect.stringContaining("the rest were not attempted"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('notes never-attempted records when a systemic stop ends the run early', async () => {
+  it("notes never-attempted records when a systemic stop ends the run early", async () => {
     const records: Record[] = Array.from({ length: 3 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1934,32 +1933,32 @@ describe('index', () => {
     // must say some were skipped.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_FAILED],
-      abortReason: 'transient',
+      abortReason: "transient",
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to mark 3 record(s) synced'),
+      expect.stringContaining("Failed to mark 3 record(s) synced"),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('so some were never attempted'),
+      expect.stringContaining("so some were never attempted"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('does not use the timeout wording for a plain (non-timeout) failure', async () => {
+  it("does not use the timeout wording for a plain (non-timeout) failure", async () => {
     const records: Record[] = Array.from({ length: 4 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -1977,38 +1976,38 @@ describe('index', () => {
     // must use the failure wording, never the timeout wording, and every record
     // still had an outcome — nothing was aborted.
     vi.mocked(markRecordsSynced).mockImplementation(
-      markResultBy((uuid) => (uuid === 'uuid-3' ? MARK_FAILED : MARK_SYNCED)),
+      markResultBy((uuid) => (uuid === "uuid-3" ? MARK_FAILED : MARK_SYNCED)),
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to mark 1 record(s) synced'),
+      expect.stringContaining("Failed to mark 1 record(s) synced"),
     );
     expect(mockSpinner.error).not.toHaveBeenCalledWith(
-      expect.stringContaining('Timed out marking records synced'),
+      expect.stringContaining("Timed out marking records synced"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-3 -> /mock/output/uuid-3.md'),
+      expect.stringContaining("! uuid-3 -> /mock/output/uuid-3.md"),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 3 record(s) synced despite'),
+      expect.stringContaining("Marked 3 record(s) synced despite"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('reports only the timed-out record when nothing was left unattempted', async () => {
+  it("reports only the timed-out record when nothing was left unattempted", async () => {
     const records: Record[] = Array.from({ length: 2 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -2026,35 +2025,35 @@ describe('index', () => {
     // only the timed-out one is pending — no never-attempted tail.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_SYNCED, MARK_TIMED_OUT],
-      abortReason: 'timeout',
+      abortReason: "timeout",
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('1 record(s) still pending'),
+      expect.stringContaining("1 record(s) still pending"),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Timed out marking records synced'),
+      expect.stringContaining("Timed out marking records synced"),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 1 record(s) synced despite'),
+      expect.stringContaining("Marked 1 record(s) synced despite"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('counts both a failed and a timed-out record as pending in one run', async () => {
+  it("counts both a failed and a timed-out record as pending in one run", async () => {
     const records: Record[] = Array.from({ length: 4 }, (_item, index) => ({
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -2072,30 +2071,30 @@ describe('index', () => {
     // All three non-synced records are pending and the run uses timeout wording.
     vi.mocked(markRecordsSynced).mockResolvedValue({
       outcomes: [MARK_SYNCED, MARK_FAILED, MARK_TIMED_OUT],
-      abortReason: 'timeout',
+      abortReason: "timeout",
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // uuid-1 failed, uuid-2 timed out, uuid-3 never attempted = three pending.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('3 record(s) still pending'),
+      expect.stringContaining("3 record(s) still pending"),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Timed out marking records synced'),
+      expect.stringContaining("Timed out marking records synced"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-1 -> /mock/output/uuid-1.md'),
+      expect.stringContaining("! uuid-1 -> /mock/output/uuid-1.md"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('warns the sync was incomplete on the mark-synced path when a page failed', async () => {
+  it("warns the sync was incomplete on the mark-synced path when a page failed", async () => {
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -2107,36 +2106,36 @@ describe('index', () => {
       records: [mockRecord],
       partial: true,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // The run must not finish on the green "Marked" line while a page is still
     // outstanding — the truncation warning has the last word and the exit is 1.
     expect(mockSpinner.success).toHaveBeenCalledWith(
-      'Marked 1 records synced!',
+      "Marked 1 records synced!",
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Sync was incomplete'),
+      expect.stringContaining("Sync was incomplete"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('sanitizes control characters in a failed mark-synced record line', async () => {
+  it("sanitizes control characters in a failed mark-synced record line", async () => {
     // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
     const escape = String.fromCharCode(0x1b);
     const evilRecord: Record = {
       uuid: `evil${escape}[2J-uuid`,
-      title: 'Evil',
-      content: 'c',
-      createdAt: '2024-01-07T00:00:00Z',
+      title: "Evil",
+      content: "c",
+      createdAt: "2024-01-07T00:00:00Z",
     };
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -2147,35 +2146,35 @@ describe('index', () => {
       records: [evilRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/evil.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/evil.md");
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_FAILED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // The ESC in the API-supplied uuid must never reach the terminal raw, where
     // it could drive an ANSI clear/overwrite and hide the failure.
     const escapePrinted = vi
       .mocked(console.error)
       .mock.calls.some(
-        ([arg]) => typeof arg === 'string' && arg.includes(escape),
+        ([arg]) => typeof arg === "string" && arg.includes(escape),
       );
     expect(escapePrinted).toBe(false);
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('/mock/output/evil.md'),
+      expect.stringContaining("/mock/output/evil.md"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('warns the sync was incomplete on the autoDelete path when a page failed and nothing was written', async () => {
+  it("warns the sync was incomplete on the autoDelete path when a page failed and nothing was written", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ autoDelete: true, conflictStrategy: 'skip' }),
+      mockSettings({ autoDelete: true, conflictStrategy: "skip" }),
     );
     // A later page failed and every fetched record is skipped, so nothing is
     // written and no delete is issued — but the user must still be told a page
@@ -2187,21 +2186,21 @@ describe('index', () => {
     });
     vi.mocked(writeMarkdown).mockReturnValue(null);
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Sync was incomplete'),
+      expect.stringContaining("Sync was incomplete"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it('deletes records (never marks synced) when autoDelete is true', async () => {
+  it("deletes records (never marks synced) when autoDelete is true", async () => {
     const { fetchAllRecords, deleteRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -2212,38 +2211,38 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
     // The delete path must not also PATCH records that are about to be removed.
     expect(markRecordsSynced).not.toHaveBeenCalled();
     expect(mockSpinner.start).not.toHaveBeenCalledWith(
-      'Marking records synced...',
+      "Marking records synced...",
     );
   });
 
-  it('excludes skipped records (null write result) from the delete call', async () => {
+  it("excludes skipped records (null write result) from the delete call", async () => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ conflictStrategy: 'skip' }),
+      mockSettings({ conflictStrategy: "skip" }),
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({
       ok: true,
@@ -2251,38 +2250,38 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown)
-      .mockReturnValueOnce('/mock/output/test-title.md')
+      .mockReturnValueOnce("/mock/output/test-title.md")
       .mockReturnValueOnce(null);
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
+    expect(mockSpinner.success).toHaveBeenCalledWith("Wrote 1 records!");
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Skipped 1 record(s)'),
+      expect.stringContaining("Skipped 1 record(s)"),
     );
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
   });
 
-  it('does not issue a delete request when every record was skipped', async () => {
+  it("does not issue a delete request when every record was skipped", async () => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
-      mockSettings({ conflictStrategy: 'skip' }),
+      mockSettings({ conflictStrategy: "skip" }),
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({
       ok: true,
@@ -2291,22 +2290,22 @@ describe('index', () => {
     });
     vi.mocked(writeMarkdown).mockReturnValue(null);
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 0 records!');
+    expect(mockSpinner.success).toHaveBeenCalledWith("Wrote 0 records!");
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Skipped 2 record(s)'),
+      expect.stringContaining("Skipped 2 record(s)"),
     );
-    expect(mockSpinner.start).not.toHaveBeenCalledWith('Deleting records...');
+    expect(mockSpinner.start).not.toHaveBeenCalledWith("Deleting records...");
     expect(deleteRecords).not.toHaveBeenCalled();
   });
 
-  it('reports a delete failure loudly instead of claiming success', async () => {
+  it("reports a delete failure loudly instead of claiming success", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -2315,20 +2314,20 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: null,
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to delete records'),
+      expect.stringContaining("Failed to delete records"),
     );
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      expect.stringContaining('Deleted'),
+      expect.stringContaining("Deleted"),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -2337,14 +2336,14 @@ describe('index', () => {
   // sync must surface its classified message, fail loud, AND stop rescheduling
   // the autoSync daemon — otherwise it wakes every few minutes and re-writes
   // the same records as duplicates against a server it can't delete from.
-  it('surfaces a systemic delete failure and stops autoSync from rescheduling', async () => {
+  it("surfaces a systemic delete failure and stops autoSync from rescheduling", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { ApiRequestError } = await import('#src/libs/api.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { ApiRequestError } = await import("#src/libs/api.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     let scheduledAutoSync: boolean | undefined;
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
@@ -2363,18 +2362,18 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockRejectedValue(
-      new ApiRequestError('Invalid or missing API token', 401),
+      new ApiRequestError("Invalid or missing API token", 401),
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Authentication failed (HTTP 401)'),
+      expect.stringContaining("Authentication failed (HTTP 401)"),
     );
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to delete records'),
+      expect.stringContaining("Failed to delete records"),
     );
     expect(process.exitCode).toBe(1);
     // The run reported autoSync off, so the scheduler won't spin another pass.
@@ -2384,14 +2383,14 @@ describe('index', () => {
   // A TRANSIENT delete failure (5xx) also fails loud, but must keep autoSync
   // alive — the server may recover, and the records are still pending, so the
   // next pass should retry rather than the daemon shutting down permanently.
-  it('keeps autoSync alive after a transient (503) delete failure', async () => {
+  it("keeps autoSync alive after a transient (503) delete failure", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { ApiRequestError } = await import('#src/libs/api.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { ApiRequestError } = await import("#src/libs/api.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     let scheduledAutoSync: boolean | undefined;
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
@@ -2408,15 +2407,15 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockRejectedValue(
-      new ApiRequestError('Service unavailable', 503),
+      new ApiRequestError("Service unavailable", 503),
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to delete records'),
+      expect.stringContaining("Failed to delete records"),
     );
     expect(process.exitCode).toBe(1);
     expect(scheduledAutoSync).toBe(true);
@@ -2430,13 +2429,13 @@ describe('index', () => {
   // same records as duplicates against a server that keeps rejecting the same
   // doomed DELETEs forever (#204). This would fail if the run passed the
   // permanence bit through as `autoSync` (true) rather than stopping.
-  it('stops autoSync after a permanent (request-shape) delete abort that did not throw', async () => {
+  it("stops autoSync after a permanent (request-shape) delete abort that did not throw", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     let scheduledAutoSync: boolean | undefined;
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
@@ -2455,22 +2454,22 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: null,
       permanentlyFailed: true,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to delete records'),
+      expect.stringContaining("Failed to delete records"),
     );
     // The failure message must name the stopped daemon so it can't imply a
     // "next run" that won't happen.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('auto-sync was stopped'),
+      expect.stringContaining("auto-sync was stopped"),
     );
     expect(process.exitCode).toBe(1);
     // The run reported autoSync off, so the scheduler won't spin another pass.
@@ -2480,12 +2479,12 @@ describe('index', () => {
   // A request-shape delete abort with autoSync OFF (a one-shot `markpost sync`)
   // still fails loud, but there's no daemon to stop — the message must NOT claim
   // auto-sync was stopped when it was never running.
-  it('does not claim auto-sync was stopped for a request-shape abort when autoSync is off', async () => {
+  it("does not claim auto-sync was stopped for a request-shape abort when autoSync is off", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -2496,19 +2495,19 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: null,
       permanentlyFailed: true,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to delete records'),
+      expect.stringContaining("Failed to delete records"),
     );
     expect(mockSpinner.error).not.toHaveBeenCalledWith(
-      expect.stringContaining('auto-sync was stopped'),
+      expect.stringContaining("auto-sync was stopped"),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -2533,14 +2532,14 @@ describe('index', () => {
       uuid: `uuid-${index}`,
       title: `Title ${index}`,
       content: `Content ${index}`,
-      createdAt: '2024-01-01T00:00:00Z',
+      createdAt: "2024-01-01T00:00:00Z",
     }));
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     const capture: { scheduledAutoSync: boolean | undefined } = {
       scheduledAutoSync: undefined,
@@ -2573,17 +2572,17 @@ describe('index', () => {
   // stop rescheduling the autoSync daemon — otherwise it wakes every few minutes
   // and re-PATCHes the same records against a server it already knows will
   // reject, re-writing them as duplicates every pass (issue #133).
-  it('stops autoSync from rescheduling on a permanent mark-synced failure', async () => {
+  it("stops autoSync from rescheduling on a permanent mark-synced failure", async () => {
     const capture = await arrangeMarkSync({
       count: 1,
       autoSync: true,
-      result: { outcomes: [MARK_FAILED], abortReason: 'permanent' },
+      result: { outcomes: [MARK_FAILED], abortReason: "permanent" },
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('auto-sync was stopped'),
+      expect.stringContaining("auto-sync was stopped"),
     );
     expect(process.exitCode).toBe(1);
     // A permanent failure recurs, so the scheduler must not spin another pass.
@@ -2595,21 +2594,21 @@ describe('index', () => {
   // it doesn't abort and must keep autoSync alive — the record is still pending
   // and the next pass retries. The systemic-blip (5xx/429) case now maps to
   // `'transient'`, covered by the test below.
-  it('keeps autoSync alive after a per-chunk (non-systemic) mark-synced failure', async () => {
+  it("keeps autoSync alive after a per-chunk (non-systemic) mark-synced failure", async () => {
     const capture = await arrangeMarkSync({
       count: 1,
       autoSync: true,
       result: { outcomes: [MARK_FAILED], abortReason: null },
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Match text unique to the generic headline — 'still pending on the server'
     // alone also appears in the timeout headline, so it wouldn't catch a
     // failure wrongly routed through the timeout branch.
     expect(mockSpinner.error).toHaveBeenCalledWith(
       expect.stringContaining(
-        'written locally but still pending on the server',
+        "written locally but still pending on the server",
       ),
     );
     expect(process.exitCode).toBe(1);
@@ -2622,20 +2621,20 @@ describe('index', () => {
   // regression that treats any abort reason as a stop. The short outcomes array
   // (2 outcomes for 3 records) models the real abort leaving a trailing chunk
   // unsent.
-  it('keeps autoSync alive on a timeout abort', async () => {
+  it("keeps autoSync alive on a timeout abort", async () => {
     const capture = await arrangeMarkSync({
       count: 3,
       autoSync: true,
       result: {
         outcomes: [MARK_SYNCED, MARK_TIMED_OUT],
-        abortReason: 'timeout',
+        abortReason: "timeout",
       },
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Timed out marking records synced'),
+      expect.stringContaining("Timed out marking records synced"),
     );
     expect(process.exitCode).toBe(1);
     // A timeout can clear, so the daemon must retry next pass.
@@ -2646,17 +2645,17 @@ describe('index', () => {
   // read differently from a scatter of per-record failures — some records were
   // never attempted — yet keep the daemon alive to retry. The short outcomes
   // array models the aborted run leaving a trailing chunk unsent.
-  it('reports a transient abort as stopped-early and keeps autoSync alive', async () => {
+  it("reports a transient abort as stopped-early and keeps autoSync alive", async () => {
     const capture = await arrangeMarkSync({
       count: 3,
       autoSync: true,
       result: {
         outcomes: [MARK_SYNCED, MARK_FAILED],
-        abortReason: 'transient',
+        abortReason: "transient",
       },
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // uuid-1 failed plus uuid-2 never attempted = two pending, with the
     // stopped-early wording (not the generic per-record failure line).
@@ -2664,12 +2663,12 @@ describe('index', () => {
       .mocked(mockSpinner.error)
       .mock.calls.map(([message]) => String(message))
       .find((message) =>
-        message.includes('a systemic error stopped the run early'),
+        message.includes("a systemic error stopped the run early"),
       );
     expect(headline).toBeDefined();
-    expect(headline).toContain('2 record(s)');
+    expect(headline).toContain("2 record(s)");
     // A trailing chunk was unsent, so the "never attempted" clause appears.
-    expect(headline).toContain('so some were never attempted');
+    expect(headline).toContain("so some were never attempted");
     expect(process.exitCode).toBe(1);
     // A transient error can clear, so the daemon must retry next pass.
     expect(capture.scheduledAutoSync).toBe(true);
@@ -2679,28 +2678,28 @@ describe('index', () => {
   // abort lands on the LAST chunk (outcomes length == count, no unattempted tail),
   // it must NOT claim records were skipped — the same false-claim guard the
   // permanent branch has for its daemon clause.
-  it('does not claim records were skipped on a transient abort with no unattempted tail', async () => {
+  it("does not claim records were skipped on a transient abort with no unattempted tail", async () => {
     await arrangeMarkSync({
       count: 2,
       autoSync: true,
       result: {
         outcomes: [MARK_SYNCED, MARK_FAILED],
-        abortReason: 'transient',
+        abortReason: "transient",
       },
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     const headline = vi
       .mocked(mockSpinner.error)
       .mock.calls.map(([message]) => String(message))
       .find((message) =>
-        message.includes('a systemic error stopped the run early'),
+        message.includes("a systemic error stopped the run early"),
       );
     expect(headline).toBeDefined();
     // Only uuid-1 is pending, and it was attempted — no skipped tail to claim.
-    expect(headline).toContain('1 record(s)');
-    expect(headline).not.toContain('never attempted');
+    expect(headline).toContain("1 record(s)");
+    expect(headline).not.toContain("never attempted");
     expect(process.exitCode).toBe(1);
   });
 
@@ -2708,21 +2707,21 @@ describe('index', () => {
   // (autoDelete off, autoSync off) must NOT claim "auto-sync was stopped" — there
   // was no daemon. The headline still guides the user to fix the cause, but a
   // cron log must not read a false statement about what the tool did.
-  it('does not claim auto-sync was stopped when it was never on', async () => {
+  it("does not claim auto-sync was stopped when it was never on", async () => {
     await arrangeMarkSync({
       count: 1,
       autoSync: false,
-      result: { outcomes: [MARK_FAILED], abortReason: 'permanent' },
+      result: { outcomes: [MARK_FAILED], abortReason: "permanent" },
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     const headline = vi
       .mocked(mockSpinner.error)
       .mock.calls.map(([message]) => String(message))
-      .find((message) => message.includes('a permanent error'));
+      .find((message) => message.includes("a permanent error"));
     expect(headline).toBeDefined();
-    expect(headline).not.toContain('auto-sync was stopped');
+    expect(headline).not.toContain("auto-sync was stopped");
     expect(process.exitCode).toBe(1);
   });
 
@@ -2734,7 +2733,7 @@ describe('index', () => {
   // (uuid-20..24) as six pending, list uuid-13 (not a settled record like
   // uuid-0), report 19 marked, and stop the daemon. An off-by-one in the settle
   // filter would strand the wrong records.
-  it('counts pending correctly and stops the daemon on a permanent abort', async () => {
+  it("counts pending correctly and stops the daemon on a permanent abort", async () => {
     const outcomes: MarkSyncedOutcome[] = Array.from(
       { length: 20 },
       (_item, index) => (index === 13 ? MARK_FAILED : MARK_SYNCED),
@@ -2742,26 +2741,26 @@ describe('index', () => {
     const capture = await arrangeMarkSync({
       count: 25,
       autoSync: true,
-      result: { outcomes, abortReason: 'permanent' },
+      result: { outcomes, abortReason: "permanent" },
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // uuid-13 failed plus the five never-attempted (uuid-20..24) = six pending.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to mark 6 record(s) synced'),
+      expect.stringContaining("Failed to mark 6 record(s) synced"),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Marked 19 record(s) synced despite the above.'),
+      expect.stringContaining("Marked 19 record(s) synced despite the above."),
     );
     // The failed record is listed pending; a settled record (uuid-0) is not —
     // proving the outcome/index alignment holds when the outcomes array is
     // truncated by an abort.
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-13 -> /mock/output/uuid-13.md'),
+      expect.stringContaining("! uuid-13 -> /mock/output/uuid-13.md"),
     );
     expect(console.error).not.toHaveBeenCalledWith(
-      expect.stringContaining('! uuid-0 -> /mock/output/uuid-0.md'),
+      expect.stringContaining("! uuid-0 -> /mock/output/uuid-0.md"),
     );
     expect(capture.scheduledAutoSync).toBe(false);
     expect(process.exitCode).toBe(1);
@@ -2773,16 +2772,16 @@ describe('index', () => {
   // record (not call order) to match the other write tests in this file.
   const arrangeFailingFirstWrite = async (): Promise<void> => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -2792,11 +2791,11 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown).mockImplementation((record) => {
-      if (record.uuid === 'abc-123') {
-        throw new Error('EACCES: permission denied');
+      if (record.uuid === "abc-123") {
+        throw new Error("EACCES: permission denied");
       }
 
-      return '/mock/output/title-2.md';
+      return "/mock/output/title-2.md";
     });
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
@@ -2804,83 +2803,102 @@ describe('index', () => {
     });
   };
 
-  it('contains a per-record write failure: keeps writing the rest and deletes only the written ones', async () => {
+  it("contains a per-record write failure: keeps writing the rest and deletes only the written ones", async () => {
     await arrangeFailingFirstWrite();
-    const { deleteRecords } = await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
+    const { deleteRecords } = await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Both records are attempted — the first throwing does not short-circuit
     // the second.
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
-    expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
+    expect(mockSpinner.success).toHaveBeenCalledWith("Wrote 1 records!");
     // The failed record is left on the server (excluded from the delete); only
     // the successfully-written one is deleted.
-    expect(deleteRecords).toHaveBeenCalledWith(['def-456']);
+    expect(deleteRecords).toHaveBeenCalledWith(["def-456"]);
   });
 
-  it('surfaces per-record write failures loudly and exits non-zero', async () => {
+  it("surfaces per-record write failures loudly and exits non-zero", async () => {
     await arrangeFailingFirstWrite();
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to write 1 record(s)'),
+      expect.stringContaining("Failed to write 1 record(s)"),
     );
     // The failing record's title, uuid, and error message are named so the
     // user knows exactly what didn't sync.
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining(
-        'Test Title (abc-123): EACCES: permission denied',
+        "Test Title (abc-123): EACCES: permission denied",
       ),
     );
     // Non-zero exit so a cron run notices the partial failure.
     expect(process.exitCode).toBe(1);
   });
 
-  it('refuses a record whose server filePath is unsafe, naming it, continuing with the rest, and exiting non-zero', async () => {
-    const { FilePathViolationError } = await import('#src/libs/filePathSafety.js');
-    const mockRecord2: Record = { uuid: 'def-456', title: 'Title 2', content: 'Content 2', createdAt: '2024-01-02T00:00:00Z' };
-    const { fetchAllRecords, deleteRecords } = await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("refuses a record whose server filePath is unsafe, naming it, continuing with the rest, and exiting non-zero", async () => {
+    const { FilePathViolationError } =
+      await import("#src/libs/filePathSafety.js");
+    const mockRecord2: Record = {
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
+    };
+    const { fetchAllRecords, deleteRecords } =
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
-    vi.mocked(fetchAllRecords).mockResolvedValue({ ok: true, records: [mockRecord, mockRecord2], partial: false });
+    vi.mocked(fetchAllRecords).mockResolvedValue({
+      ok: true,
+      records: [mockRecord, mockRecord2],
+      partial: false,
+    });
     vi.mocked(writeMarkdown).mockImplementation((record) => {
-      if (record.uuid === 'abc-123') {
-        throw new FilePathViolationError('Refusing to write: server file path "../x.md" is invalid (traversal).', 'traversal');
+      if (record.uuid === "abc-123") {
+        throw new FilePathViolationError(
+          'Refusing to write: server file path "../x.md" is invalid (traversal).',
+          "traversal",
+        );
       }
 
-      return '/mock/output/title-2.md';
+      return "/mock/output/title-2.md";
     });
-    vi.mocked(deleteRecords).mockResolvedValue({ meta: { deleted: 1 }, permanentlyFailed: false });
+    vi.mocked(deleteRecords).mockResolvedValue({
+      meta: { deleted: 1 },
+      permanentlyFailed: false,
+    });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Test Title (abc-123): Refusing to write: server file path "../x.md" is invalid (traversal).'),
+      expect.stringContaining(
+        'Test Title (abc-123): Refusing to write: server file path "../x.md" is invalid (traversal).',
+      ),
     );
-    expect(deleteRecords).toHaveBeenCalledWith(['def-456']);
+    expect(deleteRecords).toHaveBeenCalledWith(["def-456"]);
     expect(process.exitCode).toBe(1);
   });
 
-  it('exits non-zero, shows an error (not a green checkmark), and issues no delete when every record fails to write', async () => {
+  it("exits non-zero, shows an error (not a green checkmark), and issues no delete when every record fails to write", async () => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -2890,41 +2908,41 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown).mockImplementation(() => {
-      throw new Error('EISDIR: illegal operation on a directory');
+      throw new Error("EISDIR: illegal operation on a directory");
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // A run that wrote nothing must not end the write phase on a success
     // checkmark; it reports an error instead.
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('all 2 failed'),
+      expect.stringContaining("all 2 failed"),
     );
     expect(mockSpinner.success).not.toHaveBeenCalledWith(
-      expect.stringContaining('Wrote'),
+      expect.stringContaining("Wrote"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to write 2 record(s)'),
+      expect.stringContaining("Failed to write 2 record(s)"),
     );
     // Nothing was written, so no delete request is issued.
-    expect(mockSpinner.start).not.toHaveBeenCalledWith('Deleting records...');
+    expect(mockSpinner.start).not.toHaveBeenCalledWith("Deleting records...");
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 
-  it('sanitizes control characters in a failed record title before printing it', async () => {
+  it("sanitizes control characters in a failed record title before printing it", async () => {
     // ESC (0x1b) built via fromCharCode so no raw control byte lives in source.
     const escape = String.fromCharCode(0x1b);
     const evilRecord: Record = {
-      uuid: 'evil-1',
+      uuid: "evil-1",
       title: `Bad${escape}[2JTitle`,
-      content: 'c',
-      createdAt: '2024-01-05T00:00:00Z',
+      content: "c",
+      createdAt: "2024-01-05T00:00:00Z",
     };
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -2934,42 +2952,42 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(writeMarkdown).mockImplementation(() => {
-      throw new Error('EACCES: permission denied');
+      throw new Error("EACCES: permission denied");
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // The ESC is replaced with a space so it can't drive an ANSI clear/overwrite
     // sequence; the visible characters and the uuid survive intact.
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Bad [2JTitle (evil-1)'),
+      expect.stringContaining("Bad [2JTitle (evil-1)"),
     );
     const escapePrinted = vi
       .mocked(console.error)
       .mock.calls.some(
-        ([arg]) => typeof arg === 'string' && arg.includes(escape),
+        ([arg]) => typeof arg === "string" && arg.includes(escape),
       );
     expect(escapePrinted).toBe(false);
   });
 
   it.each([
-    ['DEL', '0x7f', 0x7f],
-    ['C1 CSI', '0x9b', 0x9b],
-    ['C1 OSC', '0x9d', 0x9d],
+    ["DEL", "0x7f", 0x7f],
+    ["C1 CSI", "0x9b", 0x9b],
+    ["C1 OSC", "0x9d", 0x9d],
   ])(
-    'strips the %s control character (%s) from a failed record title',
+    "strips the %s control character (%s) from a failed record title",
     async (_name, _hex, codePoint) => {
       const control = String.fromCharCode(codePoint);
       const evilRecord: Record = {
-        uuid: 'evil-2',
+        uuid: "evil-2",
         title: `A${control}B`,
-        content: 'c',
-        createdAt: '2024-01-06T00:00:00Z',
+        content: "c",
+        createdAt: "2024-01-06T00:00:00Z",
       };
-      const { fetchAllRecords } = await import('#src/libs/records.js');
-      const { writeMarkdown } = await import('#src/libs/markdown.js');
-      const { fetchSettings } = await import('#src/libs/settings.js');
-      const { default: yoctoSpinner } = await import('yocto-spinner');
+      const { fetchAllRecords } = await import("#src/libs/records.js");
+      const { writeMarkdown } = await import("#src/libs/markdown.js");
+      const { fetchSettings } = await import("#src/libs/settings.js");
+      const { default: yoctoSpinner } = await import("yocto-spinner");
 
       vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
       vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -2979,36 +2997,36 @@ describe('index', () => {
         partial: false,
       });
       vi.mocked(writeMarkdown).mockImplementation(() => {
-        throw new Error('EACCES: permission denied');
+        throw new Error("EACCES: permission denied");
       });
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('A B (evil-2)'),
+        expect.stringContaining("A B (evil-2)"),
       );
       const controlPrinted = vi
         .mocked(console.error)
         .mock.calls.some(
-          ([arg]) => typeof arg === 'string' && arg.includes(control),
+          ([arg]) => typeof arg === "string" && arg.includes(control),
         );
       expect(controlPrinted).toBe(false);
     },
   );
 
-  it('reports a systemic output-directory failure once, not as a per-record failure list', async () => {
+  it("reports a systemic output-directory failure once, not as a per-record failure list", async () => {
     const mockRecord2: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
+      await import("#src/libs/records.js");
     const { writeMarkdown, ensureOutputDirectory } =
-      await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -3021,40 +3039,40 @@ describe('index', () => {
     // `Once` so this throw can't leak into later tests (beforeEach's
     // clearAllMocks resets call history but not implementations).
     vi.mocked(ensureOutputDirectory).mockImplementationOnce(() => {
-      throw new Error('Output directory is not set!');
+      throw new Error("Output directory is not set!");
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // The systemic error routes through the outer catch and is reported once —
     // never per record, and no record is even attempted.
     expect(writeMarkdown).not.toHaveBeenCalled();
     expect(console.error).not.toHaveBeenCalledWith(
-      expect.stringContaining('Failed to write 2 record(s)'),
+      expect.stringContaining("Failed to write 2 record(s)"),
     );
-    expect(mockSpinner.error).toHaveBeenCalledWith('Something went wrong!');
+    expect(mockSpinner.error).toHaveBeenCalledWith("Something went wrong!");
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 
-  it('reports written, skipped, and failed records as three distinct outcomes', async () => {
+  it("reports written, skipped, and failed records as three distinct outcomes", async () => {
     const recordSkipped: Record = {
-      uuid: 'skip-1',
-      title: 'Skip Me',
-      content: 'c',
-      createdAt: '2024-01-03T00:00:00Z',
+      uuid: "skip-1",
+      title: "Skip Me",
+      content: "c",
+      createdAt: "2024-01-03T00:00:00Z",
     };
     const recordFailed: Record = {
-      uuid: 'fail-1',
-      title: 'Fail Me',
-      content: 'c',
-      createdAt: '2024-01-04T00:00:00Z',
+      uuid: "fail-1",
+      title: "Fail Me",
+      content: "c",
+      createdAt: "2024-01-04T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -3066,43 +3084,43 @@ describe('index', () => {
     // Written, skipped (null), failed (throw) — one of each, keyed off the
     // record so the outcome doesn't depend on call order.
     vi.mocked(writeMarkdown).mockImplementation((record) => {
-      if (record.uuid === 'skip-1') {
+      if (record.uuid === "skip-1") {
         return null;
       }
 
-      if (record.uuid === 'fail-1') {
-        throw new Error('EACCES: permission denied');
+      if (record.uuid === "fail-1") {
+        throw new Error("EACCES: permission denied");
       }
 
-      return '/mock/output/test-title.md';
+      return "/mock/output/test-title.md";
     });
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 1 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Skipped and failed are counted separately, not lumped together — a
     // regression to `skipped = total - written` would report "Skipped 2" here.
-    expect(mockSpinner.success).toHaveBeenCalledWith('Wrote 1 records!');
+    expect(mockSpinner.success).toHaveBeenCalledWith("Wrote 1 records!");
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Skipped 1 record(s)'),
+      expect.stringContaining("Skipped 1 record(s)"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to write 1 record(s)'),
+      expect.stringContaining("Failed to write 1 record(s)"),
     );
     // Only the written record is deleted; skipped and failed stay on the server.
-    expect(deleteRecords).toHaveBeenCalledWith(['abc-123']);
+    expect(deleteRecords).toHaveBeenCalledWith(["abc-123"]);
     expect(process.exitCode).toBe(1);
   });
 
-  it('surfaces the message when a record write throws a non-Error value', async () => {
+  it("surfaces the message when a record write throws a non-Error value", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -3114,17 +3132,17 @@ describe('index', () => {
     // A thrown string (not an Error) must still render its text, never
     // "[object Object]" — exercises extractErrorMessage's String(error) branch.
     vi.mocked(writeMarkdown).mockImplementation(() => {
-      throw 'raw string failure';
+      throw "raw string failure";
     });
     vi.mocked(deleteRecords).mockResolvedValue({
       meta: { deleted: 0 },
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('raw string failure'),
+      expect.stringContaining("raw string failure"),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -3132,12 +3150,12 @@ describe('index', () => {
   // A delete timeout (deleteRecords re-throws it) must land in the specific
   // "remain on the server" branch with a non-zero exit and log its reason,
   // not fall through to the generic outer catch that would hide the detail.
-  it('reports a delete timeout with the specific consequence and its reason', async () => {
+  it("reports a delete timeout with the specific consequence and its reason", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -3146,18 +3164,18 @@ describe('index', () => {
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
     vi.mocked(deleteRecords).mockRejectedValue(
-      new Error('Request to https://example.com/api/records timed out'),
+      new Error("Request to https://example.com/api/records timed out"),
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.error).toHaveBeenCalledWith(
-      expect.stringContaining('remain on the server'),
+      expect.stringContaining("remain on the server"),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('timed out'),
+      expect.stringContaining("timed out"),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -3165,36 +3183,36 @@ describe('index', () => {
   // A settings timeout must degrade like any settings read failure — write
   // records, skip the auto-delete, warn — not abort the whole sync. Writing
   // was never the risky operation.
-  it('degrades to writing records and skipping delete when settings times out', async () => {
+  it("degrades to writing records and skipping delete when settings times out", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockRejectedValue(
-      new Error('Request to https://example.com/api/settings timed out'),
+      new Error("Request to https://example.com/api/settings timed out"),
     );
     vi.mocked(fetchAllRecords).mockResolvedValue({
       ok: true,
       records: [mockRecord],
       partial: false,
     });
-    vi.mocked(writeMarkdown).mockReturnValue('/mock/output/test-title.md');
+    vi.mocked(writeMarkdown).mockReturnValue("/mock/output/test-title.md");
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledWith(
       mockRecord,
-      'suffix',
+      "suffix",
       expect.any(Map),
       true,
       expect.any(Map),
       expect.any(Set),
     );
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Could not read settings'),
+      expect.stringContaining("Could not read settings"),
     );
     expect(deleteRecords).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
@@ -3217,19 +3235,19 @@ describe('index', () => {
       snapshots.push(new Map(writtenState));
       writtenState?.set(record.uuid, {
         path: filePath,
-        contentHash: 'hash',
+        contentHash: "hash",
         identity: { deviceId: 1n, inode: 1n },
       });
       return filePath;
     };
 
-  it('records mark-synced files in the vault ledger for `records deletions`', async () => {
+  it("records mark-synced files in the vault ledger for `records deletions`", async () => {
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { recordLedgerEntries } = await import('#src/libs/vault-ledger.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { recordLedgerEntries } = await import("#src/libs/vault-ledger.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -3243,20 +3261,20 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_SYNCED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(recordLedgerEntries).toHaveBeenCalledWith({
-      'abc-123': { path: '/mock/output/abc-123.md', contentHash: 'hash' },
+      "abc-123": { path: "/mock/output/abc-123.md", contentHash: "hash" },
     });
   });
 
-  it('does not ledger a record whose mark-synced failed', async () => {
+  it("does not ledger a record whose mark-synced failed", async () => {
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { recordLedgerEntries } = await import('#src/libs/vault-ledger.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { recordLedgerEntries } = await import("#src/libs/vault-ledger.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -3270,18 +3288,18 @@ describe('index', () => {
     vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths([]));
     vi.mocked(markRecordsSynced).mockImplementation(markResultAll(MARK_FAILED));
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(recordLedgerEntries).not.toHaveBeenCalled();
   });
 
-  it('drops a record from the ledger when autoDelete deletes it', async () => {
+  it("drops a record from the ledger when autoDelete deletes it", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { removeLedgerEntries } = await import('#src/libs/vault-ledger.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { removeLedgerEntries } = await import("#src/libs/vault-ledger.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -3298,18 +3316,18 @@ describe('index', () => {
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(removeLedgerEntries).toHaveBeenCalledWith(['abc-123']);
+    expect(removeLedgerEntries).toHaveBeenCalledWith(["abc-123"]);
   });
 
-  it('never ledgers records the CLI deleted itself (autoDelete)', async () => {
+  it("never ledgers records the CLI deleted itself (autoDelete)", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { recordLedgerEntries } = await import('#src/libs/vault-ledger.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { recordLedgerEntries } = await import("#src/libs/vault-ledger.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -3326,24 +3344,24 @@ describe('index', () => {
       permanentlyFailed: false,
     });
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(recordLedgerEntries).not.toHaveBeenCalled();
   });
 
-  it('passes the same writtenPaths map instance to every autoSync pass', async () => {
+  it("passes the same writtenPaths map instance to every autoSync pass", async () => {
     const passTwoRecord: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Two',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Two",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -3370,7 +3388,7 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(writeMarkdown).toHaveBeenCalledTimes(2);
     const [firstCall, secondCall] = vi.mocked(writeMarkdown).mock.calls;
@@ -3383,19 +3401,19 @@ describe('index', () => {
     expect(firstCall[4]).not.toBe(firstCall[2]);
   });
 
-  it('forgets a record from the written-path map once it settles (deleted) so a later pass no longer carries it', async () => {
+  it("forgets a record from the written-path map once it settles (deleted) so a later pass no longer carries it", async () => {
     const passTwoRecord: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Two',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Two",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
@@ -3425,20 +3443,20 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Pass one wrote abc-123, then its delete succeeded, so the map handed to
     // pass two no longer carries it — the "settled" half of the split.
-    expect(snapshots[1].has('abc-123')).toBe(false);
+    expect(snapshots[1].has("abc-123")).toBe(false);
   });
 
-  it('keeps an unsettled record in the written-path map so a later pass reuses its file', async () => {
+  it("keeps an unsettled record in the written-path map so a later pass reuses its file", async () => {
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
@@ -3461,35 +3479,35 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Pass one wrote abc-123 and its mark-synced failed (unsettled), so pass two
     // still sees its path in the shared map and reuses the file.
-    expect(snapshots[1].get('abc-123')?.path).toBe('/mock/output/abc-123.md');
+    expect(snapshots[1].get("abc-123")?.path).toBe("/mock/output/abc-123.md");
     // The reused record must still flow through to the settle step each pass —
     // reuse that dropped it from writtenRecords would never converge.
     expect(markRecordsSynced).toHaveBeenCalledTimes(2);
     expect(markRecordsSynced).toHaveBeenNthCalledWith(1, [
-      { uuid: 'abc-123', filePath: '/mock/output/abc-123.md' },
+      { uuid: "abc-123", filePath: "/mock/output/abc-123.md" },
     ]);
     expect(markRecordsSynced).toHaveBeenNthCalledWith(2, [
-      { uuid: 'abc-123', filePath: '/mock/output/abc-123.md' },
+      { uuid: "abc-123", filePath: "/mock/output/abc-123.md" },
     ]);
   });
 
-  it('forgets only the mark-synced record that succeeded, keeping the failed one for reuse', async () => {
+  it("forgets only the mark-synced record that succeeded, keeping the failed one for reuse", async () => {
     const secondRecord: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Two',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Two",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, markRecordsSynced } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
@@ -3505,7 +3523,7 @@ describe('index', () => {
       partial: false,
     });
     vi.mocked(markRecordsSynced).mockImplementation(
-      markResultBy((uuid) => (uuid === 'abc-123' ? MARK_SYNCED : MARK_FAILED)),
+      markResultBy((uuid) => (uuid === "abc-123" ? MARK_SYNCED : MARK_FAILED)),
     );
     vi.mocked(writeMarkdown).mockImplementation(captureWrittenPaths(snapshots));
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
@@ -3515,12 +3533,12 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Snapshots 0/1 are pass one (both records fresh, map empty). Snapshots 2/3
     // are pass two: abc-123 settled (forgotten), def-456 unsettled (retained).
-    expect(snapshots[2].has('abc-123')).toBe(false);
-    expect(snapshots[2].get('def-456')?.path).toBe('/mock/output/def-456.md');
+    expect(snapshots[2].has("abc-123")).toBe(false);
+    expect(snapshots[2].get("def-456")?.path).toBe("/mock/output/def-456.md");
   });
 
   // A bare delete count can't say which uuids survived whenever it isn't an
@@ -3529,24 +3547,24 @@ describe('index', () => {
   // path may be forgotten, or a still-pending record would drop a suffixed
   // duplicate next pass.
   it.each([
-    { deleted: 1, scenario: 'settles fewer records than were written' },
-    { deleted: 3, scenario: 'exceeds what was requested' },
+    { deleted: 1, scenario: "settles fewer records than were written" },
+    { deleted: 3, scenario: "exceeds what was requested" },
   ])(
-    'retains all written paths when the delete count $scenario',
+    "retains all written paths when the delete count $scenario",
     async ({ deleted }) => {
       const secondRecord: Record = {
-        uuid: 'def-456',
-        title: 'Title 2',
-        content: 'Two',
-        createdAt: '2024-01-02T00:00:00Z',
+        uuid: "def-456",
+        title: "Title 2",
+        content: "Two",
+        createdAt: "2024-01-02T00:00:00Z",
       };
       const { fetchAllRecords, deleteRecords } =
-        await import('#src/libs/records.js');
-      const { writeMarkdown } = await import('#src/libs/markdown.js');
-      const { fetchSettings } = await import('#src/libs/settings.js');
+        await import("#src/libs/records.js");
+      const { writeMarkdown } = await import("#src/libs/markdown.js");
+      const { fetchSettings } = await import("#src/libs/settings.js");
       const { runSyncWithAutoSchedule } =
-        await import('#src/libs/scheduler.js');
-      const { default: yoctoSpinner } = await import('yocto-spinner');
+        await import("#src/libs/scheduler.js");
+      const { default: yoctoSpinner } = await import("yocto-spinner");
 
       const snapshots: Array<Map<string, WrittenRecordState>> = [];
       vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
@@ -3572,11 +3590,11 @@ describe('index', () => {
         },
       );
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       // Pass two (snapshot index 2) still carries both uuids.
-      expect(snapshots[2].has('abc-123')).toBe(true);
-      expect(snapshots[2].has('def-456')).toBe(true);
+      expect(snapshots[2].has("abc-123")).toBe(true);
+      expect(snapshots[2].has("def-456")).toBe(true);
       // Both uuids are still reported pending on pass two's fetch, so neither
       // has genuinely settled — the sticky exit code from pass one's ambiguous
       // delete must NOT be downgraded just because pass two itself ran clean
@@ -3591,19 +3609,19 @@ describe('index', () => {
   // resolved. A later fetch that no longer reports a tracked uuid as pending
   // is the server's own confirmation it settled — the narrow signal this fix
   // relies on to downgrade the sticky failure.
-  it('resets the sticky exit code once every previously-unsettled uuid drops out of a later, complete fetch', async () => {
+  it("resets the sticky exit code once every previously-unsettled uuid drops out of a later, complete fetch", async () => {
     const secondRecord: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Two',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Two",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -3635,10 +3653,10 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(mockSpinner.success).toHaveBeenCalledWith(
-      'No new records, exiting...',
+      "No new records, exiting...",
     );
     expect(deleteRecords).toHaveBeenCalledTimes(1);
     // Pins that pass two actually downgraded a real 1, not that it was never
@@ -3651,19 +3669,19 @@ describe('index', () => {
   // everything." A later fetch that still reports one previously-unsettled
   // uuid pending (it genuinely didn't settle) must leave that uuid tracked
   // even while a sibling uuid that really did drop out gets forgotten.
-  it('forgets only the previously-unsettled uuid that drops out of a later fetch, keeping a sibling that is still reported pending', async () => {
+  it("forgets only the previously-unsettled uuid that drops out of a later fetch, keeping a sibling that is still reported pending", async () => {
     const secondRecord: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Two',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Two",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
@@ -3696,14 +3714,14 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Snapshot 2 is pass two's only write (def-456), taken right after
     // reconciliation and before this pass's own delete. abc-123 is already
     // gone (it dropped out of the fetch); def-456 is still there (the fetch
     // still reports it pending, so reconciliation must not have touched it).
-    expect(snapshots[2].has('abc-123')).toBe(false);
-    expect(snapshots[2].get('def-456')?.path).toBe('/mock/output/def-456.md');
+    expect(snapshots[2].has("abc-123")).toBe(false);
+    expect(snapshots[2].get("def-456")?.path).toBe("/mock/output/def-456.md");
   });
 
   // Pins the "restore" branch specifically: a pass that is itself clean (no
@@ -3712,13 +3730,13 @@ describe('index', () => {
   // dropped for an unreconciled local edit (issue #110) — must have the prior
   // sticky failure restored, not left cleared by the temporary reset at the
   // top of the pass.
-  it('restores the sticky exit code when a previously-unsettled uuid is deferred (neither settled nor dropped from the fetch) on an otherwise clean pass', async () => {
+  it("restores the sticky exit code when a previously-unsettled uuid is deferred (neither settled nor dropped from the fetch) on an otherwise clean pass", async () => {
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -3747,7 +3765,7 @@ describe('index', () => {
       const filePath = `/mock/output/${record.uuid}.md`;
       state?.set(record.uuid, {
         path: filePath,
-        contentHash: 'hash',
+        contentHash: "hash",
         identity: { deviceId: 1n, inode: 1n },
       });
       dropped?.add(record.uuid);
@@ -3768,7 +3786,7 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Pass two never attempted a delete at all — the record was deferred, so
     // deleteRecords is only called once (pass one's ambiguous attempt).
@@ -3782,11 +3800,11 @@ describe('index', () => {
   // works — here, a fetch failure (e.g. an expired token since refreshed).
   // The written-state map was already empty going in, so there's nothing left
   // to reconcile except the exit code itself.
-  it('resets the sticky exit code once a later pass cleanly re-proves a fetch that previously failed outright', async () => {
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("resets the sticky exit code once a later pass cleanly re-proves a fetch that previously failed outright", async () => {
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -3804,7 +3822,7 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Pins that pass two actually downgraded a real 1, not that it was never
     // set in the first place.
@@ -3816,11 +3834,11 @@ describe('index', () => {
   // inherited must never be silently cleared — a crash is the opposite of
   // genuine resolution, even though the temporary clear at the top of the
   // pass means process.exitCode briefly reads as unset while it runs.
-  it('does not reset the sticky exit code when a later pass throws', async () => {
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("does not reset the sticky exit code when a later pass throws", async () => {
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(mockSettings());
@@ -3828,7 +3846,7 @@ describe('index', () => {
     // a classified API failure) throws from inside the try block.
     vi.mocked(fetchAllRecords)
       .mockResolvedValueOnce({ ok: false })
-      .mockRejectedValueOnce(new Error('unexpected'));
+      .mockRejectedValueOnce(new Error("unexpected"));
     vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
       async (runSync) => {
         await runSync();
@@ -3836,9 +3854,9 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
-    expect(mockSpinner.error).toHaveBeenCalledWith('Something went wrong!');
+    expect(mockSpinner.error).toHaveBeenCalledWith("Something went wrong!");
     expect(process.exitCode).toBe(1);
   });
 
@@ -3847,12 +3865,12 @@ describe('index', () => {
   // deferred record (issue #110; not a failure) would be mistaken for a
   // leftover from a completely unrelated earlier failure, and the earlier
   // failure would never get to clear even after it genuinely resolved.
-  it('resets the sticky exit code from an earlier fetch failure even when this pass defers a brand-new, unrelated record', async () => {
-    const { fetchAllRecords } = await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+  it("resets the sticky exit code from an earlier fetch failure even when this pass defers a brand-new, unrelated record", async () => {
+    const { fetchAllRecords } = await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
     vi.mocked(fetchSettings).mockResolvedValue(
@@ -3875,7 +3893,7 @@ describe('index', () => {
         const filePath = `/mock/output/${record.uuid}.md`;
         state?.set(record.uuid, {
           path: filePath,
-          contentHash: 'hash',
+          contentHash: "hash",
           identity: { deviceId: 1n, inode: 1n },
         });
         dropped?.add(record.uuid);
@@ -3889,7 +3907,7 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     expect(process.exitCode).toBe(0);
   });
@@ -3898,25 +3916,25 @@ describe('index', () => {
   // still-pending uuid could simply live on the unfetched page, so its
   // disappearance from THIS pass's (partial) list proves nothing. The sticky
   // exit code must stay put even though nothing else about this pass failed.
-  it('does not drop previously-unsettled uuids from the written-state map on a partial fetch that omits them', async () => {
+  it("does not drop previously-unsettled uuids from the written-state map on a partial fetch that omits them", async () => {
     const secondRecord: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Two',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Two",
+      createdAt: "2024-01-02T00:00:00Z",
     };
     const thirdRecord: Record = {
-      uuid: 'ghi-789',
-      title: 'Title 3',
-      content: 'Three',
-      createdAt: '2024-01-03T00:00:00Z',
+      uuid: "ghi-789",
+      title: "Title 3",
+      content: "Three",
+      createdAt: "2024-01-03T00:00:00Z",
     };
     const { fetchAllRecords, deleteRecords } =
-      await import('#src/libs/records.js');
-    const { writeMarkdown } = await import('#src/libs/markdown.js');
-    const { fetchSettings } = await import('#src/libs/settings.js');
-    const { runSyncWithAutoSchedule } = await import('#src/libs/scheduler.js');
-    const { default: yoctoSpinner } = await import('yocto-spinner');
+      await import("#src/libs/records.js");
+    const { writeMarkdown } = await import("#src/libs/markdown.js");
+    const { fetchSettings } = await import("#src/libs/settings.js");
+    const { runSyncWithAutoSchedule } = await import("#src/libs/scheduler.js");
+    const { default: yoctoSpinner } = await import("yocto-spinner");
 
     const snapshots: Array<Map<string, WrittenRecordState>> = [];
     vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
@@ -3950,26 +3968,26 @@ describe('index', () => {
       },
     );
 
-    await import('#src/index.js');
+    await import("#src/index.js");
 
     // Pass one wrote abc-123 and def-456 (snapshots 0 and 1); pass two writes
     // ghi-789 (snapshot 2). If the partial guard were missing, reconciliation
     // would have already dropped abc-123/def-456 by the time pass two's
     // writeMarkdown call is snapshotted, since neither appears in its
     // (incomplete) fetch.
-    expect(snapshots[2].has('abc-123')).toBe(true);
-    expect(snapshots[2].has('def-456')).toBe(true);
+    expect(snapshots[2].has("abc-123")).toBe(true);
+    expect(snapshots[2].has("def-456")).toBe(true);
     // The sticky failure from pass one's ambiguous delete must also still
     // stand — nothing about pass two (itself an incomplete fetch) resolves it.
     expect(process.exitCode).toBe(1);
   });
 
-  describe('sync --dry-run', () => {
+  describe("sync --dry-run", () => {
     const secondRecord: Record = {
-      uuid: 'def-456',
-      title: 'Title 2',
-      content: 'Content 2',
-      createdAt: '2024-01-02T00:00:00Z',
+      uuid: "def-456",
+      title: "Title 2",
+      content: "Content 2",
+      createdAt: "2024-01-02T00:00:00Z",
     };
 
     // Arranges a two-record dry run: fetch succeeds and the write preview
@@ -3977,10 +3995,10 @@ describe('index', () => {
     const arrangeDryRun = async (
       settingsOverrides: Partial<UserSettings> = {},
     ) => {
-      const { fetchAllRecords } = await import('#src/libs/records.js');
-      const { buildWritePreview } = await import('#src/libs/markdown.js');
-      const { fetchSettings } = await import('#src/libs/settings.js');
-      const { default: yoctoSpinner } = await import('yocto-spinner');
+      const { fetchAllRecords } = await import("#src/libs/records.js");
+      const { buildWritePreview } = await import("#src/libs/markdown.js");
+      const { fetchSettings } = await import("#src/libs/settings.js");
+      const { default: yoctoSpinner } = await import("yocto-spinner");
 
       vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
       vi.mocked(fetchSettings).mockResolvedValue(
@@ -3994,121 +4012,136 @@ describe('index', () => {
       vi.mocked(buildWritePreview).mockReturnValue([
         {
           record: mockRecord,
-          path: '/mock/output/test-title.md',
-          action: 'write',
+          path: "/mock/output/test-title.md",
+          action: "write",
         },
         {
           record: secondRecord,
-          path: '/mock/output/title-2.md',
-          action: 'write',
+          path: "/mock/output/title-2.md",
+          action: "write",
         },
       ]);
     };
 
-    it('writes nothing, deletes nothing, and marks nothing under --dry-run', async () => {
-      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+    it("writes nothing, deletes nothing, and marks nothing under --dry-run", async () => {
+      process.argv = ["node", "index.js", "sync", "--dry-run"];
       const { fetchAllRecords, deleteRecords, markRecordsSynced } =
-        await import('#src/libs/records.js');
+        await import("#src/libs/records.js");
       const { writeMarkdown, ensureOutputDirectory, buildWritePreview } =
-        await import('#src/libs/markdown.js');
+        await import("#src/libs/markdown.js");
       await arrangeDryRun();
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       // The fetch (a read) still runs — the preview needs the real record set.
-      expect(fetchAllRecords).toHaveBeenCalledWith({ status: 'pending' });
+      expect(fetchAllRecords).toHaveBeenCalledWith({ status: "pending" });
       expect(buildWritePreview).toHaveBeenCalledWith(
         [mockRecord, secondRecord],
-        'suffix',
+        "suffix",
       );
       // Every mutation path must be short-circuited.
       expect(writeMarkdown).not.toHaveBeenCalled();
       expect(ensureOutputDirectory).not.toHaveBeenCalled();
       expect(deleteRecords).not.toHaveBeenCalled();
       expect(markRecordsSynced).not.toHaveBeenCalled();
-      expect(mockSpinner.start).not.toHaveBeenCalledWith('Writing records...');
-      expect(mockSpinner.start).not.toHaveBeenCalledWith('Deleting records...');
+      expect(mockSpinner.start).not.toHaveBeenCalledWith("Writing records...");
+      expect(mockSpinner.start).not.toHaveBeenCalledWith("Deleting records...");
       // A successful preview exits 0.
       expect(process.exitCode).toBeUndefined();
     });
 
-    it('reports records with an unsafe server filePath as refused under --dry-run and exits non-zero', async () => {
-      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
-      const { buildWritePreview } = await import('#src/libs/markdown.js');
+    it("reports records with an unsafe server filePath as refused under --dry-run and exits non-zero", async () => {
+      process.argv = ["node", "index.js", "sync", "--dry-run"];
+      const { buildWritePreview } = await import("#src/libs/markdown.js");
       await arrangeDryRun({ autoDelete: true });
       vi.mocked(buildWritePreview).mockReturnValue([
-        { record: mockRecord, path: '../x.md', action: 'refuse', reason: 'Refusing to write: server file path "../x.md" is invalid (traversal).' },
-        { record: secondRecord, path: '/mock/output/title-2.md', action: 'write' },
+        {
+          record: mockRecord,
+          path: "../x.md",
+          action: "refuse",
+          reason:
+            'Refusing to write: server file path "../x.md" is invalid (traversal).',
+        },
+        {
+          record: secondRecord,
+          path: "/mock/output/title-2.md",
+          action: "write",
+        },
       ]);
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
-      const logged = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join('\n');
-      expect(logged).toContain('Would refuse 1 record(s)');
-      expect(logged).toContain('Test Title (abc-123): Refusing to write: server file path "../x.md" is invalid (traversal).');
-      expect(logged).toContain('Would write 1 record(s)');
+      const logged = vi
+        .mocked(console.log)
+        .mock.calls.map((call) => String(call[0]))
+        .join("\n");
+      expect(logged).toContain("Would refuse 1 record(s)");
+      expect(logged).toContain(
+        'Test Title (abc-123): Refusing to write: server file path "../x.md" is invalid (traversal).',
+      );
+      expect(logged).toContain("Would write 1 record(s)");
       // The refused record stays on the server: only the written one is listed
       // for deletion.
-      expect(logged).toContain('Would delete 1 record(s)');
-      expect(logged).toContain('! def-456');
-      expect(logged).not.toContain('! abc-123');
+      expect(logged).toContain("Would delete 1 record(s)");
+      expect(logged).toContain("! def-456");
+      expect(logged).not.toContain("! abc-123");
       expect(process.exitCode).toBe(1);
     });
 
-    it('lists the intended writes and the server-side deletes under --dry-run', async () => {
-      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+    it("lists the intended writes and the server-side deletes under --dry-run", async () => {
+      process.argv = ["node", "index.js", "sync", "--dry-run"];
       await arrangeDryRun({ autoDelete: true });
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Dry run — previewing 2 record(s)'),
+        expect.stringContaining("Dry run — previewing 2 record(s)"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Would write 2 record(s):'),
+        expect.stringContaining("Would write 2 record(s):"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('/mock/output/test-title.md (write)'),
+        expect.stringContaining("/mock/output/test-title.md (write)"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('/mock/output/title-2.md (write)'),
+        expect.stringContaining("/mock/output/title-2.md (write)"),
       );
       // autoDelete on → the server plan is a delete, listing each record.
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Would delete 2 record(s) from the server:'),
+        expect.stringContaining("Would delete 2 record(s) from the server:"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('abc-123 (Test Title)'),
+        expect.stringContaining("abc-123 (Test Title)"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('def-456 (Title 2)'),
+        expect.stringContaining("def-456 (Title 2)"),
       );
     });
 
-    it('previews a mark-synced (not a delete) when autoDelete is off', async () => {
-      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+    it("previews a mark-synced (not a delete) when autoDelete is off", async () => {
+      process.argv = ["node", "index.js", "sync", "--dry-run"];
       await arrangeDryRun({ autoDelete: false });
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Would mark 2 record(s) synced on the server:'),
+        expect.stringContaining("Would mark 2 record(s) synced on the server:"),
       );
       expect(console.log).not.toHaveBeenCalledWith(
-        expect.stringContaining('Would delete'),
+        expect.stringContaining("Would delete"),
       );
     });
 
-    it('excludes skipped records from the server-side plan under --dry-run', async () => {
-      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
-      const { fetchAllRecords } = await import('#src/libs/records.js');
-      const { buildWritePreview } = await import('#src/libs/markdown.js');
-      const { fetchSettings } = await import('#src/libs/settings.js');
-      const { default: yoctoSpinner } = await import('yocto-spinner');
+    it("excludes skipped records from the server-side plan under --dry-run", async () => {
+      process.argv = ["node", "index.js", "sync", "--dry-run"];
+      const { fetchAllRecords } = await import("#src/libs/records.js");
+      const { buildWritePreview } = await import("#src/libs/markdown.js");
+      const { fetchSettings } = await import("#src/libs/settings.js");
+      const { default: yoctoSpinner } = await import("yocto-spinner");
 
       vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
       vi.mocked(fetchSettings).mockResolvedValue(
-        mockSettings({ autoDelete: true, conflictStrategy: 'skip' }),
+        mockSettings({ autoDelete: true, conflictStrategy: "skip" }),
       );
       vi.mocked(fetchAllRecords).mockResolvedValue({
         ok: true,
@@ -4118,42 +4151,42 @@ describe('index', () => {
       vi.mocked(buildWritePreview).mockReturnValue([
         {
           record: mockRecord,
-          path: '/mock/output/test-title.md',
-          action: 'write',
+          path: "/mock/output/test-title.md",
+          action: "write",
         },
         {
           record: secondRecord,
-          path: '/mock/output/title-2.md',
-          action: 'skip',
+          path: "/mock/output/title-2.md",
+          action: "skip",
         },
       ]);
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       // Only the one non-skipped record is written and (would be) deleted.
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Would write 1 record(s):'),
+        expect.stringContaining("Would write 1 record(s):"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Would skip 1 record(s)'),
+        expect.stringContaining("Would skip 1 record(s)"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Would delete 1 record(s) from the server:'),
+        expect.stringContaining("Would delete 1 record(s) from the server:"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('abc-123 (Test Title)'),
+        expect.stringContaining("abc-123 (Test Title)"),
       );
       expect(console.log).not.toHaveBeenCalledWith(
-        expect.stringContaining('def-456 (Title 2)'),
+        expect.stringContaining("def-456 (Title 2)"),
       );
     });
 
-    it('mutates nothing on the server preview when settings cannot be read', async () => {
-      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
-      const { fetchAllRecords } = await import('#src/libs/records.js');
-      const { buildWritePreview } = await import('#src/libs/markdown.js');
-      const { fetchSettings } = await import('#src/libs/settings.js');
-      const { default: yoctoSpinner } = await import('yocto-spinner');
+    it("mutates nothing on the server preview when settings cannot be read", async () => {
+      process.argv = ["node", "index.js", "sync", "--dry-run"];
+      const { fetchAllRecords } = await import("#src/libs/records.js");
+      const { buildWritePreview } = await import("#src/libs/markdown.js");
+      const { fetchSettings } = await import("#src/libs/settings.js");
+      const { default: yoctoSpinner } = await import("yocto-spinner");
 
       vi.mocked(yoctoSpinner).mockReturnValue(mockSpinner);
       vi.mocked(fetchSettings).mockResolvedValue({ ok: false });
@@ -4165,28 +4198,28 @@ describe('index', () => {
       vi.mocked(buildWritePreview).mockReturnValue([
         {
           record: mockRecord,
-          path: '/mock/output/test-title.md',
-          action: 'write',
+          path: "/mock/output/test-title.md",
+          action: "write",
         },
       ]);
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Settings unreadable'),
+        expect.stringContaining("Settings unreadable"),
       );
       expect(console.log).not.toHaveBeenCalledWith(
-        expect.stringContaining('Would delete'),
+        expect.stringContaining("Would delete"),
       );
       expect(console.log).not.toHaveBeenCalledWith(
-        expect.stringContaining('Would mark'),
+        expect.stringContaining("Would mark"),
       );
     });
 
-    it('previews once and never self-schedules, even with autoSync on', async () => {
-      process.argv = ['node', 'index.js', 'sync', '--dry-run'];
+    it("previews once and never self-schedules, even with autoSync on", async () => {
+      process.argv = ["node", "index.js", "sync", "--dry-run"];
       const { runSyncWithAutoSchedule } =
-        await import('#src/libs/scheduler.js');
+        await import("#src/libs/scheduler.js");
       let scheduledAutoSync: boolean | undefined;
       vi.mocked(runSyncWithAutoSchedule).mockImplementationOnce(
         async (runSync) => {
@@ -4195,20 +4228,20 @@ describe('index', () => {
       );
       await arrangeDryRun({ autoSync: true });
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       // A dry run reports back `false` so the scheduler won't loop a preview.
       expect(scheduledAutoSync).toBe(false);
     });
 
-    it('still rejects an unexpected argument alongside --dry-run', async () => {
-      process.argv = ['node', 'index.js', 'sync', '--dry-run', 'oops'];
-      const { fetchAllRecords } = await import('#src/libs/records.js');
+    it("still rejects an unexpected argument alongside --dry-run", async () => {
+      process.argv = ["node", "index.js", "sync", "--dry-run", "oops"];
+      const { fetchAllRecords } = await import("#src/libs/records.js");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('Unexpected arguments: oops'),
+        expect.stringContaining("Unexpected arguments: oops"),
       );
       expect(process.exitCode).toBe(1);
       expect(fetchAllRecords).not.toHaveBeenCalled();
@@ -4218,13 +4251,13 @@ describe('index', () => {
   // account. The mocked `records` command hits the real `assertApiSuccess`
   // seam and reports through the real `failWithMessage`, the same path every
   // command takes, so this exercises the whole flow in both output modes.
-  describe('invite-only alpha auth failure notice', () => {
+  describe("invite-only alpha auth failure notice", () => {
     const failRecordsWithStatus = async (status: number) => {
-      const { runRecordsCommand } = await import('#src/commands/records.js');
+      const { runRecordsCommand } = await import("#src/commands/records.js");
       const { assertApiSuccess, describeApiError } =
-        await import('#src/libs/api.js');
-      const { failWithMessage } = await import('#src/libs/errors.js');
-      const { hasJsonFlag } = await import('#src/libs/output.js');
+        await import("#src/libs/api.js");
+      const { failWithMessage } = await import("#src/libs/errors.js");
+      const { hasJsonFlag } = await import("#src/libs/output.js");
 
       vi.mocked(runRecordsCommand).mockImplementation(async (args) => {
         try {
@@ -4239,13 +4272,13 @@ describe('index', () => {
       vi.mocked(console.error).mock.calls.map(([line]) => String(line));
 
     it.each([401, 403])(
-      'prints the waitlist notice after a %i in human output',
+      "prints the waitlist notice after a %i in human output",
       async (status) => {
-        process.argv = [...originalArgv.slice(0, 2), 'records', 'list'];
+        process.argv = [...originalArgv.slice(0, 2), "records", "list"];
         await failRecordsWithStatus(status);
-        const { AUTH_FAILURE_NOTICE } = await import('#src/libs/alpha.js');
+        const { AUTH_FAILURE_NOTICE } = await import("#src/libs/alpha.js");
 
-        await import('#src/index.js');
+        await import("#src/index.js");
 
         expect(stderrLines()).toContain(AUTH_FAILURE_NOTICE);
         expect(stderrLines().at(-1)).toBe(AUTH_FAILURE_NOTICE);
@@ -4254,47 +4287,47 @@ describe('index', () => {
     );
 
     it.each([401, 403])(
-      'appends the waitlist sentence to the fetch_failed message after a %i in --json mode',
+      "appends the waitlist sentence to the fetch_failed message after a %i in --json mode",
       async (status) => {
         process.argv = [
           ...originalArgv.slice(0, 2),
-          'records',
-          'list',
-          '--json',
+          "records",
+          "list",
+          "--json",
         ];
         await failRecordsWithStatus(status);
         const { AUTH_FAILURE_NOTICE, WAITLIST_SENTENCE } =
-          await import('#src/libs/alpha.js');
+          await import("#src/libs/alpha.js");
 
-        await import('#src/index.js');
+        await import("#src/index.js");
 
         const lines = stderrLines();
         expect(lines).toHaveLength(1);
         expect(lines).not.toContain(AUTH_FAILURE_NOTICE);
         const parsed = JSON.parse(lines[0]);
-        expect(parsed.error).toBe('fetch_failed');
+        expect(parsed.error).toBe("fetch_failed");
         expect(parsed.message.endsWith(` ${WAITLIST_SENTENCE}`)).toBe(true);
       },
     );
 
-    it('says nothing about the waitlist after a 500 in --json mode', async () => {
-      process.argv = [...originalArgv.slice(0, 2), 'records', 'list', '--json'];
+    it("says nothing about the waitlist after a 500 in --json mode", async () => {
+      process.argv = [...originalArgv.slice(0, 2), "records", "list", "--json"];
       await failRecordsWithStatus(500);
-      const { WAITLIST_URL } = await import('#src/libs/alpha.js');
+      const { WAITLIST_URL } = await import("#src/libs/alpha.js");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       const lines = stderrLines();
-      expect(JSON.parse(lines[0]).error).toBe('fetch_failed');
+      expect(JSON.parse(lines[0]).error).toBe("fetch_failed");
       expect(lines.some((line) => line.includes(WAITLIST_URL))).toBe(false);
     });
 
-    it('says nothing about the waitlist after a 500 in human output', async () => {
-      process.argv = [...originalArgv.slice(0, 2), 'records', 'list'];
+    it("says nothing about the waitlist after a 500 in human output", async () => {
+      process.argv = [...originalArgv.slice(0, 2), "records", "list"];
       await failRecordsWithStatus(500);
-      const { WAITLIST_URL } = await import('#src/libs/alpha.js');
+      const { WAITLIST_URL } = await import("#src/libs/alpha.js");
 
-      await import('#src/index.js');
+      await import("#src/index.js");
 
       expect(stderrLines().some((line) => line.includes(WAITLIST_URL))).toBe(
         false,

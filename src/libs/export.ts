@@ -1,23 +1,23 @@
-import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { homedir } from "node:os";
 
 import {
   authedRequestWithHeaders,
   isSystemicApiFailure,
   logApiFailure,
-} from '#src/libs/api.js';
-import { logErrorMessage } from '#src/libs/errors.js';
-import { expandHomeDirectory } from '#src/libs/paths.js';
-import { EventExportRow } from '#src/types/events.types.js';
-import { RecordExportRow } from '#src/types/records.types.js';
+} from "#src/libs/api.js";
+import { logErrorMessage } from "#src/libs/errors.js";
+import { expandHomeDirectory } from "#src/libs/paths.js";
+import { EventExportRow } from "#src/types/events.types.js";
+import { RecordExportRow } from "#src/types/records.types.js";
 
 // Mirrors markpost's shared/utils/export.ts `EXPORT_TRUNCATED_HEADER` — the
 // header markpost's export endpoints set to signal the result was capped at
 // their row limit. Copied by hand, like `RecordExportRow`: it's a `shared/`
 // constant, not part of the vendored `server/types/api.types.ts` contract.
-export const EXPORT_TRUNCATED_HEADER = 'X-Export-Truncated';
-const EXPORT_TRUNCATED_HEADER_TRUE = 'true';
+export const EXPORT_TRUNCATED_HEADER = "X-Export-Truncated";
+const EXPORT_TRUNCATED_HEADER_TRUE = "true";
 
 // markpost sets this header unconditionally on every response (verified
 // against server/api/records/export.get.ts: `setHeader(event,
@@ -56,25 +56,25 @@ export type EventExportResult = ExportResult<EventExportRow>;
 // A row missing one of these still passes `typeof === 'object'`, so each is
 // checked individually rather than trusting a bare `Array.isArray` + cast.
 const isNullableString = (value: unknown): value is string | null =>
-  value === null || typeof value === 'string';
+  value === null || typeof value === "string";
 
 // Guards a single export row before it's trusted as a `RecordExportRow`,
 // covering every field the CLI reads or persists (not just `uuid`) — a row
 // missing `content`, for example, would otherwise still get written into the
 // backup file and reported as a clean success.
 const isRecordExportRow = (value: unknown): value is RecordExportRow => {
-  if (typeof value !== 'object' || value === null) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
   const candidate = value as Record<string, unknown>;
 
   return (
-    typeof candidate.uuid === 'string' &&
-    typeof candidate.title === 'string' &&
-    typeof candidate.status === 'string' &&
-    typeof candidate.createdAt === 'string' &&
-    typeof candidate.content === 'string' &&
+    typeof candidate.uuid === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.status === "string" &&
+    typeof candidate.createdAt === "string" &&
+    typeof candidate.content === "string" &&
     isNullableString(candidate.source) &&
     isNullableString(candidate.sourceId) &&
     isNullableString(candidate.filePath) &&
@@ -87,17 +87,17 @@ const isRecordExportRow = (value: unknown): value is RecordExportRow => {
 // server/api/events/export.get.ts. `userId` is deliberately absent, unlike
 // the paginated `Event` shape.
 const isEventExportRow = (value: unknown): value is EventExportRow => {
-  if (typeof value !== 'object' || value === null) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
   const candidate = value as Record<string, unknown>;
 
   return (
-    typeof candidate.id === 'string' &&
-    typeof candidate.ts === 'string' &&
-    typeof candidate.kind === 'string' &&
-    typeof candidate.message === 'string' &&
+    typeof candidate.id === "string" &&
+    typeof candidate.ts === "string" &&
+    typeof candidate.kind === "string" &&
+    typeof candidate.message === "string" &&
     isNullableString(candidate.recordUuid) &&
     isNullableString(candidate.sourceId)
   );
@@ -131,7 +131,7 @@ const fetchExport = async <Row>(
         logApiFailure(
           label,
           new Error(
-            'Unexpected response shape: expected an array of export rows.',
+            "Unexpected response shape: expected an array of export rows.",
           ),
         );
       }
@@ -175,8 +175,8 @@ const fetchExport = async <Row>(
 // is a full-account dump.
 export const fetchRecordExport = (json = false): Promise<RecordExportResult> =>
   fetchExport(
-    '/api/records/export',
-    'fetchRecordExport',
+    "/api/records/export",
+    "fetchRecordExport",
     isRecordExportRow,
     json,
   );
@@ -185,7 +185,7 @@ export const fetchRecordExport = (json = false): Promise<RecordExportResult> =>
 // GET /api/events/export, newest first. Requires the `events:read` scope,
 // which the server enforces (a missing scope surfaces as a systemic 403).
 export const fetchEventExport = (json = false): Promise<EventExportResult> =>
-  fetchExport('/api/events/export', 'fetchEventExport', isEventExportRow, json);
+  fetchExport("/api/events/export", "fetchEventExport", isEventExportRow, json);
 
 // A full-account export holds every record's private title/content — as
 // sensitive as the API token itself — so the file is owner-readable only,
@@ -195,7 +195,7 @@ const EXPORT_FILE_MODE = 0o600;
 export class ExportFileExistsError extends Error {
   constructor(path: string) {
     super(`"${path}" already exists. Pass --force to overwrite it.`);
-    this.name = 'ExportFileExistsError';
+    this.name = "ExportFileExistsError";
   }
 }
 

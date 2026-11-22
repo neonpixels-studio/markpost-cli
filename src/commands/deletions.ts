@@ -1,7 +1,7 @@
-import { parseArgs } from 'node:util';
-import chalk from 'chalk';
-import { describeApiError } from '#src/libs/api.js';
-import { checkConfig } from '#src/libs/config.js';
+import { parseArgs } from "node:util";
+import chalk from "chalk";
+import { describeApiError } from "#src/libs/api.js";
+import { checkConfig } from "#src/libs/config.js";
 import {
   applyPrune,
   DeletionFeed,
@@ -9,16 +9,16 @@ import {
   planPrune,
   PruneItem,
   PrunePlan,
-} from '#src/libs/deletions.js';
-import { failWithMessage, warnMessage } from '#src/libs/errors.js';
-import { ensureOutputDirectory } from '#src/libs/markdown.js';
-import { printJson } from '#src/libs/output.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
-import { parseOrFailWithUsage } from '#src/libs/usage.js';
+} from "#src/libs/deletions.js";
+import { failWithMessage, warnMessage } from "#src/libs/errors.js";
+import { ensureOutputDirectory } from "#src/libs/markdown.js";
+import { printJson } from "#src/libs/output.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
+import { parseOrFailWithUsage } from "#src/libs/usage.js";
 import {
   getLastDeletionSync,
   setLastDeletionSync,
-} from '#src/libs/vault-ledger.js';
+} from "#src/libs/vault-ledger.js";
 
 export const DELETIONS_USAGE = `Deletions options:
   --apply           Remove the vault files the CLI wrote for records deleted on the
@@ -45,9 +45,9 @@ const parseDeletionsArgs = (args: string[]): DeletionsArgs => {
     args,
     allowPositionals: true,
     options: {
-      apply: { type: 'boolean' },
-      since: { type: 'string' },
-      json: { type: 'boolean' },
+      apply: { type: "boolean" },
+      since: { type: "string" },
+      json: { type: "boolean" },
     },
   });
 
@@ -63,7 +63,7 @@ const parseDeletionsArgs = (args: string[]): DeletionsArgs => {
     (!ISO_TIMESTAMP_PATTERN.test(since) || Number.isNaN(Date.parse(since)))
   ) {
     throw new Error(
-      '--since must be an ISO 8601 timestamp with a timezone, e.g. 2026-11-01T00:00:00Z.',
+      "--since must be an ISO 8601 timestamp with a timezone, e.g. 2026-11-01T00:00:00Z.",
     );
   }
 
@@ -71,28 +71,28 @@ const parseDeletionsArgs = (args: string[]): DeletionsArgs => {
 };
 
 const OUTCOME_LABELS = {
-  remove: { applied: 'Removed', preview: 'Would remove' },
-  missing: { applied: 'Already gone', preview: 'Already gone' },
+  remove: { applied: "Removed", preview: "Would remove" },
+  missing: { applied: "Already gone", preview: "Already gone" },
   modified: {
-    applied: 'Kept (edited since sync)',
-    preview: 'Would keep (edited since sync)',
+    applied: "Kept (edited since sync)",
+    preview: "Would keep (edited since sync)",
   },
   unsafe: {
-    applied: 'Kept (not a plain file inside the vault)',
-    preview: 'Would keep (not a plain file inside the vault)',
+    applied: "Kept (not a plain file inside the vault)",
+    preview: "Would keep (not a plain file inside the vault)",
   },
 } as const;
 
 const describeItem = (item: PruneItem, apply: boolean): string => {
-  const label = OUTCOME_LABELS[item.outcome][apply ? 'applied' : 'preview'];
+  const label = OUTCOME_LABELS[item.outcome][apply ? "applied" : "preview"];
 
   return `  ${label}: ${sanitizeForTerminal(item.path)}`;
 };
 
 const incompleteWarning = (since: string | undefined): string => {
   const reason = since
-    ? 'older than the 30 days markpost keeps deletions'
-    : 'unknown (no earlier deletion sync was recorded and --since was not given)';
+    ? "older than the 30 days markpost keeps deletions"
+    : "unknown (no earlier deletion sync was recorded and --since was not given)";
 
   return `Deletion history is not complete: the starting point is ${reason}. Notes deleted before the retained window may still be in your vault; compare it against \`markpost export\` if that matters.`;
 };
@@ -112,8 +112,8 @@ const printReport = (
   );
   plan.items.forEach((item) => console.log(describeItem(item, apply)));
 
-  if (!apply && plan.items.some((item) => item.outcome === 'remove')) {
-    console.log(chalk.yellow('Dry run: re-run with --apply to remove them.'));
+  if (!apply && plan.items.some((item) => item.outcome === "remove")) {
+    console.log(chalk.yellow("Dry run: re-run with --apply to remove them."));
   }
 };
 
@@ -163,7 +163,7 @@ const advanceBaseline = (
 ): void => {
   if (skipsUnreadDeletions(explicitSince, storedSince)) {
     warnMessage(
-      '--since starts after deletions that were never read, so the recorded sync point was not moved. Run without --since to record one.',
+      "--since starts after deletions that were never read, so the recorded sync point was not moved. Run without --since to record one.",
     );
     return;
   }

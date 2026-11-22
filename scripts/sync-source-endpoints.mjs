@@ -20,10 +20,10 @@
 //   npm run sync:source-endpoints -- --from <path>    # copies from an existing local checkout
 //   npm run sync:source-endpoints -- --from=<path>    # same, `=` form
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
 import {
   assertPathIsCommitted,
@@ -33,18 +33,18 @@ import {
   resolveSourceRepo,
   withMarkpostCheckout,
   writeManifest,
-} from './lib/markpost-checkout.mjs';
-import { parseFromPathArg } from './sync-contract.mjs';
+} from "./lib/markpost-checkout.mjs";
+import { parseFromPathArg } from "./sync-contract.mjs";
 
-const SOURCE_RELATIVE_PATH = 'app/composables/useSources.ts';
+const SOURCE_RELATIVE_PATH = "app/composables/useSources.ts";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(SCRIPT_DIR, '..');
-const VENDOR_DIR = join(REPO_ROOT, 'tests/libs/vendor');
-const VENDOR_FILE = join(VENDOR_DIR, 'markpost-source-endpoints.generated.ts');
+const REPO_ROOT = join(SCRIPT_DIR, "..");
+const VENDOR_DIR = join(REPO_ROOT, "tests/libs/vendor");
+const VENDOR_FILE = join(VENDOR_DIR, "markpost-source-endpoints.generated.ts");
 const MANIFEST_FILE = join(
   VENDOR_DIR,
-  'markpost-source-endpoints.manifest.json',
+  "markpost-source-endpoints.manifest.json",
 );
 
 // The two constants pulled out of useSources.ts. Both names must exist in
@@ -52,7 +52,7 @@ const MANIFEST_FILE = join(
 // removal, or a switch to a computed/templated value upstream fails the sync
 // loudly, which is itself the drift signal worth surfacing, rather than
 // silently vendoring something that doesn't parse as a standalone constant.
-const REQUIRED_CONSTANT_NAMES = ['WEBHOOK_INGEST_BASE', 'EMAIL_DOMAIN'];
+const REQUIRED_CONSTANT_NAMES = ["WEBHOOK_INGEST_BASE", "EMAIL_DOMAIN"];
 
 const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 //
@@ -105,8 +105,8 @@ function findConstantDeclarator(sourceFile, name) {
     if (!isConstDeclaration) {
       throw new Error(
         `${SOURCE_RELATIVE_PATH}'s ${name} is declared with a reassignable ` +
-          'binding (let/var), not const — its value at read time may differ ' +
-          'from its initializer, so it cannot be vendored as a constant',
+          "binding (let/var), not const — its value at read time may differ " +
+          "from its initializer, so it cannot be vendored as a constant",
       );
     }
 
@@ -148,8 +148,8 @@ function renderConstantDeclaration(name, declarator) {
   if (!valueExpression || !ts.isStringLiteralLike(valueExpression)) {
     throw new Error(
       `${SOURCE_RELATIVE_PATH}'s ${name} is not a plain string literal — ` +
-        'update scripts/sync-source-endpoints.mjs to handle its new shape ' +
-        '(and confirm src/commands/sources.ts still mirrors it correctly)',
+        "update scripts/sync-source-endpoints.mjs to handle its new shape " +
+        "(and confirm src/commands/sources.ts still mirrors it correctly)",
     );
   }
 
@@ -176,9 +176,9 @@ function extractEndpointConstants(source) {
 
   if (missing.length > 0) {
     throw new Error(
-      `${SOURCE_RELATIVE_PATH} is missing expected constant(s): ${missing.join(', ')} — ` +
-        'markpost renamed or removed part of the ingest-endpoint config; update ' +
-        'scripts/sync-source-endpoints.mjs and src/commands/sources.ts to match',
+      `${SOURCE_RELATIVE_PATH} is missing expected constant(s): ${missing.join(", ")} — ` +
+        "markpost renamed or removed part of the ingest-endpoint config; update " +
+        "scripts/sync-source-endpoints.mjs and src/commands/sources.ts to match",
     );
   }
 
@@ -186,7 +186,7 @@ function extractEndpointConstants(source) {
     renderConstantDeclaration(name, declarator),
   );
 
-  return declarations.join('\n\n');
+  return declarations.join("\n\n");
 }
 
 function writeVendoredConstants(constants) {
@@ -221,11 +221,11 @@ function main() {
 
   withMarkpostCheckout(
     fromPath,
-    'markpost-source-endpoints-sync-',
+    "markpost-source-endpoints-sync-",
     (checkoutDir) => {
       syncFrom(checkoutDir);
       console.log(`Synced ${VENDOR_FILE} from ${checkoutDir}`);
-      console.log('Review the diff, then run `npm test` before committing.');
+      console.log("Review the diff, then run `npm test` before committing.");
     },
   );
 }

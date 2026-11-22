@@ -1,4 +1,4 @@
-import type { ScopeName } from '#src/types/vendor/markpost-scopes.generated.js';
+import type { ScopeName } from "#src/types/vendor/markpost-scopes.generated.js";
 
 // Scopes each CLI command needs from the token it authenticates with, taken
 // from the requireScope() gate on the markpost endpoints the command calls
@@ -8,15 +8,15 @@ import type { ScopeName } from '#src/types/vendor/markpost-scopes.generated.js';
 export const COMMAND_REQUIRED_SCOPES: Readonly<
   Record<string, readonly ScopeName[]>
 > = {
-  sync: ['records:read', 'records:write', 'settings:read'],
-  push: ['records:write'],
-  get: ['records:read'],
-  records: ['records:read', 'records:write'],
-  export: ['records:read'],
-  events: ['events:read'],
-  sources: ['sources:read', 'sources:write'],
-  tokens: ['tokens:read', 'tokens:write'],
-  settings: ['settings:read', 'settings:write'],
+  sync: ["records:read", "records:write", "settings:read"],
+  push: ["records:write"],
+  get: ["records:read"],
+  records: ["records:read", "records:write"],
+  export: ["records:read"],
+  events: ["events:read"],
+  sources: ["sources:read", "sources:write"],
+  tokens: ["tokens:read", "tokens:write"],
+  settings: ["settings:read", "settings:write"],
 };
 
 export type LostCommandScopes = {
@@ -52,8 +52,8 @@ export const formatLostScopesWarning = (
   lost: LostCommandScopes[],
 ): string => {
   const details = lost
-    .map(({ command, scopes }) => `${command} (${scopes.join(', ')})`)
-    .join('; ');
+    .map(({ command, scopes }) => `${command} (${scopes.join(", ")})`)
+    .join("; ");
 
   return `WARNING: this is the token this CLI is currently configured with, and the new scopes drop scopes its commands need, so they will fail with 403 errors: ${details}. To undo it, set a full-access token with \`markpost config set apiToken <token>\`, then run \`markpost tokens update ${id} --scopes <a,b>\`.`;
 };

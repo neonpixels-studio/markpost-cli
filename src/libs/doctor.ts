@@ -1,6 +1,6 @@
-import { constants } from 'node:fs';
-import { access, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { constants } from "node:fs";
+import { access, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import {
   API_REQUEST_TIMEOUT_MS,
   ApiRequestError,
@@ -8,19 +8,19 @@ import {
   getApiToken,
   assertSafeBaseUrl,
   getConfiguredBaseUrl,
-} from '#src/libs/api.js';
-import { getConfigValue } from '#src/libs/config.js';
-import { messageFromError } from '#src/libs/errors.js';
-import { expandHomeDirectory } from '#src/libs/paths.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
+} from "#src/libs/api.js";
+import { getConfigValue } from "#src/libs/config.js";
+import { messageFromError } from "#src/libs/errors.js";
+import { expandHomeDirectory } from "#src/libs/paths.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
 
 export type CheckResult = { name: string; ok: boolean; detail: string };
 
-export const CHECK_CONFIG = 'config';
-export const CHECK_BASE_URL = 'base-url';
-export const CHECK_REACHABLE = 'api-reachable';
-export const CHECK_TOKEN = 'token';
-export const CHECK_OUTPUT_DIRECTORY = 'output-directory';
+export const CHECK_CONFIG = "config";
+export const CHECK_BASE_URL = "base-url";
+export const CHECK_REACHABLE = "api-reachable";
+export const CHECK_TOKEN = "token";
+export const CHECK_OUTPUT_DIRECTORY = "output-directory";
 
 const HTTP_UNAUTHORIZED = 401;
 const HTTP_FORBIDDEN = 403;
@@ -28,7 +28,7 @@ const HTTP_FORBIDDEN = 403;
 // The cheapest authed read that has no side effects (GET /api/settings would
 // create a default settings row for a fresh account). It needs `records:read`,
 // which every sync needs too, so a token lacking it is worth flagging.
-export const TOKEN_PROBE_PATH = '/api/records/stats';
+export const TOKEN_PROBE_PATH = "/api/records/stats";
 
 const pass = (name: string, detail: string): CheckResult => ({
   name,
@@ -44,7 +44,7 @@ const displayUrl = (baseUrl: string): string => {
   try {
     return new URL(baseUrl).origin;
   } catch {
-    return '(invalid URL)';
+    return "(invalid URL)";
   }
 };
 
@@ -55,7 +55,7 @@ const fail = (name: string, detail: string): CheckResult => ({
 });
 
 export const getConfiguredOutputDirectory = (): string | undefined => {
-  return process.env.OUTPUT_DIRECTORY ?? getConfigValue('outputDirectory');
+  return process.env.OUTPUT_DIRECTORY ?? getConfigValue("outputDirectory");
 };
 
 // Presence only, never the values: the token must not reach the output.
@@ -64,18 +64,18 @@ export const checkConfigPresent = (
   outputDirectory: string | undefined,
 ): CheckResult => {
   const missing = [
-    apiToken ? null : 'apiToken',
-    outputDirectory ? null : 'outputDirectory',
+    apiToken ? null : "apiToken",
+    outputDirectory ? null : "outputDirectory",
   ].filter((key) => key !== null);
 
   if (missing.length > 0) {
     return fail(
       CHECK_CONFIG,
-      `missing ${missing.join(', ')} (run \`markpost config set <key> <value>\` or set API_TOKEN / OUTPUT_DIRECTORY)`,
+      `missing ${missing.join(", ")} (run \`markpost config set <key> <value>\` or set API_TOKEN / OUTPUT_DIRECTORY)`,
     );
   }
 
-  return pass(CHECK_CONFIG, 'apiToken and outputDirectory are set');
+  return pass(CHECK_CONFIG, "apiToken and outputDirectory are set");
 };
 
 export const checkBaseUrl = (baseUrl: string): CheckResult => {
@@ -143,7 +143,7 @@ const describeTokenFailure = (error: unknown): string => {
     error instanceof ApiRequestError &&
     error.statusCode === HTTP_UNAUTHORIZED
   ) {
-    return 'token was rejected (missing, expired or revoked)';
+    return "token was rejected (missing, expired or revoked)";
   }
 
   if (error instanceof ApiRequestError && error.statusCode === HTTP_FORBIDDEN) {
@@ -158,13 +158,13 @@ export const checkTokenAccepted = async (
   probe: TokenProbe = probeToken,
 ): Promise<CheckResult> => {
   if (!apiToken) {
-    return fail(CHECK_TOKEN, 'no token to test');
+    return fail(CHECK_TOKEN, "no token to test");
   }
 
   try {
     await probe();
 
-    return pass(CHECK_TOKEN, 'accepted, records:read is allowed');
+    return pass(CHECK_TOKEN, "accepted, records:read is allowed");
   } catch (error) {
     return fail(CHECK_TOKEN, describeTokenFailure(error));
   }
@@ -205,7 +205,7 @@ export const checkOutputDirectory = async (
   configured: string | undefined,
 ): Promise<CheckResult> => {
   if (!configured) {
-    return fail(CHECK_OUTPUT_DIRECTORY, 'not configured');
+    return fail(CHECK_OUTPUT_DIRECTORY, "not configured");
   }
 
   const directory = resolveDirectory(configured);
@@ -232,15 +232,15 @@ const runNetworkChecks = async (
 ): Promise<CheckResult[]> => {
   if (!baseUrlResult.ok) {
     return [
-      skipped(CHECK_REACHABLE, 'BASE_URL is invalid'),
-      skipped(CHECK_TOKEN, 'BASE_URL is invalid'),
+      skipped(CHECK_REACHABLE, "BASE_URL is invalid"),
+      skipped(CHECK_TOKEN, "BASE_URL is invalid"),
     ];
   }
 
   const reachableResult = await checkApiReachable(baseUrl);
 
   if (!reachableResult.ok) {
-    return [reachableResult, skipped(CHECK_TOKEN, 'API is unreachable')];
+    return [reachableResult, skipped(CHECK_TOKEN, "API is unreachable")];
   }
 
   return [reachableResult, await checkTokenAccepted(apiToken)];

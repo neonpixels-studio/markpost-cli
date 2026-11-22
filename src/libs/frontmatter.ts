@@ -1,4 +1,4 @@
-import { Frontmatter, Record } from '#src/types/records.types.js';
+import { Frontmatter, Record } from "#src/types/records.types.js";
 
 // Faithful mirror of markpost's server/utils/markdown.ts frontmatter assembly
 // (`quoteYamlScalar`, `serializeTagsLine`, `serializeFrontmatter`,
@@ -6,10 +6,10 @@ import { Frontmatter, Record } from '#src/types/records.types.js';
 // must be byte-identical to what markpost would write, so the serialization
 // here is kept deliberately in lockstep with that file. Update both together.
 
-const FRONTMATTER_DELIMITER = '---';
-const HEADING_PREFIX = '# ';
-const BLOCK_SEPARATOR = '\n\n';
-const EMPTY_TAGS_LINE = 'tags: []';
+const FRONTMATTER_DELIMITER = "---";
+const HEADING_PREFIX = "# ";
+const BLOCK_SEPARATOR = "\n\n";
+const EMPTY_TAGS_LINE = "tags: []";
 // A synced document opens with the delimiter on its own line.
 const FRONTMATTER_OPENING = `${FRONTMATTER_DELIMITER}\n`;
 // The closing delimiter as it appears in an assembled document: the newline
@@ -17,17 +17,17 @@ const FRONTMATTER_OPENING = `${FRONTMATTER_DELIMITER}\n`;
 // separator before the heading. Matching the full sequence (not a bare `---`)
 // means a frontmatter value that happens to be `---` can't end the block early.
 const FRONTMATTER_CLOSING = `\n${FRONTMATTER_DELIMITER}${BLOCK_SEPARATOR}`;
-const BYTE_ORDER_MARK = '\uFEFF';
-const CARRIAGE_RETURN = '\r';
+const BYTE_ORDER_MARK = "\uFEFF";
+const CARRIAGE_RETURN = "\r";
 // serializeFrontmatter emits exactly these four keys, in this order. Matching
 // the full signature (not just "looks like YAML") means only a block markpost
 // itself wrote is reversed — a hand-authored note's own frontmatter, or prose
 // that merely opens with a `---` thematic break, is never stripped on push.
 const FRONTMATTER_KEY_PREFIXES = [
-  'title: ',
-  'source: ',
-  'created: ',
-  'tags: ',
+  "title: ",
+  "source: ",
+  "created: ",
+  "tags: ",
 ] as const;
 const TITLE_LINE_INDEX = 0;
 const CREATED_LINE_INDEX = 2;
@@ -45,7 +45,7 @@ const YAML_SPECIAL_CHARACTERS = /[:#[\]{}&!|>'"%@`,]/;
 const quoteYamlScalar = (value: string): string => {
   const needsQuoting =
     YAML_SPECIAL_CHARACTERS.test(value) ||
-    value.includes('\n') ||
+    value.includes("\n") ||
     value.trim() !== value;
 
   if (!needsQuoting) {
@@ -53,9 +53,9 @@ const quoteYamlScalar = (value: string): string => {
   }
 
   const escaped = value
-    .replace(/\\/g, '\\\\')
+    .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n');
+    .replace(/\n/g, "\\n");
 
   return `"${escaped}"`;
 };
@@ -73,7 +73,7 @@ const unquoteYamlScalar = (value: string): string => {
   }
 
   return value.slice(1, -1).replace(/\\(.)/g, (_match, escaped) => {
-    return escaped === 'n' ? '\n' : escaped;
+    return escaped === "n" ? "\n" : escaped;
   });
 };
 
@@ -82,7 +82,7 @@ const serializeTagsLine = (tags: string[]): string => {
     return EMPTY_TAGS_LINE;
   }
 
-  const quotedTags = tags.map((tag) => quoteYamlScalar(tag)).join(', ');
+  const quotedTags = tags.map((tag) => quoteYamlScalar(tag)).join(", ");
 
   return `tags: [${quotedTags}]`;
 };
@@ -95,7 +95,7 @@ export const serializeFrontmatter = (frontmatter: Frontmatter): string => {
     `created: ${frontmatter.created}`,
     serializeTagsLine(frontmatter.tags),
     FRONTMATTER_DELIMITER,
-  ].join('\n');
+  ].join("\n");
 };
 
 type MarkdownDocument = {
@@ -127,7 +127,7 @@ const normalizeForStrip = (content: string): string => {
     ? content.slice(BYTE_ORDER_MARK.length)
     : content;
 
-  return withoutBom.split(`${CARRIAGE_RETURN}\n`).join('\n');
+  return withoutBom.split(`${CARRIAGE_RETURN}\n`).join("\n");
 };
 
 const lineValue = (blockLines: string[], index: number): string => {
@@ -189,11 +189,11 @@ const bodyAfterMirroredHeading = (
 
   const afterHeading = content.slice(expectedHeading.length);
 
-  if (afterHeading !== '' && !afterHeading.startsWith('\n')) {
+  if (afterHeading !== "" && !afterHeading.startsWith("\n")) {
     return null;
   }
 
-  return afterHeading.replace(/^\n{0,2}/, '');
+  return afterHeading.replace(/^\n{0,2}/, "");
 };
 
 type ParsedFrontmatterDocument = {
@@ -227,7 +227,7 @@ const parseFrontmatterDocument = (
 
   const blockLines = normalized
     .slice(FRONTMATTER_OPENING.length, closingIndex)
-    .split('\n');
+    .split("\n");
 
   if (!isFrontmatterBlock(blockLines)) {
     return null;
@@ -278,7 +278,7 @@ export const stripFrontmatterDocument = (content: string): string => {
 const isEscapedQuote = (tagList: string, index: number): boolean => {
   let backslashCount = 0;
 
-  for (let scan = index - 1; tagList[scan] === '\\'; scan -= 1) {
+  for (let scan = index - 1; tagList[scan] === "\\"; scan -= 1) {
     backslashCount += 1;
   }
 
@@ -294,7 +294,7 @@ const isEscapedQuote = (tagList: string, index: number): boolean => {
 // token, which is not a real tag list to begin with (see parseTagsLine).
 const splitTagList = (tagList: string): string[] | null => {
   const tokens: string[] = [];
-  let current = '';
+  let current = "";
   let insideQuotes = false;
 
   for (let index = 0; index < tagList.length; index += 1) {
@@ -304,9 +304,9 @@ const splitTagList = (tagList: string): string[] | null => {
       insideQuotes = !insideQuotes;
     }
 
-    if (character === ',' && !insideQuotes) {
+    if (character === "," && !insideQuotes) {
       tokens.push(current);
-      current = '';
+      current = "";
       continue;
     }
 
@@ -347,13 +347,13 @@ type TagsLineParseResult = {
 const parseTagsLine = (serializedTags: string): TagsLineParseResult => {
   const trimmedValue = serializedTags.trim();
 
-  if (!trimmedValue.startsWith('[') || !trimmedValue.endsWith(']')) {
+  if (!trimmedValue.startsWith("[") || !trimmedValue.endsWith("]")) {
     return { tags: [], unparseable: true };
   }
 
   const tagList = trimmedValue.slice(1, -1).trim();
 
-  if (tagList === '') {
+  if (tagList === "") {
     return { tags: [], unparseable: false };
   }
 
@@ -365,7 +365,7 @@ const parseTagsLine = (serializedTags: string): TagsLineParseResult => {
 
   const tags = tokens
     .map((token) => unquoteYamlScalar(token.trim()))
-    .filter((tag) => tag !== '');
+    .filter((tag) => tag !== "");
 
   return { tags, unparseable: false };
 };
@@ -424,7 +424,7 @@ export interface ParsedNoteText {
 // and strip the frontmatter block and mirrored heading. Callers differ only in
 // how they derive the title.
 export const parseNoteText = (text: string): ParsedNoteText => {
-  const rawContent = text.replace(BYTE_ORDER_MARK_PATTERN, '');
+  const rawContent = text.replace(BYTE_ORDER_MARK_PATTERN, "");
   const { tags, tagsLineUnparseable } =
     extractFrontmatterTagsWithDiagnostics(rawContent);
 
@@ -437,11 +437,11 @@ export const parseNoteText = (text: string): ParsedNoteText => {
 };
 
 const isPlainObject = (value: unknown): value is { [key: string]: unknown } => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 };
 
 const asString = (value: unknown, fallback: string): string => {
-  return typeof value === 'string' ? value : fallback;
+  return typeof value === "string" ? value : fallback;
 };
 
 const asStringArray = (value: unknown): string[] => {
@@ -449,7 +449,7 @@ const asStringArray = (value: unknown): string[] => {
     return [];
   }
 
-  return value.filter((item): item is string => typeof item === 'string');
+  return value.filter((item): item is string => typeof item === "string");
 };
 
 // markpost's `created` is serialized unquoted, so mirroring it verbatim would
@@ -458,7 +458,7 @@ const asStringArray = (value: unknown): string[] => {
 // TIMESTAMP_PATTERN) and otherwise fall back to the record's `createdAt`, so
 // valid timestamps stay byte-identical to markpost while junk can't break out.
 const asTimestamp = (value: unknown, fallback: string): string => {
-  if (typeof value === 'string' && TIMESTAMP_PATTERN.test(value)) {
+  if (typeof value === "string" && TIMESTAMP_PATTERN.test(value)) {
     return value;
   }
 
@@ -480,7 +480,7 @@ const normalizeFrontmatter = (record: Record): Frontmatter | null => {
 
   return {
     title: asString(raw.title, record.title),
-    source: asString(raw.source, record.source ?? ''),
+    source: asString(raw.source, record.source ?? ""),
     created: asTimestamp(raw.created, record.createdAt),
     tags: asStringArray(raw.tags),
   };

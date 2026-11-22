@@ -5,20 +5,20 @@ import {
   readdirSync,
   realpathSync,
   statSync,
-} from 'node:fs';
-import type { Stats } from 'node:fs';
-import { homedir } from 'node:os';
-import { extname, join, resolve } from 'node:path';
+} from "node:fs";
+import type { Stats } from "node:fs";
+import { homedir } from "node:os";
+import { extname, join, resolve } from "node:path";
 
-const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
+const MARKDOWN_EXTENSIONS = [".md", ".markdown"];
 // Leading dot marks entries the directory walk skips (`.git`, `.obsidian`,
 // dotfiles), matching globSync's default of not matching dot entries.
-const HIDDEN_ENTRY_PREFIX = '.';
+const HIDDEN_ENTRY_PREFIX = ".";
 // Leading references to the home directory the shell would normally expand.
 // A user quotes a glob (`markpost push '~/vault/**'`) precisely to stop the
 // shell touching it, which also stops the shell expanding the `~`/`$HOME`, so
 // the literal reference reaches us and must be expanded here instead.
-const HOME_REFERENCE_PREFIXES = ['~', '$HOME', '${HOME}'];
+const HOME_REFERENCE_PREFIXES = ["~", "$HOME", "${HOME}"];
 
 // The outcome of expanding the raw push arguments:
 // - `files`: every markdown file resolved (deduplicated, order preserved)
@@ -109,7 +109,7 @@ const statOrSkip = (
 // Node fs errors carry an errno string in `code` rather than distinct error
 // classes, so distinguishing failure kinds means reading that field.
 const errnoCode = (error: unknown): string | undefined => {
-  if (error instanceof Error && 'code' in error) {
+  if (error instanceof Error && "code" in error) {
     return (error as NodeJS.ErrnoException).code;
   }
 
@@ -119,24 +119,24 @@ const errnoCode = (error: unknown): string | undefined => {
 // EACCES (no permission) and EPERM (operation not permitted) are the codes a
 // locked parent directory raises. Every other failure, including a
 // genuinely missing path (ENOENT/ENOTDIR), falls through to glob handling.
-const PERMISSION_ERRNO_CODES = new Set(['EACCES', 'EPERM']);
+const PERMISSION_ERRNO_CODES = new Set(["EACCES", "EPERM"]);
 
 const isPermissionError = (error: unknown): boolean => {
-  return PERMISSION_ERRNO_CODES.has(errnoCode(error) ?? '');
+  return PERMISSION_ERRNO_CODES.has(errnoCode(error) ?? "");
 };
 
 type InputStatResult =
-  | { kind: 'stats'; stats: Stats }
+  | { kind: "stats"; stats: Stats }
   // Not necessarily ENOENT — any non-permission stat failure (a typo'd
   // path, ENOTDIR, ELOOP, …) lands here and is retried as a glob, same as
   // a path that simply doesn't exist.
-  | { kind: 'try-glob' }
-  | { kind: 'permission-denied' };
+  | { kind: "try-glob" }
+  | { kind: "permission-denied" };
 
 const classifyStatError = (error: unknown): InputStatResult => {
   return isPermissionError(error)
-    ? { kind: 'permission-denied' }
-    : { kind: 'try-glob' };
+    ? { kind: "permission-denied" }
+    : { kind: "try-glob" };
 };
 
 // Stats an input argument and discriminates *why* the stat failed, which
@@ -144,7 +144,7 @@ const classifyStatError = (error: unknown): InputStatResult => {
 // collapses them into a single `false`.
 const statInput = (path: string): InputStatResult => {
   try {
-    return { kind: 'stats', stats: statSync(path) };
+    return { kind: "stats", stats: statSync(path) };
   } catch (error) {
     return classifyStatError(error);
   }
@@ -239,7 +239,7 @@ const globMatches = (pattern: string): string[] => {
   try {
     return globSync(pattern);
   } catch (error) {
-    if (errnoCode(error) === 'ENOTDIR') {
+    if (errnoCode(error) === "ENOTDIR") {
       return [];
     }
 
@@ -267,12 +267,12 @@ const collectFromGlob = (
 const resolveInput = (input: string, accumulator: WalkAccumulator): void => {
   const statResult = statInput(input);
 
-  if (statResult.kind === 'try-glob') {
+  if (statResult.kind === "try-glob") {
     collectFromGlob(input, accumulator);
     return;
   }
 
-  if (statResult.kind === 'permission-denied') {
+  if (statResult.kind === "permission-denied") {
     accumulator.skipped.push(input);
     return;
   }

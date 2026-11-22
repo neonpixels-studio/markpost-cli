@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Event } from '#src/types/events.types.js';
+import { Event } from "#src/types/events.types.js";
 
-vi.mock('#src/libs/config.js', () => ({ checkConfig: vi.fn() }));
-vi.mock('#src/libs/events.js', () => ({ fetchAllEvents: vi.fn() }));
-vi.mock('chalk', () => ({
+vi.mock("#src/libs/config.js", () => ({ checkConfig: vi.fn() }));
+vi.mock("#src/libs/events.js", () => ({ fetchAllEvents: vi.fn() }));
+vi.mock("chalk", () => ({
   default: {
     redBright: vi.fn((value: unknown) => value),
     yellow: vi.fn((value: unknown) => value),
@@ -15,35 +15,35 @@ vi.mock('chalk', () => ({
 }));
 
 const okEvent: Event = {
-  id: 'evt-1',
-  userId: 'user-1',
-  ts: '2024-01-01T00:00:00Z',
-  kind: 'ok',
-  message: 'Ingested record from webhook',
-  recordUuid: 'rec-1',
-  sourceId: 'src-1',
+  id: "evt-1",
+  userId: "user-1",
+  ts: "2024-01-01T00:00:00Z",
+  kind: "ok",
+  message: "Ingested record from webhook",
+  recordUuid: "rec-1",
+  sourceId: "src-1",
 };
 
 const errEvent: Event = {
-  id: 'evt-2',
-  userId: 'user-1',
-  ts: '2024-01-02T00:00:00Z',
-  kind: 'err',
-  message: 'Signature verification failed',
+  id: "evt-2",
+  userId: "user-1",
+  ts: "2024-01-02T00:00:00Z",
+  kind: "err",
+  message: "Signature verification failed",
   recordUuid: null,
-  sourceId: 'src-1',
+  sourceId: "src-1",
 };
 
-describe('runEventsCommand', () => {
+describe("runEventsCommand", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.resetAllMocks();
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     process.exitCode = undefined;
     // resetAllMocks strips the default implementation, so re-pin checkConfig
     // to a passing resolve; failure-path tests override it.
-    const { checkConfig } = await import('#src/libs/config.js');
+    const { checkConfig } = await import("#src/libs/config.js");
     vi.mocked(checkConfig).mockResolvedValue(true);
   });
 
@@ -51,17 +51,17 @@ describe('runEventsCommand', () => {
     process.exitCode = undefined;
   });
 
-  it('always checks config before dispatching', async () => {
-    const { checkConfig } = await import('#src/libs/config.js');
-    const { fetchAllEvents } = await import('#src/libs/events.js');
+  it("always checks config before dispatching", async () => {
+    const { checkConfig } = await import("#src/libs/config.js");
+    const { fetchAllEvents } = await import("#src/libs/events.js");
     vi.mocked(fetchAllEvents).mockResolvedValue({
       ok: true,
       events: [],
       partial: false,
     });
-    const { runEventsCommand } = await import('#src/commands/events.js');
+    const { runEventsCommand } = await import("#src/commands/events.js");
 
-    await runEventsCommand(['list']);
+    await runEventsCommand(["list"]);
 
     expect(checkConfig).toHaveBeenCalledWith(false);
     // `--json` must thread through to fetchAllEvents so a page-level failure
@@ -74,79 +74,79 @@ describe('runEventsCommand', () => {
     });
   });
 
-  it('never dispatches to list when checkConfig resolves false', async () => {
-    const { checkConfig } = await import('#src/libs/config.js');
+  it("never dispatches to list when checkConfig resolves false", async () => {
+    const { checkConfig } = await import("#src/libs/config.js");
     vi.mocked(checkConfig).mockResolvedValueOnce(false);
-    const { fetchAllEvents } = await import('#src/libs/events.js');
-    const { runEventsCommand } = await import('#src/commands/events.js');
+    const { fetchAllEvents } = await import("#src/libs/events.js");
+    const { runEventsCommand } = await import("#src/commands/events.js");
 
-    await runEventsCommand(['list']);
+    await runEventsCommand(["list"]);
 
     expect(fetchAllEvents).not.toHaveBeenCalled();
   });
 
-  it('errors to stderr and exits 1 when no subcommand is given', async () => {
-    const { fetchAllEvents } = await import('#src/libs/events.js');
-    const { runEventsCommand } = await import('#src/commands/events.js');
+  it("errors to stderr and exits 1 when no subcommand is given", async () => {
+    const { fetchAllEvents } = await import("#src/libs/events.js");
+    const { runEventsCommand } = await import("#src/commands/events.js");
 
     await runEventsCommand([]);
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('No subcommand given.'),
+      expect.stringContaining("No subcommand given."),
     );
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Usage: markpost events'),
+      expect.stringContaining("Usage: markpost events"),
     );
     expect(fetchAllEvents).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 
-  it('errors to stderr and exits 1 for an unrecognized subcommand', async () => {
-    const { runEventsCommand } = await import('#src/commands/events.js');
+  it("errors to stderr and exits 1 for an unrecognized subcommand", async () => {
+    const { runEventsCommand } = await import("#src/commands/events.js");
 
-    await runEventsCommand(['bogus']);
+    await runEventsCommand(["bogus"]);
 
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Unknown subcommand: bogus'),
+      expect.stringContaining("Unknown subcommand: bogus"),
     );
     expect(process.exitCode).toBe(1);
   });
 
-  describe('list', () => {
-    describe('filters', () => {
-      const SOURCE_ID = '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b';
+  describe("list", () => {
+    describe("filters", () => {
+      const SOURCE_ID = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
 
       const run = async (args: string[]) => {
-        const { fetchAllEvents } = await import('#src/libs/events.js');
+        const { fetchAllEvents } = await import("#src/libs/events.js");
         vi.mocked(fetchAllEvents).mockResolvedValue({
           ok: true,
           events: [],
           partial: false,
         });
-        const { runEventsCommand } = await import('#src/commands/events.js');
+        const { runEventsCommand } = await import("#src/commands/events.js");
         await runEventsCommand(args);
         return fetchAllEvents;
       };
 
-      it('passes --kind and --source through as filters', async () => {
+      it("passes --kind and --source through as filters", async () => {
         const fetchAllEvents = await run([
-          'list',
-          '--kind',
-          'err',
-          '--source',
+          "list",
+          "--kind",
+          "err",
+          "--source",
           SOURCE_ID,
         ]);
 
         expect(fetchAllEvents).toHaveBeenCalledWith(false, {
-          kind: 'err',
+          kind: "err",
           sourceId: SOURCE_ID,
         });
       });
 
-      it('sends an uppercase --source uuid lowercased', async () => {
+      it("sends an uppercase --source uuid lowercased", async () => {
         const fetchAllEvents = await run([
-          'list',
-          '--source',
+          "list",
+          "--source",
           SOURCE_ID.toUpperCase(),
         ]);
 
@@ -156,58 +156,58 @@ describe('runEventsCommand', () => {
         });
       });
 
-      it('trims whitespace around --kind', async () => {
-        const fetchAllEvents = await run(['list', '--kind', ' err ']);
+      it("trims whitespace around --kind", async () => {
+        const fetchAllEvents = await run(["list", "--kind", " err "]);
 
         expect(fetchAllEvents).toHaveBeenCalledWith(false, {
-          kind: 'err',
+          kind: "err",
           sourceId: undefined,
         });
       });
 
-      it('accepts the --flag=value form', async () => {
-        const fetchAllEvents = await run(['list', '--kind=warn']);
+      it("accepts the --flag=value form", async () => {
+        const fetchAllEvents = await run(["list", "--kind=warn"]);
 
         expect(fetchAllEvents).toHaveBeenCalledWith(false, {
-          kind: 'warn',
+          kind: "warn",
           sourceId: undefined,
         });
       });
 
       it.each([
         [
-          'an invalid kind',
-          ['list', '--kind', 'fatal'],
-          '--kind must be one of: ok, dim, warn, err',
+          "an invalid kind",
+          ["list", "--kind", "fatal"],
+          "--kind must be one of: ok, dim, warn, err",
         ],
         [
-          'a repeated kind',
-          ['list', '--kind', 'err', '--kind', 'ok'],
-          'more than once',
+          "a repeated kind",
+          ["list", "--kind", "err", "--kind", "ok"],
+          "more than once",
         ],
-        ['an empty kind', ['list', '--kind='], 'non-empty'],
-        ['a whitespace-only kind', ['list', '--kind', '   '], 'non-empty'],
+        ["an empty kind", ["list", "--kind="], "non-empty"],
+        ["a whitespace-only kind", ["list", "--kind", "   "], "non-empty"],
         [
-          'a repeated source',
+          "a repeated source",
           [
-            'list',
-            '--source',
-            '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
-            '--source',
-            '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+            "list",
+            "--source",
+            "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b",
+            "--source",
+            "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b",
           ],
-          'more than once',
+          "more than once",
         ],
-        ['an empty source', ['list', '--source='], 'non-empty'],
+        ["an empty source", ["list", "--source="], "non-empty"],
         [
-          'a non-uuid source',
-          ['list', '--source', 'webhook'],
-          '--source must be a source uuid',
+          "a non-uuid source",
+          ["list", "--source", "webhook"],
+          "--source must be a source uuid",
         ],
       ])(
-        'rejects %s before checking config or fetching',
+        "rejects %s before checking config or fetching",
         async (_label, args, message) => {
-          const { checkConfig } = await import('#src/libs/config.js');
+          const { checkConfig } = await import("#src/libs/config.js");
           const fetchAllEvents = await run(args);
 
           expect(checkConfig).not.toHaveBeenCalled();
@@ -219,8 +219,8 @@ describe('runEventsCommand', () => {
         },
       );
 
-      it('still rejects a stray positional', async () => {
-        const fetchAllEvents = await run(['list', 'err']);
+      it("still rejects a stray positional", async () => {
+        const fetchAllEvents = await run(["list", "err"]);
 
         expect(fetchAllEvents).not.toHaveBeenCalled();
         expect(process.exitCode).toBe(1);
@@ -228,264 +228,264 @@ describe('runEventsCommand', () => {
     });
 
     it('prints "No events found." when the log is empty', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
-      expect(console.log).toHaveBeenCalledWith('No events found.');
+      expect(console.log).toHaveBeenCalledWith("No events found.");
     });
 
-    it('prints each fetched event, including source and record when present', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+    it("prints each fetched event, including source and record when present", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent, errEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Ingested record from webhook'),
+        expect.stringContaining("Ingested record from webhook"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('source: src-1'),
+        expect.stringContaining("source: src-1"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('record: rec-1'),
+        expect.stringContaining("record: rec-1"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Signature verification failed'),
+        expect.stringContaining("Signature verification failed"),
       );
     });
 
-    it('colors each kind through its dedicated chalk function', async () => {
-      const chalk = (await import('chalk')).default;
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+    it("colors each kind through its dedicated chalk function", async () => {
+      const chalk = (await import("chalk")).default;
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent, errEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
-      expect(chalk.green).toHaveBeenCalledWith('OK');
-      expect(chalk.redBright).toHaveBeenCalledWith('ERR');
+      expect(chalk.green).toHaveBeenCalledWith("OK");
+      expect(chalk.redBright).toHaveBeenCalledWith("ERR");
     });
 
-    it('leaves an off-contract kind uncolored instead of failing', async () => {
-      const chalk = (await import('chalk')).default;
+    it("leaves an off-contract kind uncolored instead of failing", async () => {
+      const chalk = (await import("chalk")).default;
       const offContractEvent: Event = {
-        id: 'evt-4',
-        userId: 'user-1',
-        ts: '2024-01-04T00:00:00Z',
-        kind: 'mystery',
-        message: 'Unknown kind from an off-contract response',
+        id: "evt-4",
+        userId: "user-1",
+        ts: "2024-01-04T00:00:00Z",
+        kind: "mystery",
+        message: "Unknown kind from an off-contract response",
         recordUuid: null,
         sourceId: null,
       };
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [offContractEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
       expect(chalk.green).not.toHaveBeenCalled();
       expect(chalk.yellow).not.toHaveBeenCalled();
       expect(chalk.redBright).not.toHaveBeenCalled();
       expect(chalk.dim).not.toHaveBeenCalled();
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('MYSTERY'),
+        expect.stringContaining("MYSTERY"),
       );
     });
 
     // A non-string kind (an off-contract response) must not crash the whole
     // list via a bare `.toUpperCase()` call.
-    it('does not crash on a non-string kind', async () => {
+    it("does not crash on a non-string kind", async () => {
       const malformedEvent = {
-        id: 'evt-5',
-        userId: 'user-1',
-        ts: '2024-01-05T00:00:00Z',
+        id: "evt-5",
+        userId: "user-1",
+        ts: "2024-01-05T00:00:00Z",
         kind: null,
-        message: 'Malformed kind',
+        message: "Malformed kind",
         recordUuid: null,
         sourceId: null,
       } as unknown as Event;
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [malformedEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
       // runEventsCommand catches everything, so `resolves.not.toThrow()`
       // alone would pass even if the crash were silently swallowed. Assert
       // directly that nothing failed: no error logged, no non-zero exit.
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
       expect(console.error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Malformed kind'),
+        expect.stringContaining("Malformed kind"),
       );
     });
 
     // recordUuid is null on errEvent — its "record:" line must not print.
-    it('omits the record line for an event with no recordUuid', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+    it("omits the record line for an event with no recordUuid", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [errEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
       const printedRecordLine = vi
         .mocked(console.log)
         .mock.calls.some(
-          ([arg]) => typeof arg === 'string' && arg.includes('record:'),
+          ([arg]) => typeof arg === "string" && arg.includes("record:"),
         );
       expect(printedRecordLine).toBe(false);
     });
 
-    it('strips control characters from untrusted event fields before printing', async () => {
+    it("strips control characters from untrusted event fields before printing", async () => {
       const control = String.fromCharCode(0x1b);
       const evilEvent: Event = {
-        id: 'evt-3',
-        userId: 'user-1',
+        id: "evt-3",
+        userId: "user-1",
         ts: `2024${control}01`,
-        kind: 'ok',
+        kind: "ok",
         message: `A${control}B`,
         recordUuid: null,
         sourceId: null,
       };
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [evilEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
       const printedControl = vi
         .mocked(console.log)
         .mock.calls.some(
-          ([arg]) => typeof arg === 'string' && arg.includes(control),
+          ([arg]) => typeof arg === "string" && arg.includes(control),
         );
       expect(printedControl).toBe(false);
-      expect(console.log).toHaveBeenCalledWith('  A B');
+      expect(console.log).toHaveBeenCalledWith("  A B");
     });
 
     // Covers the fields the test above doesn't: an off-contract kind, plus
     // sourceId/recordUuid, which are only sanitized on the "source:"/
     // "record:" lines.
-    it('strips control characters from kind, sourceId, and recordUuid before printing', async () => {
+    it("strips control characters from kind, sourceId, and recordUuid before printing", async () => {
       const control = String.fromCharCode(0x1b);
       const evilEvent: Event = {
-        id: 'evt-6',
-        userId: 'user-1',
-        ts: '2024-01-06T00:00:00Z',
+        id: "evt-6",
+        userId: "user-1",
+        ts: "2024-01-06T00:00:00Z",
         kind: `mystery${control}kind`,
-        message: 'irrelevant',
+        message: "irrelevant",
         recordUuid: `rec${control}1`,
         sourceId: `src${control}1`,
       };
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [evilEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
       const printedControl = vi
         .mocked(console.log)
         .mock.calls.some(
-          ([arg]) => typeof arg === 'string' && arg.includes(control),
+          ([arg]) => typeof arg === "string" && arg.includes(control),
         );
       expect(printedControl).toBe(false);
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('source: src 1'),
+        expect.stringContaining("source: src 1"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('record: rec 1'),
+        expect.stringContaining("record: rec 1"),
       );
     });
 
-    it('prints the events as a parseable JSON array with --json', async () => {
-      const { checkConfig } = await import('#src/libs/config.js');
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+    it("prints the events as a parseable JSON array with --json", async () => {
+      const { checkConfig } = await import("#src/libs/config.js");
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent, errEvent],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', '--json']);
+      await runEventsCommand(["list", "--json"]);
 
       expect(checkConfig).toHaveBeenCalledWith(true);
       expect(console.log).toHaveBeenCalledTimes(1);
       const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
       const parsed = JSON.parse(output);
       expect(parsed).toHaveLength(2);
-      expect(parsed[0]).toMatchObject({ id: 'evt-1', kind: 'ok' });
-      expect(parsed[1]).toMatchObject({ id: 'evt-2', kind: 'err' });
+      expect(parsed[0]).toMatchObject({ id: "evt-1", kind: "ok" });
+      expect(parsed[1]).toMatchObject({ id: "evt-2", kind: "err" });
     });
 
     it('prints an empty JSON array (not "No events found.") for --json with no events', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [],
         partial: false,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', '--json']);
+      await runEventsCommand(["list", "--json"]);
 
-      expect(console.log).not.toHaveBeenCalledWith('No events found.');
+      expect(console.log).not.toHaveBeenCalledWith("No events found.");
       const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
       expect(JSON.parse(output)).toEqual([]);
     });
 
     // A partial read must keep stdout valid JSON (jq-safe): the warning goes
     // to stderr only, and the command still exits non-zero.
-    it('writes clean JSON to stdout on a partial read, warning only on stderr', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+    it("writes clean JSON to stdout on a partial read, warning only on stderr", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent],
         partial: true,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', '--json']);
+      await runEventsCommand(["list", "--json"]);
 
       const output = vi.mocked(console.log).mock.calls.at(-1)?.[0] as string;
       expect(JSON.parse(output)).toHaveLength(1);
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('this list may be incomplete'),
+        expect.stringContaining("this list may be incomplete"),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -494,16 +494,16 @@ describe('runEventsCommand', () => {
     // object the rest of the JSON failure contract uses (issue #194) — not a
     // plain-text chalk line, which would choke a script parsing stderr as
     // JSON.
-    it('emits a single JSON error object on stderr on a partial read under --json', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+    it("emits a single JSON error object on stderr on a partial read under --json", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent],
         partial: true,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', '--json']);
+      await runEventsCommand(["list", "--json"]);
 
       // `--json` must thread through to fetchAllEvents (see the comment on
       // the plain-mode assertion above) so its own page-level diagnostic
@@ -515,8 +515,8 @@ describe('runEventsCommand', () => {
       expect(console.error).toHaveBeenCalledTimes(1);
       const errorOutput = vi.mocked(console.error).mock.calls[0][0] as string;
       expect(JSON.parse(errorOutput)).toEqual({
-        error: 'partial_read',
-        message: expect.stringContaining('this list may be incomplete'),
+        error: "partial_read",
+        message: expect.stringContaining("this list may be incomplete"),
       });
       // The partial-read data on stdout and the non-zero exit must both
       // survive alongside the JSON error object — a script checks the exit
@@ -528,17 +528,17 @@ describe('runEventsCommand', () => {
       expect(process.exitCode).toBe(1);
     });
 
-    it('surfaces an error and never fetches when given an unknown flag', async () => {
-      const { checkConfig } = await import('#src/libs/config.js');
-      const { fetchAllEvents } = await import('#src/libs/events.js');
-      const { runEventsCommand } = await import('#src/commands/events.js');
+    it("surfaces an error and never fetches when given an unknown flag", async () => {
+      const { checkConfig } = await import("#src/libs/config.js");
+      const { fetchAllEvents } = await import("#src/libs/events.js");
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', '--bogus']);
+      await runEventsCommand(["list", "--bogus"]);
 
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchAllEvents).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('--bogus'),
+        expect.stringContaining("--bogus"),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -546,21 +546,21 @@ describe('runEventsCommand', () => {
     // The non-JSON path changed too: a bad flag used to print bare prose via
     // failWithMessage and now goes through failWithUsage, so the usage block
     // must print alongside the message.
-    it('prints the usage block, not bare prose, for an unknown flag without --json', async () => {
+    it("prints the usage block, not bare prose, for an unknown flag without --json", async () => {
       const { runEventsCommand, USAGE } =
-        await import('#src/commands/events.js');
+        await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', '--bogus']);
+      await runEventsCommand(["list", "--bogus"]);
 
       expect(console.error).toHaveBeenCalledWith(USAGE);
       expect(process.exitCode).toBe(1);
     });
 
-    it('rejects a stray positional argument instead of listing everything', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
-      const { runEventsCommand } = await import('#src/commands/events.js');
+    it("rejects a stray positional argument instead of listing everything", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', 'webhook']);
+      await runEventsCommand(["list", "webhook"]);
 
       expect(fetchAllEvents).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalledWith(
@@ -571,16 +571,16 @@ describe('runEventsCommand', () => {
 
     // A failed fetch (`ok: false`) must not print "No events found." — it has
     // to surface loudly and exit non-zero, distinct from an empty log.
-    it('fails loud and exits non-zero when the fetch fails', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+    it("fails loud and exits non-zero when the fetch fails", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({ ok: false });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
-      expect(console.log).not.toHaveBeenCalledWith('No events found.');
+      expect(console.log).not.toHaveBeenCalledWith("No events found.");
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to fetch events from the server.'),
+        expect.stringContaining("Failed to fetch events from the server."),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -588,22 +588,22 @@ describe('runEventsCommand', () => {
     // A partial read that still collected some events must print them,
     // warn, and exit non-zero — never silently present a truncated log as
     // the full one.
-    it('warns and exits non-zero on a partial read, still printing what it got', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+    it("warns and exits non-zero on a partial read, still printing what it got", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [okEvent],
         partial: true,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('this list may be incomplete'),
+        expect.stringContaining("this list may be incomplete"),
       );
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Ingested record from webhook'),
+        expect.stringContaining("Ingested record from webhook"),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -611,19 +611,19 @@ describe('runEventsCommand', () => {
     // A partial read that returned zero events must not claim "No events
     // found." — the read failed before any page came back, not an empty log.
     it('does not print "No events found." on a partial read with no events', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
+      const { fetchAllEvents } = await import("#src/libs/events.js");
       vi.mocked(fetchAllEvents).mockResolvedValue({
         ok: true,
         events: [],
         partial: true,
       });
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
-      expect(console.log).not.toHaveBeenCalledWith('No events found.');
+      expect(console.log).not.toHaveBeenCalledWith("No events found.");
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('the read failed partway through'),
+        expect.stringContaining("the read failed partway through"),
       );
       expect(process.exitCode).toBe(1);
     });
@@ -631,89 +631,89 @@ describe('runEventsCommand', () => {
     // A systemic auth failure (expired token) re-throws from fetchAllEvents
     // and must surface its classified, actionable message with a non-zero
     // exit — never masquerade as "No events found."
-    it('surfaces a systemic auth failure with a classified message and non-zero exit', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
-      const { ApiRequestError } = await import('#src/libs/api.js');
+    it("surfaces a systemic auth failure with a classified message and non-zero exit", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
+      const { ApiRequestError } = await import("#src/libs/api.js");
       vi.mocked(fetchAllEvents).mockRejectedValue(
-        new ApiRequestError('Invalid or missing API token', 401),
+        new ApiRequestError("Invalid or missing API token", 401),
       );
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list']);
+      await runEventsCommand(["list"]);
 
-      expect(console.log).not.toHaveBeenCalledWith('No events found.');
+      expect(console.log).not.toHaveBeenCalledWith("No events found.");
       expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('Authentication failed (HTTP 401)'),
+        expect.stringContaining("Authentication failed (HTTP 401)"),
       );
       expect(process.exitCode).toBe(1);
     });
   });
 
-  describe('--json failure contract', () => {
-    it('emits a usage-coded JSON error for an unknown subcommand', async () => {
-      const { runEventsCommand } = await import('#src/commands/events.js');
+  describe("--json failure contract", () => {
+    it("emits a usage-coded JSON error for an unknown subcommand", async () => {
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['bogus', '--json']);
+      await runEventsCommand(["bogus", "--json"]);
 
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
       expect(parsed).toEqual({
-        error: 'usage',
-        message: 'Unknown subcommand: bogus',
+        error: "usage",
+        message: "Unknown subcommand: bogus",
       });
       expect(process.exitCode).toBe(1);
     });
 
-    it('emits a fetch_failed JSON error on stderr for a thrown fetch failure', async () => {
-      const { fetchAllEvents } = await import('#src/libs/events.js');
-      const { ApiRequestError } = await import('#src/libs/api.js');
+    it("emits a fetch_failed JSON error on stderr for a thrown fetch failure", async () => {
+      const { fetchAllEvents } = await import("#src/libs/events.js");
+      const { ApiRequestError } = await import("#src/libs/api.js");
       vi.mocked(fetchAllEvents).mockRejectedValue(
-        new ApiRequestError('Invalid or missing API token', 401),
+        new ApiRequestError("Invalid or missing API token", 401),
       );
-      const { runEventsCommand } = await import('#src/commands/events.js');
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', '--json']);
+      await runEventsCommand(["list", "--json"]);
 
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
-      expect(parsed.error).toBe('fetch_failed');
-      expect(parsed.message).toContain('Authentication failed (HTTP 401)');
+      expect(parsed.error).toBe("fetch_failed");
+      expect(parsed.message).toContain("Authentication failed (HTTP 401)");
       expect(process.exitCode).toBe(1);
     });
 
     // A bad flag/stray argument on `list` must report the documented `usage`
     // code, not `fetch_failed` — argument parsing used to share the fetch's
     // try/catch, miscoding it (issue #184).
-    it('emits a usage-coded JSON error, not fetch_failed, for an unknown flag on list', async () => {
-      const { checkConfig } = await import('#src/libs/config.js');
-      const { fetchAllEvents } = await import('#src/libs/events.js');
-      const { runEventsCommand } = await import('#src/commands/events.js');
+    it("emits a usage-coded JSON error, not fetch_failed, for an unknown flag on list", async () => {
+      const { checkConfig } = await import("#src/libs/config.js");
+      const { fetchAllEvents } = await import("#src/libs/events.js");
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', '--bogus', '--json']);
+      await runEventsCommand(["list", "--bogus", "--json"]);
 
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
-      expect(parsed.error).toBe('usage');
-      expect(parsed.message).toContain('bogus');
+      expect(parsed.error).toBe("usage");
+      expect(parsed.message).toContain("bogus");
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchAllEvents).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     });
 
-    it('emits a usage-coded JSON error, not fetch_failed, for a stray positional on list', async () => {
-      const { checkConfig } = await import('#src/libs/config.js');
-      const { fetchAllEvents } = await import('#src/libs/events.js');
-      const { runEventsCommand } = await import('#src/commands/events.js');
+    it("emits a usage-coded JSON error, not fetch_failed, for a stray positional on list", async () => {
+      const { checkConfig } = await import("#src/libs/config.js");
+      const { fetchAllEvents } = await import("#src/libs/events.js");
+      const { runEventsCommand } = await import("#src/commands/events.js");
 
-      await runEventsCommand(['list', 'webhook', '--json']);
+      await runEventsCommand(["list", "webhook", "--json"]);
 
       const parsed = JSON.parse(
         vi.mocked(console.error).mock.calls[0][0] as string,
       );
-      expect(parsed.error).toBe('usage');
+      expect(parsed.error).toBe("usage");
       expect(parsed.message).toContain('Unexpected argument "webhook"');
       expect(checkConfig).not.toHaveBeenCalled();
       expect(fetchAllEvents).not.toHaveBeenCalled();

@@ -5,10 +5,10 @@ import {
   rmSync,
   statSync,
   writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   EXPORT_TRUNCATED_HEADER,
@@ -16,29 +16,29 @@ import {
   fetchEventExport,
   fetchRecordExport,
   writeExportFile,
-} from '#src/libs/export.js';
-import { ApiRequestError, ApiTimeoutError } from '#src/libs/api.js';
-import { logErrorMessage } from '#src/libs/errors.js';
-import { EventExportRow } from '#src/types/events.types.js';
-import { RecordExportRow } from '#src/types/records.types.js';
+} from "#src/libs/export.js";
+import { ApiRequestError, ApiTimeoutError } from "#src/libs/api.js";
+import { logErrorMessage } from "#src/libs/errors.js";
+import { EventExportRow } from "#src/types/events.types.js";
+import { RecordExportRow } from "#src/types/records.types.js";
 
 // #src/libs/api.js imports #src/libs/config.js, which constructs a real
 // `conf`-backed store as soon as it's loaded. Mock it so loading api.js
 // doesn't pull in that side effect (see tests/libs/settings.test.ts).
-vi.mock('#src/libs/config.js', () => ({
+vi.mock("#src/libs/config.js", () => ({
   config: { get: vi.fn() },
 }));
 
-vi.mock('#src/libs/errors.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('#src/libs/errors.js')>()),
+vi.mock("#src/libs/errors.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#src/libs/errors.js")>()),
   logErrorMessage: vi.fn(),
 }));
 
 // Drive the external-service seams (base URL, token) through the env vars the
 // real `getBaseUrl`/`getApiToken` read, mirroring tests/libs/settings.test.ts.
 beforeEach(() => {
-  vi.stubEnv('BASE_URL', 'https://example.com');
-  vi.stubEnv('API_TOKEN', 'test-token');
+  vi.stubEnv("BASE_URL", "https://example.com");
+  vi.stubEnv("API_TOKEN", "test-token");
 });
 
 afterEach(() => {
@@ -46,17 +46,17 @@ afterEach(() => {
 });
 
 const exportRow: RecordExportRow = {
-  uuid: 'abc-123',
-  createdAt: '2024-01-01T00:00:00Z',
-  title: 'First Record',
-  content: 'First record content',
-  source: 'webhook',
-  sourceId: 'source-1',
-  status: 'synced',
-  filePath: '/vault/first-record.md',
-  tags: ['a', 'b'],
+  uuid: "abc-123",
+  createdAt: "2024-01-01T00:00:00Z",
+  title: "First Record",
+  content: "First record content",
+  source: "webhook",
+  sourceId: "source-1",
+  status: "synced",
+  filePath: "/vault/first-record.md",
+  tags: ["a", "b"],
   frontmatter: null,
-  syncedAt: '2024-01-02T00:00:00Z',
+  syncedAt: "2024-01-02T00:00:00Z",
   errorMessage: null,
 };
 
@@ -82,13 +82,13 @@ function mockFetch(
   });
 }
 
-describe('fetchRecordExport', () => {
+describe("fetchRecordExport", () => {
   beforeEach(() => {
     vi.mocked(logErrorMessage).mockClear();
   });
 
   it('returns every row and truncated:false when the header says "false"', async () => {
-    mockFetch([exportRow], { truncatedHeader: 'false' });
+    mockFetch([exportRow], { truncatedHeader: "false" });
 
     await expect(fetchRecordExport()).resolves.toEqual({
       ok: true,
@@ -99,7 +99,7 @@ describe('fetchRecordExport', () => {
   });
 
   it('returns truncated:true when the header says "true"', async () => {
-    mockFetch([exportRow], { truncatedHeader: 'true' });
+    mockFetch([exportRow], { truncatedHeader: "true" });
 
     const result = await fetchRecordExport();
 
@@ -109,7 +109,7 @@ describe('fetchRecordExport', () => {
   // Fail closed like markpost's own web export client: an absent header can't
   // prove the export is whole, so treat it as truncated rather than silently
   // claiming completeness.
-  it('fails closed to truncated:true when the header is absent', async () => {
+  it("fails closed to truncated:true when the header is absent", async () => {
     mockFetch([exportRow]);
 
     const result = await fetchRecordExport();
@@ -117,16 +117,16 @@ describe('fetchRecordExport', () => {
     expect(result).toMatchObject({ ok: true, truncated: true });
   });
 
-  it('normalizes the header value case-insensitively', async () => {
-    mockFetch([exportRow], { truncatedHeader: 'TRUE' });
+  it("normalizes the header value case-insensitively", async () => {
+    mockFetch([exportRow], { truncatedHeader: "TRUE" });
 
     const result = await fetchRecordExport();
 
     expect(result).toMatchObject({ truncated: true });
   });
 
-  it('returns an empty array (not ok:false) for a genuinely empty account', async () => {
-    mockFetch([], { truncatedHeader: 'false' });
+  it("returns an empty array (not ok:false) for a genuinely empty account", async () => {
+    mockFetch([], { truncatedHeader: "false" });
 
     await expect(fetchRecordExport()).resolves.toEqual({
       ok: true,
@@ -141,9 +141,9 @@ describe('fetchRecordExport', () => {
   // on every row) reach the printer/written backup unvalidated. Malformed
   // rows are dropped and logged instead, mirroring
   // `unwrapResourceCollection`'s attributes-present check.
-  it('drops a malformed row and logs the skip, keeping the well-formed ones', async () => {
-    mockFetch([exportRow, null, { uuid: 'no-title-or-status' }], {
-      truncatedHeader: 'false',
+  it("drops a malformed row and logs the skip, keeping the well-formed ones", async () => {
+    mockFetch([exportRow, null, { uuid: "no-title-or-status" }], {
+      truncatedHeader: "false",
     });
 
     const result = await fetchRecordExport();
@@ -155,8 +155,8 @@ describe('fetchRecordExport', () => {
       skippedCount: 2,
     });
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchRecordExport',
-      'Skipped 2 malformed export row(s)',
+      "fetchRecordExport",
+      "Skipped 2 malformed export row(s)",
     );
   });
 
@@ -166,9 +166,9 @@ describe('fetchRecordExport', () => {
   // issue #205), not this function's own plain-text line ahead of it —
   // mirroring `fetchPaginatedRecords`'s own `json` param in records.ts
   // (issue #194).
-  it('does not log the skip to stderr when json is true, while still reporting skippedCount', async () => {
-    mockFetch([exportRow, null, { uuid: 'no-title-or-status' }], {
-      truncatedHeader: 'false',
+  it("does not log the skip to stderr when json is true, while still reporting skippedCount", async () => {
+    mockFetch([exportRow, null, { uuid: "no-title-or-status" }], {
+      truncatedHeader: "false",
     });
 
     const result = await fetchRecordExport(true);
@@ -186,11 +186,11 @@ describe('fetchRecordExport', () => {
   // missing a field the CLI still reads or persists on every row (createdAt,
   // content) would pass validation, then crash the printer or land silently
   // in a written backup with no body.
-  it('drops a row missing createdAt or content, even though uuid/title/status are present', async () => {
+  it("drops a row missing createdAt or content, even though uuid/title/status are present", async () => {
     const missingCreatedAt = { ...exportRow, createdAt: undefined };
     const missingContent = { ...exportRow, content: undefined };
     mockFetch([exportRow, missingCreatedAt, missingContent], {
-      truncatedHeader: 'false',
+      truncatedHeader: "false",
     });
 
     const result = await fetchRecordExport();
@@ -206,9 +206,9 @@ describe('fetchRecordExport', () => {
   // The optional fields (source, sourceId, filePath, syncedAt, errorMessage)
   // are `string | null` on the wire; a non-string, non-null value (an
   // off-contract number, say) must not reach `sanitizeForTerminal` unchecked.
-  it('drops a row whose optional field is neither a string nor null', async () => {
+  it("drops a row whose optional field is neither a string nor null", async () => {
     const badSource = { ...exportRow, source: 123 };
-    mockFetch([exportRow, badSource], { truncatedHeader: 'false' });
+    mockFetch([exportRow, badSource], { truncatedHeader: "false" });
 
     const result = await fetchRecordExport();
 
@@ -220,24 +220,24 @@ describe('fetchRecordExport', () => {
     });
   });
 
-  it('logs and returns ok:false when the response body is not an array', async () => {
-    mockFetch({ data: [] }, { truncatedHeader: 'false' });
+  it("logs and returns ok:false when the response body is not an array", async () => {
+    mockFetch({ data: [] }, { truncatedHeader: "false" });
 
     await expect(fetchRecordExport()).resolves.toEqual({ ok: false });
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchRecordExport',
-      expect.stringContaining('Unexpected response shape'),
+      "fetchRecordExport",
+      expect.stringContaining("Unexpected response shape"),
     );
   });
 
-  it('does not log to stderr when the response body is not an array and json is true', async () => {
-    mockFetch({ data: [] }, { truncatedHeader: 'false' });
+  it("does not log to stderr when the response body is not an array and json is true", async () => {
+    mockFetch({ data: [] }, { truncatedHeader: "false" });
 
     await expect(fetchRecordExport(true)).resolves.toEqual({ ok: false });
     expect(logErrorMessage).not.toHaveBeenCalled();
   });
 
-  it('logs and returns ok:false for a non-systemic failure', async () => {
+  it("logs and returns ok:false for a non-systemic failure", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -245,7 +245,7 @@ describe('fetchRecordExport', () => {
       json: () =>
         Promise.resolve({
           data: {
-            errors: [{ status: '404', title: 'Not found', detail: 'x' }],
+            errors: [{ status: "404", title: "Not found", detail: "x" }],
           },
         }),
     });
@@ -254,7 +254,7 @@ describe('fetchRecordExport', () => {
     expect(logErrorMessage).toHaveBeenCalled();
   });
 
-  it('does not log to stderr on a non-systemic failure when json is true', async () => {
+  it("does not log to stderr on a non-systemic failure when json is true", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -262,7 +262,7 @@ describe('fetchRecordExport', () => {
       json: () =>
         Promise.resolve({
           data: {
-            errors: [{ status: '404', title: 'Not found', detail: 'x' }],
+            errors: [{ status: "404", title: "Not found", detail: "x" }],
           },
         }),
     });
@@ -275,7 +275,7 @@ describe('fetchRecordExport', () => {
   // (mirroring fetchRecord/fetchAllRecords) rather than collapse to ok:false —
   // the caller surfaces the classified message with a non-zero exit instead of
   // reporting an empty backup.
-  it('re-throws a systemic auth failure instead of returning ok:false', async () => {
+  it("re-throws a systemic auth failure instead of returning ok:false", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -286,33 +286,33 @@ describe('fetchRecordExport', () => {
     await expect(fetchRecordExport()).rejects.toBeInstanceOf(ApiRequestError);
   });
 
-  it('propagates a timeout instead of returning ok:false', async () => {
+  it("propagates a timeout instead of returning ok:false", async () => {
     global.fetch = vi
       .fn()
-      .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+      .mockRejectedValue(new DOMException("timed out", "TimeoutError"));
 
     await expect(fetchRecordExport()).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 });
 
-describe('writeExportFile', () => {
+describe("writeExportFile", () => {
   let tempDirectory: string;
 
   beforeEach(() => {
-    tempDirectory = mkdtempSync(join(tmpdir(), 'markpost-export-test-'));
+    tempDirectory = mkdtempSync(join(tmpdir(), "markpost-export-test-"));
   });
 
   afterEach(() => {
     rmSync(tempDirectory, { recursive: true, force: true });
   });
 
-  it('writes the rows as indented JSON to the given path', () => {
-    const targetPath = join(tempDirectory, 'backup.json');
+  it("writes the rows as indented JSON to the given path", () => {
+    const targetPath = join(tempDirectory, "backup.json");
 
     const resolvedPath = writeExportFile(targetPath, [exportRow]);
 
     expect(resolvedPath).toBe(targetPath);
-    expect(JSON.parse(readFileSync(targetPath, 'utf-8'))).toEqual([exportRow]);
+    expect(JSON.parse(readFileSync(targetPath, "utf-8"))).toEqual([exportRow]);
   });
 
   // A full-account export holds every record's private title/content — as
@@ -320,10 +320,10 @@ describe('writeExportFile', () => {
   // group/world-readable, matching config.ts's `configFileMode: 0o600`.
   // @todo Windows reports 0o666 for every file (ACLs, not mode bits), so the
   // 0o600 assertions are skipped there; verify owner-only access via ACLs.
-  it.skipIf(process.platform === 'win32')(
-    'creates the file owner-readable only (0o600)',
+  it.skipIf(process.platform === "win32")(
+    "creates the file owner-readable only (0o600)",
     () => {
-      const targetPath = join(tempDirectory, 'backup.json');
+      const targetPath = join(tempDirectory, "backup.json");
 
       writeExportFile(targetPath, [exportRow]);
 
@@ -332,44 +332,44 @@ describe('writeExportFile', () => {
     },
   );
 
-  it('creates missing parent directories', () => {
-    const targetPath = join(tempDirectory, 'nested', 'deeper', 'backup.json');
+  it("creates missing parent directories", () => {
+    const targetPath = join(tempDirectory, "nested", "deeper", "backup.json");
 
     writeExportFile(targetPath, []);
 
-    expect(JSON.parse(readFileSync(targetPath, 'utf-8'))).toEqual([]);
+    expect(JSON.parse(readFileSync(targetPath, "utf-8"))).toEqual([]);
   });
 
   // Refuses to clobber an existing file by default — a mistyped `--out` path
   // must not silently destroy whatever was already there.
-  it('refuses to overwrite an existing file unless force is set', () => {
-    const targetPath = join(tempDirectory, 'backup.json');
-    writeFileSync(targetPath, 'previous backup contents');
+  it("refuses to overwrite an existing file unless force is set", () => {
+    const targetPath = join(tempDirectory, "backup.json");
+    writeFileSync(targetPath, "previous backup contents");
 
     expect(() => writeExportFile(targetPath, [exportRow])).toThrow(
       ExportFileExistsError,
     );
     // The refusal must not touch the existing file at all.
-    expect(readFileSync(targetPath, 'utf-8')).toBe('previous backup contents');
+    expect(readFileSync(targetPath, "utf-8")).toBe("previous backup contents");
   });
 
-  it('overwrites an existing file when force is true', () => {
-    const targetPath = join(tempDirectory, 'backup.json');
-    writeFileSync(targetPath, 'previous backup contents');
+  it("overwrites an existing file when force is true", () => {
+    const targetPath = join(tempDirectory, "backup.json");
+    writeFileSync(targetPath, "previous backup contents");
 
     writeExportFile(targetPath, [exportRow], true);
 
-    expect(JSON.parse(readFileSync(targetPath, 'utf-8'))).toEqual([exportRow]);
+    expect(JSON.parse(readFileSync(targetPath, "utf-8"))).toEqual([exportRow]);
   });
 
   // The new content always lands in a freshly created inode (temp file +
   // rename), so `force` overwriting a file some other process left
   // world-readable still ends up 0o600 rather than inheriting the old mode.
-  it.skipIf(process.platform === 'win32')(
-    'applies 0o600 even when force-overwriting a file with a looser mode',
+  it.skipIf(process.platform === "win32")(
+    "applies 0o600 even when force-overwriting a file with a looser mode",
     () => {
-      const targetPath = join(tempDirectory, 'backup.json');
-      writeFileSync(targetPath, 'previous backup contents', { mode: 0o644 });
+      const targetPath = join(tempDirectory, "backup.json");
+      writeFileSync(targetPath, "previous backup contents", { mode: 0o644 });
 
       writeExportFile(targetPath, [exportRow], true);
 
@@ -382,26 +382,26 @@ describe('writeExportFile', () => {
   // truncating the target directly, so a mid-write failure can't leave a
   // corrupt backup where a good one used to be. No leftover temp file should
   // survive a successful write.
-  it('leaves no temp file behind after a successful write', () => {
-    const targetPath = join(tempDirectory, 'backup.json');
+  it("leaves no temp file behind after a successful write", () => {
+    const targetPath = join(tempDirectory, "backup.json");
 
     writeExportFile(targetPath, [exportRow]);
 
     const entries = readdirSync(tempDirectory);
-    expect(entries).toEqual(['backup.json']);
+    expect(entries).toEqual(["backup.json"]);
   });
 
-  it('expands a leading ~ against the home directory', () => {
+  it("expands a leading ~ against the home directory", () => {
     // Point HOME at the temp dir so the expansion is verifiable without
     // touching the real home directory.
-    vi.stubEnv('HOME', tempDirectory);
+    vi.stubEnv("HOME", tempDirectory);
     // os.homedir() reads USERPROFILE, not HOME, on Windows.
-    vi.stubEnv('USERPROFILE', tempDirectory);
+    vi.stubEnv("USERPROFILE", tempDirectory);
 
-    const resolvedPath = writeExportFile('~/backup.json', [exportRow]);
+    const resolvedPath = writeExportFile("~/backup.json", [exportRow]);
 
-    expect(resolvedPath).toBe(join(tempDirectory, 'backup.json'));
-    expect(JSON.parse(readFileSync(resolvedPath, 'utf-8'))).toEqual([
+    expect(resolvedPath).toBe(join(tempDirectory, "backup.json"));
+    expect(JSON.parse(readFileSync(resolvedPath, "utf-8"))).toEqual([
       exportRow,
     ]);
 
@@ -410,21 +410,21 @@ describe('writeExportFile', () => {
 });
 
 const eventExportRow: EventExportRow = {
-  id: 'evt-1',
-  ts: '2024-01-01T00:00:00.000Z',
-  kind: 'ok',
-  message: 'Ingested record from webhook',
-  recordUuid: 'rec-1',
+  id: "evt-1",
+  ts: "2024-01-01T00:00:00.000Z",
+  kind: "ok",
+  message: "Ingested record from webhook",
+  recordUuid: "rec-1",
   sourceId: null,
 };
 
-describe('fetchEventExport', () => {
+describe("fetchEventExport", () => {
   beforeEach(() => {
     vi.mocked(logErrorMessage).mockClear();
   });
 
-  it('requests GET /api/events/export and returns every row', async () => {
-    mockFetch([eventExportRow], { truncatedHeader: 'false' });
+  it("requests GET /api/events/export and returns every row", async () => {
+    mockFetch([eventExportRow], { truncatedHeader: "false" });
 
     await expect(fetchEventExport()).resolves.toEqual({
       ok: true,
@@ -433,12 +433,12 @@ describe('fetchEventExport', () => {
       skippedCount: 0,
     });
     expect(vi.mocked(global.fetch).mock.calls[0][0]).toBe(
-      'https://example.com/api/events/export',
+      "https://example.com/api/events/export",
     );
   });
 
   it('returns truncated:true when the header says "true"', async () => {
-    mockFetch([eventExportRow], { truncatedHeader: 'true' });
+    mockFetch([eventExportRow], { truncatedHeader: "true" });
 
     await expect(fetchEventExport()).resolves.toMatchObject({
       ok: true,
@@ -446,7 +446,7 @@ describe('fetchEventExport', () => {
     });
   });
 
-  it('fails closed to truncated:true when the header is absent', async () => {
+  it("fails closed to truncated:true when the header is absent", async () => {
     mockFetch([eventExportRow]);
 
     await expect(fetchEventExport()).resolves.toMatchObject({
@@ -454,9 +454,9 @@ describe('fetchEventExport', () => {
     });
   });
 
-  it('drops rows missing event fields and counts them', async () => {
-    mockFetch([eventExportRow, null, { id: 'no-ts-or-kind' }], {
-      truncatedHeader: 'false',
+  it("drops rows missing event fields and counts them", async () => {
+    mockFetch([eventExportRow, null, { id: "no-ts-or-kind" }], {
+      truncatedHeader: "false",
     });
 
     await expect(fetchEventExport()).resolves.toEqual({
@@ -466,13 +466,13 @@ describe('fetchEventExport', () => {
       skippedCount: 2,
     });
     expect(logErrorMessage).toHaveBeenCalledWith(
-      'fetchEventExport',
-      'Skipped 2 malformed export row(s)',
+      "fetchEventExport",
+      "Skipped 2 malformed export row(s)",
     );
   });
 
-  it('does not accept a record export row as an event row', async () => {
-    mockFetch([exportRow], { truncatedHeader: 'false' });
+  it("does not accept a record export row as an event row", async () => {
+    mockFetch([exportRow], { truncatedHeader: "false" });
 
     await expect(fetchEventExport()).resolves.toMatchObject({
       rows: [],
@@ -480,15 +480,15 @@ describe('fetchEventExport', () => {
     });
   });
 
-  it('returns ok:false when the body is not an array', async () => {
-    mockFetch({ data: [] }, { truncatedHeader: 'false' });
+  it("returns ok:false when the body is not an array", async () => {
+    mockFetch({ data: [] }, { truncatedHeader: "false" });
 
     await expect(fetchEventExport(true)).resolves.toEqual({ ok: false });
     expect(logErrorMessage).not.toHaveBeenCalled();
   });
 
-  it('suppresses the skipped-row diagnostic under json while still counting', async () => {
-    mockFetch([eventExportRow, null], { truncatedHeader: 'false' });
+  it("suppresses the skipped-row diagnostic under json while still counting", async () => {
+    mockFetch([eventExportRow, null], { truncatedHeader: "false" });
 
     await expect(fetchEventExport(true)).resolves.toMatchObject({
       skippedCount: 1,
@@ -496,7 +496,7 @@ describe('fetchEventExport', () => {
     expect(logErrorMessage).not.toHaveBeenCalled();
   });
 
-  it('rethrows a systemic auth failure (e.g. missing events:read scope)', async () => {
+  it("rethrows a systemic auth failure (e.g. missing events:read scope)", async () => {
     mockFetch({}, { ok: false, status: 403 });
 
     await expect(fetchEventExport()).rejects.toMatchObject({

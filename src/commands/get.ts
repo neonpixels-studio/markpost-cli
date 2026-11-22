@@ -1,20 +1,20 @@
-import { parseArgs } from 'node:util';
-import chalk from 'chalk';
-import { ERROR_STATUS, fetchRecord } from '#src/libs/records.js';
+import { parseArgs } from "node:util";
+import chalk from "chalk";
+import { ERROR_STATUS, fetchRecord } from "#src/libs/records.js";
 import {
   describeApiError,
   describeRequestRejection,
   isPerRecordRejection,
-} from '#src/libs/api.js';
-import { checkConfig } from '#src/libs/config.js';
-import { failWithMessage } from '#src/libs/errors.js';
+} from "#src/libs/api.js";
+import { checkConfig } from "#src/libs/config.js";
+import { failWithMessage } from "#src/libs/errors.js";
 import {
   sanitizeBlockForTerminal,
   sanitizeForTerminal,
-} from '#src/libs/terminal.js';
-import { failWithUsage, parseOrFailWithUsage } from '#src/libs/usage.js';
-import { hasJsonFlag, printJson } from '#src/libs/output.js';
-import { Record } from '#src/types/records.types.js';
+} from "#src/libs/terminal.js";
+import { failWithUsage, parseOrFailWithUsage } from "#src/libs/usage.js";
+import { hasJsonFlag, printJson } from "#src/libs/output.js";
+import { Record } from "#src/types/records.types.js";
 
 export const USAGE = `Usage: markpost get <uuid...> [--json]
 
@@ -40,7 +40,7 @@ export const runGetCommand = async (args: string[]): Promise<void> => {
   const { uuids, requestedCount } = parsed;
 
   if (requestedCount === 0) {
-    failWithUsage('No uuid given.', USAGE, json);
+    failWithUsage("No uuid given.", USAGE, json);
     return;
   }
 
@@ -99,7 +99,7 @@ const parseGetArgs = (
     args,
     allowPositionals: true,
     options: {
-      json: { type: 'boolean' },
+      json: { type: "boolean" },
     },
   });
 
@@ -140,7 +140,7 @@ const fetchResult = async (uuid: string, json: boolean): Promise<GetResult> => {
 };
 
 const reportMissing = ({ uuid, failure }: GetResult, json: boolean): void => {
-  const reason = failure ? `: ${sanitizeForTerminal(failure)}` : '.';
+  const reason = failure ? `: ${sanitizeForTerminal(failure)}` : ".";
 
   failWithMessage(`Failed to fetch record "${uuid}"${reason}`, json);
 };
@@ -256,7 +256,7 @@ const printTextResult = (printedFirst: boolean, result: GetResult): boolean => {
   // (and the only one, in the single-uuid case) prints with no leading gap,
   // matching the prior single-uuid output exactly.
   if (printedFirst) {
-    console.log('');
+    console.log("");
   }
 
   printRecord(result.record);
@@ -297,6 +297,6 @@ const printRecord = (record: Record): void => {
     console.log(`  error:      ${sanitizeForTerminal(record.errorMessage)}`);
   }
 
-  console.log('');
+  console.log("");
   console.log(sanitizeBlockForTerminal(record.content));
 };

@@ -1,6 +1,6 @@
-import { parseArgs } from 'node:util';
-import chalk from 'chalk';
-import { confirm, input, password, select } from '@inquirer/prompts';
+import { parseArgs } from "node:util";
+import chalk from "chalk";
+import { confirm, input, password, select } from "@inquirer/prompts";
 import {
   createSource,
   deleteSource,
@@ -9,21 +9,21 @@ import {
   rotateSourceSecret,
   testSource,
   updateSource,
-} from '#src/libs/sources.js';
-import { checkConfig } from '#src/libs/config.js';
-import { failWithMessage, messageFromError } from '#src/libs/errors.js';
+} from "#src/libs/sources.js";
+import { checkConfig } from "#src/libs/config.js";
+import { failWithMessage, messageFromError } from "#src/libs/errors.js";
 import {
   confirmRefusal,
   isInteractiveTerminal,
   isPromptAbort,
   sanitizeForTerminal,
-} from '#src/libs/terminal.js';
+} from "#src/libs/terminal.js";
 import {
   failWithSubcommandUsage,
   failWithUsage,
   parseOrFailWithUsage,
-} from '#src/libs/usage.js';
-import { hasJsonFlag, printJson } from '#src/libs/output.js';
+} from "#src/libs/usage.js";
+import { hasJsonFlag, printJson } from "#src/libs/output.js";
 import {
   FIELD_MAPPING_KEYS,
   FieldMappingConfig,
@@ -40,23 +40,23 @@ import {
   SourceTestSignatureStatus,
   SourceType,
   UpdateSourceInput,
-} from '#src/types/sources.types.js';
+} from "#src/types/sources.types.js";
 
 // Mirror the endpoint constants markpost's web app uses in
 // app/composables/useSources.ts so the CLI shows the same URL a user would
 // see there. Exported so tests/libs/source-endpoints-drift.test.ts can guard
 // them against markpost's real values (see README.md#source-endpoint-sync).
-export const WEBHOOK_INGEST_BASE = 'https://ingest.markpost.io/v1/hooks';
-export const EMAIL_DOMAIN = 'in.markpost.io';
+export const WEBHOOK_INGEST_BASE = "https://ingest.markpost.io/v1/hooks";
+export const EMAIL_DOMAIN = "in.markpost.io";
 
 // inquirer's `input` returns the prefilled default on an empty submit, so a
 // stored key can't be cleared with a blank answer; this sentinel removes it.
-const CLEAR_FIELD_MAPPING_KEY_SENTINEL = '-';
+const CLEAR_FIELD_MAPPING_KEY_SENTINEL = "-";
 
 // Non-interactive counterpart to the per-key sentinel: `sources update <uuid>
 // --clear-field-mapping` sends `fieldMapping: null`, markpost's explicit
 // "clear the whole stored mapping" value, without opening any prompt.
-const CLEAR_FIELD_MAPPING_FLAG = 'clear-field-mapping';
+const CLEAR_FIELD_MAPPING_FLAG = "clear-field-mapping";
 
 export const USAGE = `Usage: markpost sources <list|create|update|delete|rotate-secret|rotate-endpoint|test> [uuid]
 
@@ -72,7 +72,7 @@ export const buildEndpointUrl = (
   sourceType: SourceType,
   endpointSlug: string,
 ): string => {
-  if (sourceType === 'email') {
+  if (sourceType === "email") {
     return `${endpointSlug}@${EMAIL_DOMAIN}`;
   }
 
@@ -84,14 +84,14 @@ export const buildEndpointUrl = (
 // through to the destructive delete). A Map (not an object) keeps a subcommand
 // named "toString" from resolving to a prototype member.
 // Which subcommands render JSON is decided once, by JSON_SUBCOMMANDS below.
-const LIST_SUBCOMMAND = 'list';
-const CREATE_SUBCOMMAND = 'create';
-const UPDATE_SUBCOMMAND = 'update';
+const LIST_SUBCOMMAND = "list";
+const CREATE_SUBCOMMAND = "create";
+const UPDATE_SUBCOMMAND = "update";
 // `delete` is the only subcommand `--yes` applies to, so it's named for the
 // guard that rejects the flag elsewhere as well as its handler-map key.
-const DELETE_SUBCOMMAND = 'delete';
-const ROTATE_SECRET_SUBCOMMAND = 'rotate-secret';
-const ROTATE_ENDPOINT_SUBCOMMAND = 'rotate-endpoint';
+const DELETE_SUBCOMMAND = "delete";
+const ROTATE_SECRET_SUBCOMMAND = "rotate-secret";
+const ROTATE_ENDPOINT_SUBCOMMAND = "rotate-endpoint";
 // The subcommands that ask for confirmation, and so are the only ones `--yes`
 // applies to.
 const CONFIRMING_SUBCOMMANDS = new Set([
@@ -100,7 +100,7 @@ const CONFIRMING_SUBCOMMANDS = new Set([
 ]);
 // `test` is non-interactive (it takes a required uuid, never a picker) and, like
 // `list`, renders JSON — so it's the second subcommand `--json` applies to.
-const TEST_SUBCOMMAND = 'test';
+const TEST_SUBCOMMAND = "test";
 
 // The subcommands `--json` is meaningful for: `list` (renders a JSON array) and
 // `test` (renders a JSON diagnostic). Every other subcommand is interactive or
@@ -148,8 +148,8 @@ const SOURCES_HANDLERS = new Map<
 
 // The verb in each confirming subcommand's "... without a prompt" refusal.
 const CONFIRM_VERBS = new Map<string, string>([
-  [DELETE_SUBCOMMAND, 'delete'],
-  [ROTATE_ENDPOINT_SUBCOMMAND, 'rotate'],
+  [DELETE_SUBCOMMAND, "delete"],
+  [ROTATE_ENDPOINT_SUBCOMMAND, "rotate"],
 ]);
 
 // The message for the subcommand (if any) that can't complete without an
@@ -171,16 +171,16 @@ const interactiveGuardMessageFor = (
   skipConfirm: boolean,
   clearFieldMapping: boolean,
 ): string | null => {
-  const confirmVerb = CONFIRM_VERBS.get(subcommand ?? '');
+  const confirmVerb = CONFIRM_VERBS.get(subcommand ?? "");
   const confirmRefusalMessage =
     subcommand && confirmVerb
       ? confirmRefusal(
           {
-            command: 'sources',
+            command: "sources",
             subcommand,
-            argument: '<uuid>',
+            argument: "<uuid>",
             verb: confirmVerb,
-            requirement: 'a uuid with --yes',
+            requirement: "a uuid with --yes",
           },
           { skipConfirm, isInteractive: isInteractiveTerminal() },
         )
@@ -199,7 +199,7 @@ const interactiveGuardMessageFor = (
   }
 
   if (subcommand === ROTATE_SECRET_SUBCOMMAND && !uuid) {
-    return `\`sources ${ROTATE_SECRET_SUBCOMMAND}\` needs an interactive terminal to pick a source when no uuid is given; pass a uuid (\`markpost sources ${ROTATE_SECRET_SUBCOMMAND} <uuid>\`) to skip the picker — unless the source turns out to be a manual-secret provider (${MANUAL_SECRET_PROVIDERS.join(', ')}), which still prompts for the new secret and needs a terminal either way.`;
+    return `\`sources ${ROTATE_SECRET_SUBCOMMAND}\` needs an interactive terminal to pick a source when no uuid is given; pass a uuid (\`markpost sources ${ROTATE_SECRET_SUBCOMMAND} <uuid>\`) to skip the picker — unless the source turns out to be a manual-secret provider (${MANUAL_SECRET_PROVIDERS.join(", ")}), which still prompts for the new secret and needs a terminal either way.`;
   }
 
   return null;
@@ -223,7 +223,7 @@ const parseTestPayload = (raw: string): Record<string, unknown> => {
     );
   }
 
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(
       `--payload must be a JSON object, e.g. --payload '{"foo":"bar"}'.`,
     );
@@ -298,7 +298,7 @@ const usageErrorFor = (
 
   // --yes only skips the confirmation of the CONFIRMING_SUBCOMMANDS; reject it elsewhere so a
   // misplaced flag fails loudly instead of appearing to take effect.
-  if (skipConfirm && !CONFIRMING_SUBCOMMANDS.has(subcommand ?? '')) {
+  if (skipConfirm && !CONFIRMING_SUBCOMMANDS.has(subcommand ?? "")) {
     return `--yes is only supported by \`sources ${DELETE_SUBCOMMAND}\` and \`sources ${ROTATE_ENDPOINT_SUBCOMMAND}\`.`;
   }
 
@@ -365,10 +365,10 @@ const parseSourcesArgs = (
     args,
     allowPositionals: true,
     options: {
-      json: { type: 'boolean' },
-      yes: { type: 'boolean' },
-      payload: { type: 'string' },
-      [CLEAR_FIELD_MAPPING_FLAG]: { type: 'boolean' },
+      json: { type: "boolean" },
+      yes: { type: "boolean" },
+      payload: { type: "string" },
+      [CLEAR_FIELD_MAPPING_FLAG]: { type: "boolean" },
     },
   });
 
@@ -413,7 +413,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
   // positionals at all) — `Map.get` needs a `string` key, and no subcommand
   // is ever named the empty string, so it's a safe stand-in that still misses
   // the lookup exactly like `undefined` would.
-  const handler = SOURCES_HANDLERS.get(subcommand ?? '');
+  const handler = SOURCES_HANDLERS.get(subcommand ?? "");
 
   // Validate before the config check so a bad subcommand fails on usage
   // alone, without needing a configured account. The bad-subcommand case
@@ -461,7 +461,7 @@ export const runSourcesCommand = async (args: string[]): Promise<void> => {
 };
 
 const PROVIDER_SECRET_NOTICE =
-  'Signing secret (shown once — copy it now, it cannot be retrieved later):';
+  "Signing secret (shown once — copy it now, it cannot be retrieved later):";
 
 // markpost reveals the generated signing secret exactly once — in the create
 // response for a secret-backed provider (github/zapier/shortcuts). It is null
@@ -474,7 +474,7 @@ const printProviderSecret = (
     return;
   }
 
-  console.log('');
+  console.log("");
   console.log(chalk.yellowBright(`  ${PROVIDER_SECRET_NOTICE}`));
   // The secret is untrusted API output like every other field printSource
   // handles, so it's sanitized too — lossless for a real signing secret, which
@@ -495,7 +495,7 @@ const printFieldMapping = (
     return;
   }
 
-  console.log('  mapping:');
+  console.log("  mapping:");
   configuredKeys.forEach((key) => {
     console.log(`    ${key}: ${sanitizeForTerminal(fieldMapping?.[key])}`);
   });
@@ -510,7 +510,7 @@ const printPausedNotice = (source: Source): void => {
     return;
   }
 
-  console.log(chalk.yellowBright('  status:    paused (not ingesting)'));
+  console.log(chalk.yellowBright("  status:    paused (not ingesting)"));
 };
 
 // Every field here comes from the untrusted API response, so each is stripped
@@ -534,7 +534,7 @@ const printSource = (source: Source): void => {
   printFieldMapping(source.fieldMapping);
   console.log(`  records:   ${sanitizeForTerminal(source.recordCount)}`);
   console.log(
-    `  last hit:  ${source.lastHitAt ? sanitizeForTerminal(source.lastHitAt) : 'never hit'}`,
+    `  last hit:  ${source.lastHitAt ? sanitizeForTerminal(source.lastHitAt) : "never hit"}`,
   );
   printPausedNotice(source);
 };
@@ -580,7 +580,7 @@ const listSources = async (json: boolean): Promise<void> => {
   }
 
   if (sources.length === 0) {
-    console.log('No sources found.');
+    console.log("No sources found.");
     return;
   }
 
@@ -602,7 +602,7 @@ const resolveFieldMappingAnswer = (
   storedValue: string | undefined,
 ): string => {
   if (answer === CLEAR_FIELD_MAPPING_KEY_SENTINEL) {
-    return '';
+    return "";
   }
 
   if (
@@ -621,7 +621,7 @@ const fieldMappingPromptMessage = (
 ): string => {
   const skipHint = storedValue
     ? `enter "${CLEAR_FIELD_MAPPING_KEY_SENTINEL}" to remove`
-    : 'blank to skip';
+    : "blank to skip";
 
   return `Field mapping: ${key} (dot path into the raw ingest payload, e.g. "data.subject") — ${skipHint}`;
 };
@@ -650,7 +650,7 @@ const announcePreservedFieldMappingKeys = (
 
   const keys = unknownEntries.map(([key]) => sanitizeForTerminal(key));
   console.log(
-    `Preserved fields not editable in this CLI version: ${keys.join(', ')}`,
+    `Preserved fields not editable in this CLI version: ${keys.join(", ")}`,
   );
 };
 
@@ -694,7 +694,7 @@ const isSameFieldMapping = (
   current: FieldMappingConfig | null,
 ): boolean =>
   FIELD_MAPPING_KEYS.every(
-    (key) => (next[key] ?? '') === (current?.[key] ?? ''),
+    (key) => (next[key] ?? "") === (current?.[key] ?? ""),
   );
 
 // Field mapping is optional and easy to configure later via `sources update`,
@@ -740,19 +740,19 @@ const promptFieldMapping = async (
 
 const createSourceCommand = async (): Promise<void> => {
   const type = await select({
-    message: 'Source type',
+    message: "Source type",
     choices: SOURCE_TYPES.map((sourceType) => ({ value: sourceType })),
   });
-  const name = await input({ message: 'Source name' });
+  const name = await input({ message: "Source name" });
   const routeFolder = await input({
-    message: 'Route folder (e.g. 99-incoming/)',
+    message: "Route folder (e.g. 99-incoming/)",
   });
   const provider = await input({
-    message: 'Provider (optional)',
-    default: '',
+    message: "Provider (optional)",
+    default: "",
   });
   const fieldMapping = await promptFieldMapping(
-    'Configure field mapping now? (maps ingest payload fields to title/content/etc — optional, can be set later with `sources update`)',
+    "Configure field mapping now? (maps ingest payload fields to title/content/etc — optional, can be set later with `sources update`)",
   );
 
   const created = await createSource({
@@ -770,7 +770,7 @@ const createSourceCommand = async (): Promise<void> => {
     // rather than letting a blind retry orphan a source.
     console.error(
       chalk.redBright(
-        'Failed to create source. Run `markpost sources list` to check whether it was created anyway — if it was, its one-time signing secret is unrecoverable, so delete and recreate the source to mint a new one.',
+        "Failed to create source. Run `markpost sources list` to check whether it was created anyway — if it was, its one-time signing secret is unrecoverable, so delete and recreate the source to mint a new one.",
       ),
     );
     return;
@@ -844,7 +844,7 @@ const findSourceByUuid = async (uuid: string): Promise<Source | null> => {
 
   console.error(
     chalk.redBright(
-      'Source not found, or the source list could not be loaded.',
+      "Source not found, or the source list could not be loaded.",
     ),
   );
 
@@ -858,7 +858,7 @@ const applySourceUpdate = async (
   const source = await updateSource(target.uuid, updateInput);
 
   if (!source) {
-    console.error(chalk.redBright('Failed to update source.'));
+    console.error(chalk.redBright("Failed to update source."));
     return false;
   }
 
@@ -882,7 +882,7 @@ const isKnownEmptyFieldMapping = (source: Source): boolean =>
 // stored is left alone rather than sending a no-op PATCH.
 const clearFieldMappingCommand = async (target: Source): Promise<void> => {
   if (isKnownEmptyFieldMapping(target)) {
-    console.log('Nothing to update: field mapping is already empty.');
+    console.log("Nothing to update: field mapping is already empty.");
     return;
   }
 
@@ -905,19 +905,19 @@ const clearFieldMappingCommand = async (target: Source): Promise<void> => {
 const promptAndApplyUpdates = async (target: Source): Promise<void> => {
   const routeFolder = (
     await input({
-      message: 'Route folder (e.g. 99-incoming/)',
+      message: "Route folder (e.g. 99-incoming/)",
       default: target.routeFolder,
     })
   ).trim();
 
   if (!routeFolder) {
-    console.error(chalk.redBright('Route folder cannot be empty.'));
+    console.error(chalk.redBright("Route folder cannot be empty."));
     return;
   }
 
   const routeFolderChanged = routeFolder !== target.routeFolder;
   const fieldMapping = await promptFieldMapping(
-    'Update field mapping now? (maps ingest payload fields to title/content/etc — each field is prefilled with the stored value and the result replaces the entire stored mapping; decline to keep it as is)',
+    "Update field mapping now? (maps ingest payload fields to title/content/etc — each field is prefilled with the stored value and the result replaces the entire stored mapping; decline to keep it as is)",
     target.fieldMapping,
   );
 
@@ -925,7 +925,7 @@ const promptAndApplyUpdates = async (target: Source): Promise<void> => {
   // field mapping declined) and "field mapping was offered but left blank or every stored value re-accepted" —
   // either way there is nothing to send.
   if (!routeFolderChanged && fieldMapping === undefined) {
-    console.log('Nothing to update: route folder and field mapping unchanged.');
+    console.log("Nothing to update: route folder and field mapping unchanged.");
     return;
   }
 
@@ -943,7 +943,7 @@ const updateSourceCommand = async (
 ): Promise<void> => {
   const target = uuid
     ? await findSourceByUuid(uuid)
-    : await promptForSource('update');
+    : await promptForSource("update");
 
   // Scripted use: a mistyped uuid must not look like a successful clear.
   if (!target && clearFieldMapping) {
@@ -982,11 +982,11 @@ const confirmDeletion = async (label: string): Promise<boolean> =>
 // timeout) into []. So this can't claim the source is absent; it mirrors
 // findSourceByUuid's wording and leaves both possibilities open.
 const NO_MATCH_NOTE =
-  'no matching source found, or the list could not be loaded';
+  "no matching source found, or the list could not be loaded";
 // The lookup itself failed (e.g. a timeout, which fetchSources re-throws), so
 // the name is simply unknown — distinct from a confirmed non-match, and never
 // claiming the source doesn't exist.
-const LOOKUP_FAILED_NOTE = 'source name unavailable — could not load the list';
+const LOOKUP_FAILED_NOTE = "source name unavailable — could not load the list";
 
 // Build the confirmation label. The interactive pick already carries the
 // Source; a bare-uuid delete looks the source up so the prompt names it —
@@ -1029,7 +1029,7 @@ const deleteSourceCommand = async (
   uuid: string | undefined,
   skipConfirm: boolean,
 ): Promise<void> => {
-  const picked = uuid ? undefined : await promptForSource('delete');
+  const picked = uuid ? undefined : await promptForSource("delete");
   // `||` (not `??`) so an empty-string uuid falls through to the picked source,
   // matching the truthiness branch above — otherwise `delete ""` would open the
   // picker, take a selection, then silently discard it on the `!targetUuid` guard.
@@ -1043,7 +1043,7 @@ const deleteSourceCommand = async (
     skipConfirm || (await confirmSourceDeletion(picked, targetUuid));
 
   if (!confirmed) {
-    console.log('Deletion cancelled.');
+    console.log("Deletion cancelled.");
     return;
   }
 
@@ -1053,7 +1053,7 @@ const deleteSourceCommand = async (
     // Exit non-zero (not a bare console.error) so a scripted `delete <uuid>
     // --yes || notify` catches a failed delete instead of reading it as done —
     // delete now carries a documented --yes contract, like rotate-secret below.
-    failWithMessage('Failed to delete source.');
+    failWithMessage("Failed to delete source.");
     return;
   }
 
@@ -1097,7 +1097,7 @@ const collectRotateInput = async (
   ).trim();
 
   if (!providerSecret) {
-    console.error(chalk.redBright('Signing secret cannot be empty.'));
+    console.error(chalk.redBright("Signing secret cannot be empty."));
     return null;
   }
 
@@ -1108,7 +1108,7 @@ const rotateSecretForSource = async (target: Source): Promise<void> => {
   if (!isRotatableProvider(target.provider)) {
     console.error(
       chalk.redBright(
-        `Source "${sanitizeForTerminal(target.name)}" has no rotatable secret — only ${ROTATABLE_PROVIDERS.join(', ')} sources do.`,
+        `Source "${sanitizeForTerminal(target.name)}" has no rotatable secret — only ${ROTATABLE_PROVIDERS.join(", ")} sources do.`,
       ),
     );
     return;
@@ -1129,7 +1129,7 @@ const rotateSecretForSource = async (target: Source): Promise<void> => {
     // a 5xx or unparseable body after the secret was replaced — leaving the old
     // secret dead, so warn conditionally rather than implying nothing changed.
     failWithMessage(
-      'Failed to rotate source secret. If the rotation was applied server-side the previous secret no longer works — run `markpost sources rotate-secret <uuid>` again to mint a secret you can copy.',
+      "Failed to rotate source secret. If the rotation was applied server-side the previous secret no longer works — run `markpost sources rotate-secret <uuid>` again to mint a secret you can copy.",
     );
     return;
   }
@@ -1146,7 +1146,7 @@ const rotateSecretForSource = async (target: Source): Promise<void> => {
   // never ends on "Rotated ..." for a broken integration.
   if (!isManual && !providerSecret) {
     failWithMessage(
-      'The secret was rotated but the server did not return it — the previous secret no longer works. Run `markpost sources rotate-secret <uuid>` again to mint one you can copy.',
+      "The secret was rotated but the server did not return it — the previous secret no longer works. Run `markpost sources rotate-secret <uuid>` again to mint one you can copy.",
     );
     return;
   }
@@ -1172,9 +1172,9 @@ const rotateSecretCommand = async (uuid?: string): Promise<void> => {
   const target = uuid
     ? await findSourceByUuid(uuid)
     : await promptForSource(
-        'rotate the secret for',
+        "rotate the secret for",
         (source) => isRotatableProvider(source.provider),
-        `None of your sources have a rotatable secret — only ${ROTATABLE_PROVIDERS.join(', ')} sources do.`,
+        `None of your sources have a rotatable secret — only ${ROTATABLE_PROVIDERS.join(", ")} sources do.`,
       );
 
   if (!target) {
@@ -1196,7 +1196,7 @@ const confirmEndpointRotation = async (target: Source): Promise<boolean> =>
   });
 
 const ENDPOINT_NOT_ROTATABLE_NOTE =
-  'Email sources have a mailbox address, not a rotatable URL';
+  "Email sources have a mailbox address, not a rotatable URL";
 
 const rotateEndpointForSource = async (
   target: Source,
@@ -1210,7 +1210,7 @@ const rotateEndpointForSource = async (
   }
 
   if (!skipConfirm && !(await confirmEndpointRotation(target))) {
-    console.log('Rotation cancelled.');
+    console.log("Rotation cancelled.");
     return;
   }
 
@@ -1221,7 +1221,7 @@ const rotateEndpointForSource = async (
     // 409 means a concurrent rotation won; either way the URL on file may be
     // stale, so point at how to find the live one.
     failWithMessage(
-      'Failed to rotate source endpoint (see the error above). If the rotation was applied server-side the previous URL no longer works — run `markpost sources list` to see the current one before retrying.',
+      "Failed to rotate source endpoint (see the error above). If the rotation was applied server-side the previous URL no longer works — run `markpost sources list` to see the current one before retrying.",
     );
     return;
   }
@@ -1241,7 +1241,7 @@ const rotateEndpointCommand = async (
   const target = uuid
     ? await findSourceByUuid(uuid)
     : await promptForSource(
-        'rotate the endpoint for',
+        "rotate the endpoint for",
         (source) => isSourceEndpointRotatable(source.type),
         `None of your sources have a rotatable endpoint — ${ENDPOINT_NOT_ROTATABLE_NOTE}.`,
       );
@@ -1269,10 +1269,10 @@ const SIGNATURE_STATUS_COLORS = new Map<
   SourceTestSignatureStatus,
   (text: string) => string
 >([
-  ['verified', chalk.greenBright],
-  ['failed', chalk.redBright],
-  ['not_required', chalk.yellowBright],
-  ['not_verifiable', chalk.yellowBright],
+  ["verified", chalk.greenBright],
+  ["failed", chalk.redBright],
+  ["not_required", chalk.yellowBright],
+  ["not_verifiable", chalk.yellowBright],
 ]);
 
 const colorizeSignatureStatus = (
@@ -1304,7 +1304,7 @@ const printTestResult = (result: SourceTestResult): void => {
   const tags = Array.isArray(fieldMapping.tags) ? fieldMapping.tags : [];
 
   console.log(
-    `Provider:       ${sanitizeForTerminal(result.provider ?? 'none')}`,
+    `Provider:       ${sanitizeForTerminal(result.provider ?? "none")}`,
   );
   console.log(
     `Sample payload: ${sanitizeForTerminal(JSON.stringify(result.payload))}`,
@@ -1318,11 +1318,11 @@ const printTestResult = (result: SourceTestResult): void => {
     ),
   );
   console.log(`  ${sanitizeForTerminal(signatureCheck.message)}`);
-  console.log('');
-  console.log(chalk.bold('Field mapping preview:'));
+  console.log("");
+  console.log(chalk.bold("Field mapping preview:"));
   console.log(`  title:       ${sanitizeForTerminal(fieldMapping.title)}`);
   console.log(`  content:     ${sanitizeForTerminal(fieldMapping.content)}`);
-  console.log(`  tags:        ${sanitizeForTerminal(tags.join(', '))}`);
+  console.log(`  tags:        ${sanitizeForTerminal(tags.join(", "))}`);
   console.log(`  file path:   ${sanitizeForTerminal(fieldMapping.filePath)}`);
   console.log(
     `  frontmatter: ${sanitizeForTerminal(JSON.stringify(fieldMapping.frontmatter))}`,
@@ -1352,7 +1352,7 @@ const testSourceCommand = async (
       : await testSource(uuid);
 
   if (!result) {
-    failWithMessage('Failed to test source.', json);
+    failWithMessage("Failed to test source.", json);
     return;
   }
 
@@ -1363,7 +1363,7 @@ const testSourceCommand = async (
   // didn't — pointing a script at the server instead of its own network/token.
   if (!result.signatureCheck || !result.fieldMapping) {
     failWithMessage(
-      'The test ran, but the server returned an unexpected result (missing signatureCheck or fieldMapping).',
+      "The test ran, but the server returned an unexpected result (missing signatureCheck or fieldMapping).",
       json,
     );
     return;

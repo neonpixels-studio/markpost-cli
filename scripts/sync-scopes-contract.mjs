@@ -20,12 +20,12 @@
 //   npm run sync:scopes-contract -- --from <path>    # copies from an existing local checkout
 //   npm run sync:scopes-contract -- --from=<path>    # same, `=` form
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
-import { parseFromPathArg } from './sync-contract.mjs';
+import { parseFromPathArg } from "./sync-contract.mjs";
 import {
   assertPathIsCommitted,
   parseTypeScriptSource,
@@ -34,16 +34,16 @@ import {
   resolveSourceRepo,
   withMarkpostCheckout,
   writeManifest,
-} from './lib/markpost-checkout.mjs';
+} from "./lib/markpost-checkout.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(SCRIPT_DIR, '..');
-const VENDOR_DIR = join(REPO_ROOT, 'src/types/vendor');
-const VENDOR_FILE = join(VENDOR_DIR, 'markpost-scopes.generated.ts');
-const MANIFEST_FILE = join(VENDOR_DIR, 'markpost-scopes.manifest.json');
+const REPO_ROOT = join(SCRIPT_DIR, "..");
+const VENDOR_DIR = join(REPO_ROOT, "src/types/vendor");
+const VENDOR_FILE = join(VENDOR_DIR, "markpost-scopes.generated.ts");
+const MANIFEST_FILE = join(VENDOR_DIR, "markpost-scopes.manifest.json");
 
-const SCOPES_SOURCE_PATH = 'shared/utils/scopes.ts';
-const SCOPES_DECLARATION_NAME = 'SCOPES';
+const SCOPES_SOURCE_PATH = "shared/utils/scopes.ts";
+const SCOPES_DECLARATION_NAME = "SCOPES";
 
 const VENDOR_FILE_HEADER = `// GENERATED FILE — do not hand-edit.
 //
@@ -99,7 +99,7 @@ function readScopeName(element) {
     (property) =>
       ts.isPropertyAssignment(property) &&
       (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) &&
-      property.name.text === 'name' &&
+      property.name.text === "name" &&
       ts.isStringLiteralLike(property.initializer),
   );
 
@@ -116,8 +116,8 @@ export function extractScopeNames(source) {
   if (!initializer || !ts.isArrayLiteralExpression(initializer)) {
     throw new Error(
       `${SCOPES_SOURCE_PATH} no longer declares ${SCOPES_DECLARATION_NAME} as an ` +
-        'array literal — markpost renamed or restructured the scope catalog; ' +
-        'update scripts/sync-scopes-contract.mjs to match',
+        "array literal — markpost renamed or restructured the scope catalog; " +
+        "update scripts/sync-scopes-contract.mjs to match",
     );
   }
 
@@ -126,8 +126,8 @@ export function extractScopeNames(source) {
   if (names.length === 0 || names.some((name) => name === undefined)) {
     throw new Error(
       `${SCOPES_SOURCE_PATH}'s ${SCOPES_DECLARATION_NAME} array is empty or has an ` +
-        'entry without a string-literal `name` — update ' +
-        'scripts/sync-scopes-contract.mjs to match',
+        "entry without a string-literal `name` — update " +
+        "scripts/sync-scopes-contract.mjs to match",
     );
   }
 
@@ -145,14 +145,14 @@ export function renderScopesFile(names) {
 
   return [
     VENDOR_FILE_HEADER.trimEnd(),
-    '',
-    'export const SCOPE_NAMES = [',
+    "",
+    "export const SCOPE_NAMES = [",
     ...lines,
-    '] as const;',
-    '',
-    'export type ScopeName = (typeof SCOPE_NAMES)[number];',
-    '',
-  ].join('\n');
+    "] as const;",
+    "",
+    "export type ScopeName = (typeof SCOPE_NAMES)[number];",
+    "",
+  ].join("\n");
 }
 
 function syncFrom(checkoutDir) {
@@ -176,11 +176,11 @@ function syncFrom(checkoutDir) {
 function main() {
   const fromPath = parseFromPathArg(process.argv.slice(2));
 
-  withMarkpostCheckout(fromPath, 'markpost-scopes-contract-sync-', (dir) => {
+  withMarkpostCheckout(fromPath, "markpost-scopes-contract-sync-", (dir) => {
     syncFrom(dir);
     console.log(`Synced ${VENDOR_FILE} from ${dir}`);
     console.log(
-      'Review the diff, then run `npm run build` and `npm test` before committing.',
+      "Review the diff, then run `npm run build` and `npm test` before committing.",
     );
   });
 }

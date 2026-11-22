@@ -3,12 +3,12 @@ import {
   logApiFailure,
   unwrapResourceAttributes,
   unwrapResourceCollection,
-} from '#src/libs/api.js';
+} from "#src/libs/api.js";
 import {
   ApiDeleteMeta,
   ApiDeleteResponse,
   ApiResponse,
-} from '#src/types/api.types.js';
+} from "#src/types/api.types.js";
 import {
   CreatedSource,
   CreatedSourceResource,
@@ -21,9 +21,9 @@ import {
   SourceTestResource,
   SourceTestResult,
   UpdateSourceInput,
-} from '#src/types/sources.types.js';
+} from "#src/types/sources.types.js";
 
-const JSON_API_CONTENT_TYPE = 'application/vnd.api+json';
+const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 
 // The shared write seam for source POST/PATCH endpoints: they all send the same
 // JSON:API `{ data: { type: 'sources', attributes } }` envelope and unwrap the
@@ -41,18 +41,18 @@ const writeSourceRequest = async <
 >(
   context: string,
   path: string,
-  method: 'POST' | 'PATCH',
+  method: "POST" | "PATCH",
   attributes: TInput,
-): Promise<TResource['attributes'] | null> => {
+): Promise<TResource["attributes"] | null> => {
   try {
     const body = (await authedRequest(path, {
       method,
       headers: {
-        'Content-Type': JSON_API_CONTENT_TYPE,
+        "Content-Type": JSON_API_CONTENT_TYPE,
       },
       body: JSON.stringify({
         data: {
-          type: 'sources',
+          type: "sources",
           attributes,
         },
       }),
@@ -68,11 +68,11 @@ const writeSourceRequest = async <
 
 export const fetchSources = async (): Promise<Source[]> => {
   try {
-    const body = (await authedRequest('/api/sources')) as SourceListApiResponse;
+    const body = (await authedRequest("/api/sources")) as SourceListApiResponse;
 
-    return unwrapResourceCollection('fetchSources', body, 'source');
+    return unwrapResourceCollection("fetchSources", body, "source");
   } catch (error) {
-    logApiFailure('fetchSources', error);
+    logApiFailure("fetchSources", error);
 
     return [];
   }
@@ -83,8 +83,8 @@ export const createSource = async (
 ): Promise<CreatedSource | null> =>
   writeSourceRequest<CreateSourceInput, CreatedSourceResource>(
     `createSource["${input.name}"]`,
-    '/api/sources',
-    'POST',
+    "/api/sources",
+    "POST",
     input,
   );
 
@@ -95,7 +95,7 @@ export const updateSource = async (
   writeSourceRequest<UpdateSourceInput, SourceResource>(
     `updateSource["${uuid}"]`,
     `/api/sources/${encodeURIComponent(uuid)}`,
-    'PATCH',
+    "PATCH",
     input,
   );
 
@@ -111,7 +111,7 @@ export const rotateSourceSecret = async (
   writeSourceRequest<RotateSourceSecretInput, CreatedSourceResource>(
     `rotateSourceSecret["${uuid}"]`,
     `/api/sources/${encodeURIComponent(uuid)}/rotate-secret`,
-    'POST',
+    "POST",
     input,
   );
 
@@ -126,7 +126,7 @@ export const rotateSourceEndpoint = async (
   writeSourceRequest<Record<string, never>, SourceResource>(
     `rotateSourceEndpoint["${uuid}"]`,
     `/api/sources/${encodeURIComponent(uuid)}/rotate-endpoint`,
-    'POST',
+    "POST",
     {},
   );
 
@@ -144,7 +144,7 @@ export const testSource = async (
   writeSourceRequest<SourceTestInput, SourceTestResource>(
     `testSource["${uuid}"]`,
     `/api/sources/${encodeURIComponent(uuid)}/test`,
-    'POST',
+    "POST",
     input,
   );
 
@@ -155,7 +155,7 @@ export const deleteSource = async (
     const body = (await authedRequest(
       `/api/sources/${encodeURIComponent(uuid)}`,
       {
-        method: 'DELETE',
+        method: "DELETE",
       },
     )) as ApiDeleteResponse;
 

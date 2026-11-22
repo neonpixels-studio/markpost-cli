@@ -5,10 +5,10 @@
 //
 // Usage: node scripts/check-release-tag.mjs <tag> [path/to/package.json]
 // Writes `dist-tag=<tag>` to $GITHUB_OUTPUT when set.
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from "node:fs";
 
-const DEFAULT_PACKAGE_JSON = new URL('../package.json', import.meta.url);
-const STABLE_DIST_TAG = 'latest';
+const DEFAULT_PACKAGE_JSON = new URL("../package.json", import.meta.url);
+const STABLE_DIST_TAG = "latest";
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-([0-9A-Za-z.-]+))?$/;
 // npm rejects dist-tags that parse as semver ranges, so a preid must be a word.
 const PREID_PATTERN = /^[a-z]+$/;
@@ -19,8 +19,8 @@ function fail(message) {
 }
 
 function readVersion(packageJsonPath) {
-  const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-  if (typeof version !== 'string') {
+  const { version } = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+  if (typeof version !== "string") {
     fail(`package.json has no string "version" field.`);
   }
 
@@ -40,7 +40,7 @@ function distTagFor(version) {
     return STABLE_DIST_TAG;
   }
 
-  const preid = prerelease.split('.')[0];
+  const preid = prerelease.split(".")[0];
   if (!PREID_PATTERN.test(preid)) {
     fail(
       `Prerelease "${prerelease}" must start with a lowercase word used as the npm dist-tag (e.g. alpha.0).`,
@@ -59,7 +59,7 @@ function writeOutput(distTag) {
   appendFileSync(outputPath, `dist-tag=${distTag}\n`);
 }
 
-const tag = process.argv[2] ?? '';
+const tag = process.argv[2] ?? "";
 const version = readVersion(process.argv[3] ?? DEFAULT_PACKAGE_JSON);
 const distTag = distTagFor(version);
 

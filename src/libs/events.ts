@@ -3,15 +3,15 @@ import {
   isSystemicApiFailure,
   logApiFailure,
   unwrapResourceCollection,
-} from '#src/libs/api.js';
-import { ApiPaginationLinks } from '#src/types/api.types.js';
-import { buildEventFilterParams } from '#src/libs/event-filters.js';
+} from "#src/libs/api.js";
+import { ApiPaginationLinks } from "#src/types/api.types.js";
+import { buildEventFilterParams } from "#src/libs/event-filters.js";
 import {
   Event,
   EventFilters,
   EventListApiResponse,
   PaginatedEventsMeta,
-} from '#src/types/events.types.js';
+} from "#src/types/events.types.js";
 
 // markpost paginates the events feed with the same cursor scheme as records
 // (server/api/events/index.get.ts): each response's `links.next` embeds the
@@ -46,20 +46,20 @@ const extractAfterCursor = (
     return undefined;
   }
 
-  const queryString = next.slice(next.indexOf('?') + 1);
+  const queryString = next.slice(next.indexOf("?") + 1);
 
-  for (const pair of queryString.split('&')) {
+  for (const pair of queryString.split("&")) {
     // Split on the first `=` only, so a value that itself contains an
     // unencoded `=` (e.g. base64 padding) isn't truncated.
-    const separatorIndex = pair.indexOf('=');
+    const separatorIndex = pair.indexOf("=");
     const rawKey = separatorIndex === -1 ? pair : pair.slice(0, separatorIndex);
 
-    if (decodePercentEncoding(rawKey) !== 'page[after]') {
+    if (decodePercentEncoding(rawKey) !== "page[after]") {
       continue;
     }
 
     const rawValue =
-      separatorIndex === -1 ? '' : pair.slice(separatorIndex + 1);
+      separatorIndex === -1 ? "" : pair.slice(separatorIndex + 1);
 
     return decodePercentEncoding(rawValue);
   }
@@ -173,7 +173,7 @@ const buildEventsQuery = (
     params.push(`page[after]=${encodeURIComponent(after)}`);
   }
 
-  return params.join('&');
+  return params.join("&");
 };
 
 // `json` suppresses the plain-text `logApiFailure` diagnostic below for a
@@ -199,9 +199,9 @@ export const fetchPaginatedEvents = async (
     )) as EventListApiResponse;
 
     const events = unwrapResourceCollection(
-      'fetchPaginatedEvents',
+      "fetchPaginatedEvents",
       body,
-      'event',
+      "event",
     );
 
     // `meta`/`links` fall back to conservative defaults, field by field, if a
@@ -238,7 +238,7 @@ export const fetchPaginatedEvents = async (
     }
 
     if (!json) {
-      logApiFailure('fetchPaginatedEvents', error);
+      logApiFailure("fetchPaginatedEvents", error);
     }
 
     return null;

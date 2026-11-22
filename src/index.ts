@@ -9,12 +9,12 @@ import {
   MarkSyncedItem,
   MarkAbortReason,
   PENDING_STATUS,
-} from '#src/libs/records.js';
+} from "#src/libs/records.js";
 import {
   describeApiError,
   isPermanentApiFailure,
   isSystemicApiFailure,
-} from '#src/libs/api.js';
+} from "#src/libs/api.js";
 import {
   buildWritePreview,
   ensureOutputDirectory,
@@ -22,66 +22,66 @@ import {
   writeMarkdown,
   WritePreview,
   WrittenRecordState,
-} from '#src/libs/markdown.js';
-import { fetchSettings, SettingsReadResult } from '#src/libs/settings.js';
-import { ApiDeleteMeta } from '#src/types/api.types.js';
-import { runPushCommand, USAGE as PUSH_USAGE } from '#src/commands/push.js';
-import { runGetCommand, USAGE as GET_USAGE } from '#src/commands/get.js';
+} from "#src/libs/markdown.js";
+import { fetchSettings, SettingsReadResult } from "#src/libs/settings.js";
+import { ApiDeleteMeta } from "#src/types/api.types.js";
+import { runPushCommand, USAGE as PUSH_USAGE } from "#src/commands/push.js";
+import { runGetCommand, USAGE as GET_USAGE } from "#src/commands/get.js";
 import {
   runSourcesCommand,
   USAGE as SOURCES_USAGE,
-} from '#src/commands/sources.js';
+} from "#src/commands/sources.js";
 import {
   runTokensCommand,
   USAGE as TOKENS_USAGE,
-} from '#src/commands/tokens.js';
+} from "#src/commands/tokens.js";
 import {
   runRecordsCommand,
   USAGE as RECORDS_USAGE,
-} from '#src/commands/records.js';
+} from "#src/commands/records.js";
 import {
   runEventsCommand,
   USAGE as EVENTS_USAGE,
-} from '#src/commands/events.js';
+} from "#src/commands/events.js";
 import {
   runExportCommand,
   USAGE as EXPORT_USAGE,
-} from '#src/commands/export.js';
+} from "#src/commands/export.js";
 import {
   runConfigCommand,
   USAGE as CONFIG_USAGE,
-} from '#src/commands/config.js';
+} from "#src/commands/config.js";
 import {
   runDoctorCommand,
   USAGE as DOCTOR_USAGE,
-} from '#src/commands/doctor.js';
+} from "#src/commands/doctor.js";
 import {
   runSettingsCommand,
   USAGE as SETTINGS_USAGE,
-} from '#src/commands/settings.js';
-import packageJson from '../package.json' with { type: 'json' };
-import yoctoSpinner from 'yocto-spinner';
-import cliSpinners from 'cli-spinners';
-import chalk from 'chalk';
-import { checkConfig } from '#src/libs/config.js';
-import { AUTH_FAILURE_NOTICE, hasSeenAuthFailure } from '#src/libs/alpha.js';
-import { warnMessage, messageFromError } from '#src/libs/errors.js';
+} from "#src/commands/settings.js";
+import packageJson from "../package.json" with { type: "json" };
+import yoctoSpinner from "yocto-spinner";
+import cliSpinners from "cli-spinners";
+import chalk from "chalk";
+import { checkConfig } from "#src/libs/config.js";
+import { AUTH_FAILURE_NOTICE, hasSeenAuthFailure } from "#src/libs/alpha.js";
+import { warnMessage, messageFromError } from "#src/libs/errors.js";
 import {
   LedgerEntry,
   recordLedgerEntries,
   removeLedgerEntries,
-} from '#src/libs/vault-ledger.js';
-import { hasJsonFlag } from '#src/libs/output.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
-import { runSyncWithAutoSchedule } from '#src/libs/scheduler.js';
-import { Record } from '#src/types/records.types.js';
+} from "#src/libs/vault-ledger.js";
+import { hasJsonFlag } from "#src/libs/output.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
+import { runSyncWithAutoSchedule } from "#src/libs/scheduler.js";
+import { Record } from "#src/types/records.types.js";
 import {
   ConflictStrategy,
   normalizeAutoDelete,
   normalizeAutoSync,
   normalizeConflictStrategy,
   normalizeFrontmatterEnabled,
-} from '#src/types/settings.types.js';
+} from "#src/types/settings.types.js";
 
 type Spinner = ReturnType<typeof yoctoSpinner>;
 
@@ -189,12 +189,12 @@ function reconcileStickyExitCode(
 
 const [commandName, ...commandArgs] = process.argv.slice(2);
 
-const SYNC_COMMAND = 'sync';
+const SYNC_COMMAND = "sync";
 
 // The one flag `sync` accepts: preview the exact write/delete plan without
 // touching disk or the server. Named so the parse check and usage text share
 // the single literal.
-const DRY_RUN_FLAG = '--dry-run';
+const DRY_RUN_FLAG = "--dry-run";
 
 // The fetch/write/delete sync is destructive (it can delete server records),
 // so it must be requested explicitly by name — never triggered by a bare,
@@ -210,8 +210,8 @@ const SYNC_USAGE = `Usage: markpost sync [--dry-run]
 // Tokens in the command position that print top-level help instead of running
 // a command. `help` is only a command word — as a sub-argument it could be a
 // real path, so per-command help below accepts flags only.
-const HELP_COMMANDS = new Set(['help', '--help', '-h']);
-const HELP_FLAG_ARGS = new Set(['--help', '-h']);
+const HELP_COMMANDS = new Set(["help", "--help", "-h"]);
+const HELP_FLAG_ARGS = new Set(["--help", "-h"]);
 
 // Tokens in the command position that print the installed CLI version instead
 // of running a command — a globally-installed user's only way to confirm
@@ -219,8 +219,8 @@ const HELP_FLAG_ARGS = new Set(['--help', '-h']);
 // for the same reason `help` sits alongside `--help`/`-h` in HELP_COMMANDS.
 // Checked like HELP_COMMANDS: a top-level token, never a per-command
 // sub-argument.
-const VERSION_COMMANDS = new Set(['version', '--version', '-v']);
-const VERSION_USAGE = 'Usage: markpost --version';
+const VERSION_COMMANDS = new Set(["version", "--version", "-v"]);
+const VERSION_USAGE = "Usage: markpost --version";
 
 interface Command {
   run: (args: string[]) => Promise<void>;
@@ -234,16 +234,16 @@ interface Command {
 // to the "unknown command" branch.
 const COMMANDS = new Map<string, Command>([
   [SYNC_COMMAND, { run: runSyncCommand, usage: SYNC_USAGE }],
-  ['push', { run: runPushCommand, usage: PUSH_USAGE }],
-  ['get', { run: runGetCommand, usage: GET_USAGE }],
-  ['sources', { run: runSourcesCommand, usage: SOURCES_USAGE }],
-  ['tokens', { run: runTokensCommand, usage: TOKENS_USAGE }],
-  ['records', { run: runRecordsCommand, usage: RECORDS_USAGE }],
-  ['events', { run: runEventsCommand, usage: EVENTS_USAGE }],
-  ['export', { run: runExportCommand, usage: EXPORT_USAGE }],
-  ['config', { run: runConfigCommand, usage: CONFIG_USAGE }],
-  ['settings', { run: runSettingsCommand, usage: SETTINGS_USAGE }],
-  ['doctor', { run: runDoctorCommand, usage: DOCTOR_USAGE }],
+  ["push", { run: runPushCommand, usage: PUSH_USAGE }],
+  ["get", { run: runGetCommand, usage: GET_USAGE }],
+  ["sources", { run: runSourcesCommand, usage: SOURCES_USAGE }],
+  ["tokens", { run: runTokensCommand, usage: TOKENS_USAGE }],
+  ["records", { run: runRecordsCommand, usage: RECORDS_USAGE }],
+  ["events", { run: runEventsCommand, usage: EVENTS_USAGE }],
+  ["export", { run: runExportCommand, usage: EXPORT_USAGE }],
+  ["config", { run: runConfigCommand, usage: CONFIG_USAGE }],
+  ["settings", { run: runSettingsCommand, usage: SETTINGS_USAGE }],
+  ["doctor", { run: runDoctorCommand, usage: DOCTOR_USAGE }],
 ]);
 
 // The sync is the one destructive command, so it rejects unexpected arguments
@@ -256,7 +256,7 @@ async function runSyncCommand(args: string[]): Promise<void> {
 
   if (unexpectedArgs.length > 0) {
     console.error(
-      chalk.redBright(`Unexpected arguments: ${unexpectedArgs.join(' ')}`),
+      chalk.redBright(`Unexpected arguments: ${unexpectedArgs.join(" ")}`),
     );
     console.error(SYNC_USAGE);
     process.exitCode = 1;
@@ -274,15 +274,15 @@ async function runSyncCommand(args: string[]): Promise<void> {
 // hand-written help blob that would drift — each command owns the single
 // source of truth for its own usage, and this reads straight from COMMANDS.
 const HELP_TEXT = [
-  'markpost — sync markdown records with your markpost account',
-  '',
-  'Usage: markpost <command> [options]',
-  '',
-  'Commands:',
-  ...[...COMMANDS.values()].flatMap((command) => ['', command.usage]),
-  '',
-  'Run `markpost help` (or `--help`) to see this message, or `markpost --version` (or `-v`) for the installed version.',
-].join('\n');
+  "markpost — sync markdown records with your markpost account",
+  "",
+  "Usage: markpost <command> [options]",
+  "",
+  "Commands:",
+  ...[...COMMANDS.values()].flatMap((command) => ["", command.usage]),
+  "",
+  "Run `markpost help` (or `--help`) to see this message, or `markpost --version` (or `-v`) for the installed version.",
+].join("\n");
 
 // A top-level help request optionally targets one command: `markpost help
 // sync` prints just the sync usage. `markpost help version` is handled the
@@ -318,7 +318,7 @@ function runVersionCommand(args: string[]): void {
   }
 
   if (args.length > 0) {
-    console.error(chalk.redBright(`Unexpected arguments: ${args.join(' ')}`));
+    console.error(chalk.redBright(`Unexpected arguments: ${args.join(" ")}`));
     console.error(VERSION_USAGE);
     process.exitCode = 1;
     return;
@@ -329,7 +329,7 @@ function runVersionCommand(args: string[]): void {
   // still exiting 0.
   if (!packageJson.version) {
     console.error(
-      chalk.redBright('Unable to determine the installed CLI version.'),
+      chalk.redBright("Unable to determine the installed CLI version."),
     );
     process.exitCode = 1;
     return;
@@ -364,7 +364,7 @@ async function dispatch(): Promise<void> {
   if (!commandName) {
     console.error(HELP_TEXT);
     console.error(
-      chalk.redBright('No command given. Run `markpost sync` to sync records.'),
+      chalk.redBright("No command given. Run `markpost sync` to sync records."),
     );
     process.exitCode = 1;
     return;
@@ -377,7 +377,7 @@ async function dispatch(): Promise<void> {
   if (!command) {
     console.error(chalk.redBright(`Unknown command: ${commandName}`));
     console.error(
-      chalk.dim('Run `markpost help` to see the available commands.'),
+      chalk.dim("Run `markpost help` to see the available commands."),
     );
     process.exitCode = 1;
     return;
@@ -418,9 +418,9 @@ type FailedRecord = { record: Record; error: unknown };
 // or the write threw (e.g. EACCES/EISDIR). Modeling all three as one tagged
 // result lets writeRecords sort each record without a nested try/if.
 type WriteOutcome =
-  | { status: 'written'; filePath: string }
-  | { status: 'skipped' }
-  | { status: 'failed'; error: unknown };
+  | { status: "written"; filePath: string }
+  | { status: "skipped" }
+  | { status: "failed"; error: unknown };
 
 type WriteRecordsResult = {
   written: WrittenRecord[];
@@ -463,12 +463,12 @@ function writeRecordSafely(
     );
 
     if (filePath === null) {
-      return { status: 'skipped' };
+      return { status: "skipped" };
     }
 
-    return { status: 'written', filePath };
+    return { status: "written", filePath };
   } catch (error) {
-    return { status: 'failed', error };
+    return { status: "failed", error };
   }
 }
 
@@ -505,12 +505,12 @@ function writeRecords(
       droppedServerChangeUuids,
     );
 
-    if (outcome.status === 'written') {
+    if (outcome.status === "written") {
       written.push({ record, filePath: outcome.filePath });
       continue;
     }
 
-    if (outcome.status === 'skipped') {
+    if (outcome.status === "skipped") {
       skipped += 1;
       continue;
     }
@@ -655,36 +655,36 @@ function markFailureHeadline(
     hasUnattempted: boolean;
   },
 ): string {
-  if (abortReason === 'permanent') {
-    const daemonClause = autoSyncEnabled ? ', so auto-sync was stopped;' : ';';
+  if (abortReason === "permanent") {
+    const daemonClause = autoSyncEnabled ? ", so auto-sync was stopped;" : ";";
     // Note the unattempted tail like the transient branch does — the abort left
     // later chunks unsent, so the count is more than just the records that failed.
-    const skipped = hasUnattempted ? ' (some were never attempted)' : '';
+    const skipped = hasUnattempted ? " (some were never attempted)" : "";
     // Don't prescribe `markpost config` — a 403 (plan limit / sign-ups disabled)
     // isn't a token problem. markRecordsSynced already logged the failing chunk's
     // case-specific reason to stderr; point the user at that.
     return `Failed to mark ${pendingCount} record(s) synced${skipped} — a permanent error (authentication or a forbidden account) will recur every pass${daemonClause} the record(s) remain pending on the server. Fix the cause reported above and sync again.`;
   }
 
-  if (abortReason === 'timeout') {
+  if (abortReason === "timeout") {
     return `Timed out marking records synced — stopped after the batch that first timed out; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
-  if (abortReason === 'transient') {
+  if (abortReason === "transient") {
     // A systemic error (rate limit / 5xx) aborted the run to back off. Only claim
     // records were skipped if a trailing chunk was actually unsent; the "re-written
     // next run" hedge matches the timeout/generic branches (soft — true whenever
     // the user next syncs, daemon or not), so it isn't gated on autoSyncEnabled.
-    const skipped = hasUnattempted ? ', so some were never attempted' : '';
+    const skipped = hasUnattempted ? ", so some were never attempted" : "";
     return `Failed to mark ${pendingCount} record(s) synced — a systemic error stopped the run early${skipped}; they remain pending on the server, they may be re-written next run.`;
   }
 
-  if (abortReason === 'request-shape') {
+  if (abortReason === "request-shape") {
     // Two consecutive chunks were rejected the same categorical way (a 400/422),
     // so the request envelope itself is wrong and every record would fail alike.
     const notAttemptedClause = hasUnattempted
-      ? ' and the rest were not attempted'
-      : '';
+      ? " and the rest were not attempted"
+      : "";
     return `Aborted marking records synced — the server rejected the request wholesale (a 400/422), so every record would fail the same way${notAttemptedClause}; ${pendingCount} record(s) still pending on the server, they may be re-written next run.`;
   }
 
@@ -847,12 +847,12 @@ async function markWrittenRecordsSynced(
     return false;
   }
 
-  spinner.start('Marking records synced...');
+  spinner.start("Marking records synced...");
 
   const { outcomes, abortReason } = await markRecordsSynced(
     toMarkSyncedItems(writtenRecords),
   );
-  const permanentlyFailed = abortReason === 'permanent';
+  const permanentlyFailed = abortReason === "permanent";
   // A record is settled only when its mark-synced outcome is MARK_SYNCED; it is
   // pending if its mark failed or was never attempted (its outcome is undefined
   // because an abort — a timeout, a systemic failure, or a request-shape 4xx —
@@ -917,7 +917,7 @@ function reportIncompleteSync(partial: boolean): void {
 
   console.error(
     chalk.yellow(
-      'Sync was incomplete — a later page failed to fetch. Re-run to collect the remaining records.',
+      "Sync was incomplete — a later page failed to fetch. Re-run to collect the remaining records.",
     ),
   );
 }
@@ -925,7 +925,7 @@ function reportIncompleteSync(partial: boolean): void {
 // The real sync fails every refused record (non-zero exit), so the dry run does
 // too.
 function hasRefusals(previews: WritePreview[]): boolean {
-  return previews.some((preview) => preview.action === 'refuse');
+  return previews.some((preview) => preview.action === "refuse");
 }
 
 // The records a dry run would actually persist. A `skip` leaves the existing
@@ -934,7 +934,7 @@ function hasRefusals(previews: WritePreview[]): boolean {
 // from both.
 function previewedWrites(previews: WritePreview[]): WritePreview[] {
   return previews.filter(
-    (preview) => preview.action !== 'skip' && preview.action !== 'refuse',
+    (preview) => preview.action !== "skip" && preview.action !== "refuse",
   );
 }
 
@@ -971,8 +971,8 @@ function printPreviewRefusals(refusals: WritePreview[]): void {
 // escape.
 function printWritePreview(previews: WritePreview[]): void {
   const writes = previewedWrites(previews);
-  const skips = previews.filter((preview) => preview.action === 'skip');
-  const refusals = previews.filter((preview) => preview.action === 'refuse');
+  const skips = previews.filter((preview) => preview.action === "skip");
+  const refusals = previews.filter((preview) => preview.action === "refuse");
 
   console.log(chalk.dim(`Would write ${writes.length} record(s):`));
   writes.forEach((preview) => {
@@ -1021,7 +1021,7 @@ function printServerPreview(
   if (!settingsOk) {
     console.log(
       chalk.yellow(
-        'Settings unreadable — would write records but mutate nothing on the server this run.',
+        "Settings unreadable — would write records but mutate nothing on the server this run.",
       ),
     );
     return;
@@ -1155,7 +1155,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     if (!settingsResult.ok) {
       console.log(
         chalk.yellow(
-          'Could not read settings — writing records but skipping the auto-delete this run. Re-run once settings are reachable.',
+          "Could not read settings — writing records but skipping the auto-delete this run. Re-run once settings are reachable.",
         ),
       );
     }
@@ -1165,7 +1165,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // already written to disk and they get re-fetched and re-written as endless
     // `-2`/`-3` duplicates. The mark-synced step below moves each written
     // record out of `pending` so the next run skips it.
-    spinner.start('Fetching records...');
+    spinner.start("Fetching records...");
     const recordsResult = await fetchAllRecords({ status: PENDING_STATUS });
 
     // A failed fetch must fail loud: reporting "No new records" and exiting 0
@@ -1173,7 +1173,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // account still succeeds via the `ok: true` branch below.
     if (!recordsResult.ok) {
       spinner.error(
-        'Failed to fetch records from the server — nothing synced.',
+        "Failed to fetch records from the server — nothing synced.",
       );
       process.exitCode = 1;
       return autoSync;
@@ -1205,7 +1205,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
         return autoSync;
       }
     } else if (allRecords.length === 0) {
-      spinner.success('No new records, exiting...');
+      spinner.success("No new records, exiting...");
       return autoSync;
     } else {
       spinner.success(`Fetched ${allRecords.length} records!`);
@@ -1229,7 +1229,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     }
 
     // Write Records
-    spinner.start('Writing records...');
+    spinner.start("Writing records...");
     // A batch-wide precondition (unset/un-creatable output directory) throws
     // here into the outer catch and is reported once, before the per-record
     // loop — so a systemic error can't masquerade as N per-record failures.
@@ -1285,7 +1285,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     if (!settingsResult.ok) {
       console.log(
         chalk.yellow(
-          '  Settings unreadable — records left pending; their files are reused while this process runs and re-created on a fresh run, until settings are readable.',
+          "  Settings unreadable — records left pending; their files are reused while this process runs and re-created on a fresh run, until settings are readable.",
         ),
       );
       reportIncompleteSync(recordsResult.partial);
@@ -1319,7 +1319,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
       return autoSync;
     }
 
-    spinner.start('Deleting records...');
+    spinner.start("Deleting records...");
     // deleteRecords swallows its own per-request errors to null but re-throws a
     // timeout and any systemic auth/5xx failure. Describe the reason
     // (deleteRecords never got to log a re-thrown error, since the rethrow
@@ -1361,8 +1361,8 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
       // the message can't imply a "next run" that won't happen.
       const daemonClause =
         deletePermanentlyFailed && autoSync
-          ? ' A permanent error (a dead token, a forbidden account, or a rejected request shape) will recur every pass, so auto-sync was stopped; fix the cause reported above and sync again.'
-          : '';
+          ? " A permanent error (a dead token, a forbidden account, or a rejected request shape) will recur every pass, so auto-sync was stopped; fix the cause reported above and sync again."
+          : "";
       spinner.error(
         `Failed to delete records from the server — they were written locally but remain on the server.${daemonClause}`,
       );
@@ -1396,7 +1396,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
     // says *why* the sync died; the spinner headline is just the interactive
     // cue. Sanitize — the message is server-derived and can embed an escape.
     if (isSystemicApiFailure(error)) {
-      spinner.error('Sync failed.');
+      spinner.error("Sync failed.");
       // `describeApiError` yields the classified `describeSystemicFailure`
       // text inside this guard, so we don't call the latter directly.
       console.error(
@@ -1410,7 +1410,7 @@ async function runDefaultSync(dryRun = false): Promise<boolean> {
       return isPermanentApiFailure(error) ? false : autoSync;
     }
 
-    spinner.error('Something went wrong!');
+    spinner.error("Something went wrong!");
     // Other errors surface here (unset output dir, a non-systemic failure).
     // Sanitize before printing: a server- or API-derived message can embed an
     // escape sequence, same threat the per-record failure path guards against.

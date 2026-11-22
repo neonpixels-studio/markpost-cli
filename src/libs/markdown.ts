@@ -5,7 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
-} from 'node:fs';
+} from "node:fs";
 import {
   basename,
   dirname,
@@ -14,35 +14,35 @@ import {
   relative,
   resolve,
   sep,
-} from 'node:path';
-import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
-import slugify from '@sindresorhus/slugify';
-import { config } from '#src/libs/config.js';
-import { warnMessage } from '#src/libs/errors.js';
-import { expandHomeDirectory } from '#src/libs/paths.js';
-import { sanitizeForTerminal } from '#src/libs/terminal.js';
-import { buildRecordDocument, parseNoteText } from '#src/libs/frontmatter.js';
+} from "node:path";
+import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import slugify from "@sindresorhus/slugify";
+import { config } from "#src/libs/config.js";
+import { warnMessage } from "#src/libs/errors.js";
+import { expandHomeDirectory } from "#src/libs/paths.js";
+import { sanitizeForTerminal } from "#src/libs/terminal.js";
+import { buildRecordDocument, parseNoteText } from "#src/libs/frontmatter.js";
 import {
   assertSafeServerFilePath,
   FilePathViolationError,
   filePathViolation,
   isLegacyLocalFilePath,
   resolveWithinVault,
-} from '#src/libs/filePathSafety.js';
-import { Record } from '#src/types/records.types.js';
+} from "#src/libs/filePathSafety.js";
+import { Record } from "#src/types/records.types.js";
 import {
   ConflictStrategy,
   DEFAULT_CONFLICT_STRATEGY,
-} from '#src/types/settings.types.js';
+} from "#src/types/settings.types.js";
 
-const MARKDOWN_EXTENSION = '.md';
+const MARKDOWN_EXTENSION = ".md";
 // markpost builds `record.filePath` with `/` separators (see
 // src/types/records.types.ts); the CLI splits on it to validate each segment
 // and never treats a backslash as a separator (a `\` is rejected outright).
-const VAULT_PATH_SEPARATOR = '/';
+const VAULT_PATH_SEPARATOR = "/";
 // Shown in a refused dry-run entry when the server sent no file path.
-const NO_SERVER_FILE_PATH = '(none)';
+const NO_SERVER_FILE_PATH = "(none)";
 const FIRST_COLLISION_SUFFIX = 2;
 // Give up rather than loop forever if a directory somehow has this many
 // same-slug files already; something else is wrong at that point. Exported
@@ -50,14 +50,14 @@ const FIRST_COLLISION_SUFFIX = 2;
 export const MAX_COLLISION_SUFFIX = 1000;
 // Last-resort filename stem when both the title and its fallback (the
 // record's uuid) slugify to nothing at all.
-const UNTITLED_SLUG = 'untitled';
+const UNTITLED_SLUG = "untitled";
 // node:fs exclusive-write flag: fail instead of silently overwriting when
 // the target path already exists.
-const EXCLUSIVE_WRITE_FLAG = 'wx';
-const FILE_ALREADY_EXISTS_ERROR_CODE = 'EEXIST';
+const EXCLUSIVE_WRITE_FLAG = "wx";
+const FILE_ALREADY_EXISTS_ERROR_CODE = "EEXIST";
 // Any collision-resistant digest works here — the hash is only compared against
 // another hash of the CLI's own output, never used as a security boundary.
-const CONTENT_HASH_ALGORITHM = 'sha256';
+const CONTENT_HASH_ALGORITHM = "sha256";
 
 // Identity of the exact file writeMarkdown put on disk, so a later pass can tell
 // "still my file" from "a different regular file dropped at this path between
@@ -103,7 +103,7 @@ export type WrittenRecordState = {
 // piece of the CLI's own output against another (baseline vs. re-render, or
 // baseline vs. on-disk). Not a security check.
 export const hashContent = (content: string): string => {
-  return createHash(CONTENT_HASH_ALGORITHM).update(content).digest('hex');
+  return createHash(CONTENT_HASH_ALGORITHM).update(content).digest("hex");
 };
 
 // The configured output directory can carry a leading `~`/`$HOME` that no shell
@@ -113,7 +113,7 @@ export const hashContent = (content: string): string => {
 // requireOutputDirectory go through — so every writer sees the real path.
 const getOutputDirectory = () => {
   const configured =
-    process.env.OUTPUT_DIRECTORY ?? (config.get('outputDirectory') as string);
+    process.env.OUTPUT_DIRECTORY ?? (config.get("outputDirectory") as string);
 
   if (!configured) {
     return configured;
@@ -209,7 +209,7 @@ const resolveWriteRelativePath = (
 // reported on mark-synced overwrites the stale value stored on the server.
 const warnIfLegacyFilePath = (record: Record, writtenPath: string): void => {
   if (
-    typeof record.filePath !== 'string' ||
+    typeof record.filePath !== "string" ||
     !isLegacyLocalFilePath(record.filePath)
   ) {
     return;
@@ -382,9 +382,9 @@ const STRATEGY_WRITERS = new Map<
     content: string,
   ) => string | null
 >([
-  ['suffix', writeToFirstAvailablePath],
-  ['overwrite', writeOverwriting],
-  ['skip', writeIfAbsent],
+  ["suffix", writeToFirstAvailablePath],
+  ["overwrite", writeOverwriting],
+  ["skip", writeIfAbsent],
 ]);
 
 // `overwrite` truncates `<slug>.md`, which is intended against a file from a
@@ -410,8 +410,8 @@ const resolveStrategyForSlug = (
     seenSlugs.has(baseKey) &&
     (!recordUuid || seenSlugs.get(baseKey) !== recordUuid);
 
-  if (conflictStrategy === 'overwrite' && claimedByOtherRecord) {
-    return 'suffix';
+  if (conflictStrategy === "overwrite" && claimedByOtherRecord) {
+    return "suffix";
   }
 
   return conflictStrategy;
@@ -557,11 +557,11 @@ const fileIdentityMatches = (
 // leaves it alone rather than clobbering something it can't inspect.
 const readFileIfReadable = (filePath: string): string | null => {
   try {
-    const content = readFileSync(filePath, 'utf-8');
+    const content = readFileSync(filePath, "utf-8");
     // `utf-8` always yields a string in production, but guard so a non-string
     // (a test stub, an odd override) is treated as unreadable rather than
     // reaching hashContent and throwing on a non-string input.
-    return typeof content === 'string' ? content : null;
+    return typeof content === "string" ? content : null;
   } catch {
     return null;
   }
@@ -643,7 +643,7 @@ const shouldRewriteReusedFile = (
   renderedContent: string,
   conflictStrategy: ConflictStrategy,
 ): boolean => {
-  if (conflictStrategy === 'overwrite') {
+  if (conflictStrategy === "overwrite") {
     return true;
   }
 
@@ -727,7 +727,7 @@ export const ensureOutputDirectory = (): string => {
   const outputDirectory = getOutputDirectory();
 
   if (!outputDirectory) {
-    throw Error('Output directory is not set!');
+    throw Error("Output directory is not set!");
   }
 
   if (!existsSync(outputDirectory)) {
@@ -849,7 +849,7 @@ export const writeMarkdown = (
 // real sync would refuse it (`path` then holds the server's raw value). Mirrors
 // the outcomes the real writers produce so the preview matches what an actual
 // sync would do.
-export type WritePreviewAction = 'write' | 'overwrite' | 'skip' | 'refuse';
+export type WritePreviewAction = "write" | "overwrite" | "skip" | "refuse";
 
 export type WritePreview = {
   record: Record;
@@ -868,7 +868,7 @@ const requireOutputDirectory = (): string => {
   const outputDirectory = getOutputDirectory();
 
   if (!outputDirectory) {
-    throw Error('Output directory is not set!');
+    throw Error("Output directory is not set!");
   }
 
   return outputDirectory;
@@ -936,7 +936,7 @@ const previewRecordWrite = (
     return {
       record,
       path: record.filePath ?? NO_SERVER_FILE_PATH,
-      action: 'refuse',
+      action: "refuse",
       reason: error.message,
     };
   }
@@ -958,21 +958,21 @@ const planRecordWrite = (
   const baseKey = pathKey(basePath);
   const baseTaken = plannedPaths.has(baseKey) || existsSync(basePath);
 
-  if (conflictStrategy === 'skip' && baseTaken) {
-    return { record, path: basePath, action: 'skip' };
+  if (conflictStrategy === "skip" && baseTaken) {
+    return { record, path: basePath, action: "skip" };
   }
 
-  if (conflictStrategy === 'skip') {
+  if (conflictStrategy === "skip") {
     plannedPaths.add(baseKey);
-    return { record, path: basePath, action: 'write' };
+    return { record, path: basePath, action: "write" };
   }
 
-  if (conflictStrategy === 'overwrite' && !plannedPaths.has(baseKey)) {
+  if (conflictStrategy === "overwrite" && !plannedPaths.has(baseKey)) {
     plannedPaths.add(baseKey);
     return {
       record,
       path: basePath,
-      action: existsSync(basePath) ? 'overwrite' : 'write',
+      action: existsSync(basePath) ? "overwrite" : "write",
     };
   }
 
@@ -982,7 +982,7 @@ const planRecordWrite = (
     plannedPaths,
   );
   plannedPaths.add(pathKey(writtenPath));
-  return { record, path: writtenPath, action: 'write' };
+  return { record, path: writtenPath, action: "write" };
 };
 
 // Build the full write plan for a dry run: for each record, the path it would
@@ -1033,7 +1033,7 @@ export const readMarkdown = (
   }
 
   const { content, tags, tagsLineUnparseable } = parseNoteText(
-    readFileSync(filePath, 'utf-8'),
+    readFileSync(filePath, "utf-8"),
   );
 
   return {

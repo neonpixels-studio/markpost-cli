@@ -1,13 +1,13 @@
 import {
   SCOPE_NAMES,
   type ScopeName,
-} from '#src/types/vendor/markpost-scopes.generated.js';
+} from "#src/types/vendor/markpost-scopes.generated.js";
 
 export type ScopesParseResult =
   { ok: true; scopes: ScopeName[] } | { ok: false; message: string };
 
-const SCOPE_SEPARATOR = ',';
-const VALID_SCOPES_LIST = SCOPE_NAMES.join(', ');
+const SCOPE_SEPARATOR = ",";
+const VALID_SCOPES_LIST = SCOPE_NAMES.join(", ");
 
 const isScopeName = (value: string): value is ScopeName =>
   (SCOPE_NAMES as readonly string[]).includes(value);
@@ -34,7 +34,7 @@ export const parseScopesFlag = (raw: string): ScopesParseResult => {
   if (unknownScopes.length > 0) {
     return {
       ok: false,
-      message: `Unknown scope(s): ${unknownScopes.join(', ')}. Valid scopes: ${VALID_SCOPES_LIST}. If markpost added a scope recently, upgrade the CLI.`,
+      message: `Unknown scope(s): ${unknownScopes.join(", ")}. Valid scopes: ${VALID_SCOPES_LIST}. If markpost added a scope recently, upgrade the CLI.`,
     };
   }
 
