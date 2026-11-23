@@ -37,7 +37,6 @@ function mockFetchTimeout() {
 
 const mockEvent: Event = {
   id: "evt-1",
-  userId: "user-1",
   ts: "2024-01-01T00:00:00Z",
   kind: "ok",
   message: "Ingested record from webhook",
@@ -47,7 +46,6 @@ const mockEvent: Event = {
 
 const mockEvent2: Event = {
   id: "evt-2",
-  userId: "user-1",
   ts: "2024-01-02T00:00:00Z",
   kind: "err",
   message: "Signature verification failed",

@@ -1285,7 +1285,6 @@ describe("index", () => {
   ): SettingsReadResult => ({
     ok: true,
     settings: {
-      userId: "user-1",
       vaultDir: "",
       filenameTemplate: "",
       autoSync: true,
@@ -1293,7 +1292,7 @@ describe("index", () => {
       frontmatter: true,
       conflictStrategy: "suffix",
       theme: "system",
-      accentColor: "#a855f7",
+      accentColor: "violet",
       updatedAt: "2024-01-01T00:00:00Z",
       ...overrides,
     },

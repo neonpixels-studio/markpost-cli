@@ -25,7 +25,6 @@ vi.mock("chalk", () => ({
 }));
 
 const mockSettings: UserSettings = {
-  userId: "user-1",
   vaultDir: "01-inbox/",
   filenameTemplate: "{{title}}",
   autoSync: true,
@@ -33,7 +32,7 @@ const mockSettings: UserSettings = {
   frontmatter: true,
   conflictStrategy: "overwrite",
   theme: "system",
-  accentColor: "#a855f7",
+  accentColor: "violet",
   updatedAt: "2024-01-01T00:00:00Z",
 };
 

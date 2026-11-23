@@ -16,7 +16,6 @@ vi.mock("chalk", () => ({
 
 const okEvent: Event = {
   id: "evt-1",
-  userId: "user-1",
   ts: "2024-01-01T00:00:00Z",
   kind: "ok",
   message: "Ingested record from webhook",
@@ -26,7 +25,6 @@ const okEvent: Event = {
 
 const errEvent: Event = {
   id: "evt-2",
-  userId: "user-1",
   ts: "2024-01-02T00:00:00Z",
   kind: "err",
   message: "Signature verification failed",
@@ -286,7 +284,6 @@ describe("runEventsCommand", () => {
       const chalk = (await import("chalk")).default;
       const offContractEvent: Event = {
         id: "evt-4",
-        userId: "user-1",
         ts: "2024-01-04T00:00:00Z",
         kind: "mystery",
         message: "Unknown kind from an off-contract response",
@@ -317,7 +314,6 @@ describe("runEventsCommand", () => {
     it("does not crash on a non-string kind", async () => {
       const malformedEvent = {
         id: "evt-5",
-        userId: "user-1",
         ts: "2024-01-05T00:00:00Z",
         kind: null,
         message: "Malformed kind",
@@ -368,7 +364,6 @@ describe("runEventsCommand", () => {
       const control = String.fromCharCode(0x1b);
       const evilEvent: Event = {
         id: "evt-3",
-        userId: "user-1",
         ts: `2024${control}01`,
         kind: "ok",
         message: `A${control}B`,
@@ -401,7 +396,6 @@ describe("runEventsCommand", () => {
       const control = String.fromCharCode(0x1b);
       const evilEvent: Event = {
         id: "evt-6",
-        userId: "user-1",
         ts: "2024-01-06T00:00:00Z",
         kind: `mystery${control}kind`,
         message: "irrelevant",

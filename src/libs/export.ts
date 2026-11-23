@@ -84,8 +84,8 @@ const isRecordExportRow = (value: unknown): value is RecordExportRow => {
 };
 
 // Event export rows: markpost's `serializeExportRow` in
-// server/api/events/export.get.ts. `userId` is deliberately absent, unlike
-// the paginated `Event` shape.
+// server/api/events/export.get.ts. Like the paginated `Event` shape, it
+// carries no `userId`.
 const isEventExportRow = (value: unknown): value is EventExportRow => {
   if (typeof value !== "object" || value === null) {
     return false;

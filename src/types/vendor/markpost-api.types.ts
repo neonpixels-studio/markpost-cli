@@ -16,6 +16,8 @@ export type ApiError = {
   status: string;
   title: string;
   detail: string;
+  // Machine-readable code a client can branch on (e.g. reverification).
+  code?: string;
   source?: { pointer?: string; parameter?: string };
 };
 
@@ -72,4 +74,12 @@ export type RecordDeletionListQuery = {
   "page[size]"?: string;
   "page[after]"?: string;
   "filter[since]"?: string;
+};
+
+// `meta` of the DELETE /api/account response. The account is soft-deleted:
+// sign-in and credentials stop working immediately and the data is permanently
+// removed at `gracePeriodEndsAt` (ISO 8601). There is no self-serve restore.
+export type AccountDeletedMeta = {
+  deleted: true;
+  gracePeriodEndsAt: string;
 };
