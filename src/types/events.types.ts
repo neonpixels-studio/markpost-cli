@@ -20,7 +20,6 @@ export type EventFilters = {
 // off-contract value still parses instead of failing the whole response.
 export type Event = {
   id: string;
-  userId: string;
   ts: string;
   kind: string;
   message: string;
@@ -30,7 +29,7 @@ export type Event = {
 
 // Mirrors the rows GET /api/events/export returns (`serializeExportRow` in
 // markpost's server/api/events/export.get.ts): a bare array, no JSON:API
-// envelope, and no `userId` unlike `Event`. Copied by hand like
+// envelope. Like `Event`, it carries no `userId`. Copied by hand like
 // `RecordExportRow`.
 export type EventExportRow = {
   id: string;

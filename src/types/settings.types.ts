@@ -22,8 +22,10 @@ export const DEFAULT_FRONTMATTER_ENABLED = true;
 // how `createdAt` is typed on `Record`. `conflictStrategy`/`theme` are plain
 // strings on the wire (the server types them as `string`), so treat them as
 // untrusted and narrow before use — see `normalizeConflictStrategy`.
+// `accentColor` is likewise typed `string`, though the server sends one of its
+// named keys (e.g. `violet`), never a hex value. The resource id is the
+// constant `"settings"`; no `userId` is returned.
 export type UserSettings = {
-  userId: string;
   vaultDir: string;
   filenameTemplate: string;
   // When true, the default sync self-schedules a repeat run (see
